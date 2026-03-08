@@ -7,14 +7,6 @@
 🍥 **新一代大模型网关与AI资产管理系统**
 
 <p align="center">
-  简体中文 |
-  <a href="./README.zh_TW.md">繁體中文</a> |
-  <a href="./README.en.md">English</a> |
-  <a href="./README.fr.md">Français</a> |
-  <a href="./README.ja.md">日本語</a>
-</p>
-
-<p align="center">
   <a href="https://raw.githubusercontent.com/Calcium-Ion/new-api/main/LICENSE">
     <img src="https://img.shields.io/github/license/Calcium-Ion/new-api?color=brightgreen" alt="license">
   </a><!--

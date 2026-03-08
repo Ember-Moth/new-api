@@ -120,6 +120,47 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		initCol()
 	}()
 	dsn := os.Getenv(envName)
+
+	// 如果没有设置DSN环境变量，尝试从配置文件读取结构化数据库配置
+	if dsn == "" && common.Config != nil {
+		var dbType, host, port, user, password, dbname string
+
+		if isLog {
+			dbType = common.Config.GetString("LogDatabase.Type")
+			host = common.Config.GetString("LogDatabase.Host")
+			port = common.Config.GetString("LogDatabase.Port")
+			user = common.Config.GetString("LogDatabase.Username")
+			password = common.Config.GetString("LogDatabase.Password")
+			dbname = common.Config.GetString("LogDatabase.DBName")
+		} else {
+			dbType = common.Config.GetString("Database.Type")
+			host = common.Config.GetString("Database.Host")
+			port = common.Config.GetString("Database.Port")
+			user = common.Config.GetString("Database.Username")
+			password = common.Config.GetString("Database.Password")
+			dbname = common.Config.GetString("Database.DBName")
+		}
+
+		// 生成DSN
+		if dbType != "" && host != "" && user != "" && dbname != "" {
+			switch strings.ToLower(dbType) {
+			case "mysql":
+				if port == "" {
+					port = "3306"
+				}
+				dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+					user, password, host, port, dbname)
+			case "postgres", "postgresql":
+				if port == "" {
+					port = "5432"
+				}
+				dsn = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+					user, password, host, port, dbname)
+			case "sqlite":
+				dsn = dbname // SQLite直接使用路径作为dsn
+			}
+		}
+	}
 	if dsn != "" {
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 			// Use PostgreSQL

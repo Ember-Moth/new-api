@@ -5,13 +5,23 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      name:
-        description: 'reason'
+      tag_name:
+        description: 'Release tag name (e.g. v1.0.0)'
+        required: true
+        type: string
+      release_name:
+        description: 'Release name'
+        required: true
+        type: string
+      release_body:
+        description: 'Release description'
         required: false
-  push:
-    tags:
-      - '*'
-      - '!*-alpha*'
+        type: string
+      prerelease:
+        description: 'Is this a pre-release?'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   linux:
@@ -24,7 +34,7 @@ jobs:
           fetch-depth: 0
       - name: Determine Version
         run: |
-          VERSION=$(git describe --tags)
+          VERSION=${{ github.event.inputs.tag_name }}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - uses: oven-sh/setup-bun@v2
         with:
@@ -52,8 +62,11 @@ jobs:
           CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -extldflags '-static'" -o new-api-arm64-$VERSION
       - name: Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          name: ${{ github.event.inputs.release_name }}
+          body: ${{ github.event.inputs.release_body }}
+          prerelease: ${{ github.event.inputs.prerelease }}
           files: |
             new-api-*
         env:
@@ -69,7 +82,7 @@ jobs:
           fetch-depth: 0
       - name: Determine Version
         run: |
-          VERSION=$(git describe --tags)
+          VERSION=${{ github.event.inputs.tag_name }}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - uses: oven-sh/setup-bun@v2
         with:
@@ -112,7 +125,7 @@ jobs:
           fetch-depth: 0
       - name: Determine Version
         run: |
-          VERSION=$(git describe --tags)
+          VERSION=${{ github.event.inputs.tag_name }}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - uses: oven-sh/setup-bun@v2
         with:

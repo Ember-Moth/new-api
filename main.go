@@ -27,7 +27,6 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 
 	_ "net/http/pprof"
 )
@@ -190,16 +189,10 @@ func main() {
 
 
 func InitResources() error {
+	var err error
 	// Initialize resources here if needed
 	// This is a placeholder function for future resource initialization
-	err := godotenv.Load(".env")
-	if err != nil {
-		if common.DebugEnabled {
-			common.SysLog("No .env file found, using default environment variables. If needed, please create a .env file and set the relevant variables.")
-		}
-	}
-
-	// 加载环境变量
+	// 加载配置（包含配置文件、.env、系统环境变量）
 	common.InitEnv()
 
 	logger.SetupLogger()

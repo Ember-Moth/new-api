@@ -7,6 +7,10 @@ import (
 )
 
 func GetEnvOrDefault(env string, defaultValue int) int {
+	// 优先从配置文件/Viper读取
+	if Config != nil && Config.IsSet(env) {
+		return Config.GetInt(env)
+	}
 	if env == "" || os.Getenv(env) == "" {
 		return defaultValue
 	}
@@ -19,6 +23,10 @@ func GetEnvOrDefault(env string, defaultValue int) int {
 }
 
 func GetEnvOrDefaultString(env string, defaultValue string) string {
+	// 优先从配置文件/Viper读取
+	if Config != nil && Config.IsSet(env) {
+		return Config.GetString(env)
+	}
 	if env == "" || os.Getenv(env) == "" {
 		return defaultValue
 	}
@@ -26,6 +34,10 @@ func GetEnvOrDefaultString(env string, defaultValue string) string {
 }
 
 func GetEnvOrDefaultBool(env string, defaultValue bool) bool {
+	// 优先从配置文件/Viper读取
+	if Config != nil && Config.IsSet(env) {
+		return Config.GetBool(env)
+	}
 	if env == "" || os.Getenv(env) == "" {
 		return defaultValue
 	}

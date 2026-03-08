@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -28,10 +29,17 @@ func printHelp() {
 	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help]")
 }
 
+// Config 全局配置对象
+var Config *viper.Viper
+
 func InitEnv() {
+	// 1. 加载配置文件
+	loadConfigFile()
+
 	flag.Parse()
 
-	envVersion := os.Getenv("VERSION")
+	// 优先从配置文件读取VERSION
+	envVersion := GetEnvOrDefaultString("VERSION", "")
 	if envVersion != "" {
 		Version = envVersion
 	}
@@ -46,8 +54,9 @@ func InitEnv() {
 		os.Exit(0)
 	}
 
-	if os.Getenv("SESSION_SECRET") != "" {
-		ss := os.Getenv("SESSION_SECRET")
+	// 优先从配置文件读取SESSION_SECRET
+	ss := GetEnvOrDefaultString("SESSION_SECRET", "")
+	if ss != "" {
 		if ss == "random_string" {
 			log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
 			log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
@@ -56,13 +65,17 @@ func InitEnv() {
 			SessionSecret = ss
 		}
 	}
-	if os.Getenv("CRYPTO_SECRET") != "" {
-		CryptoSecret = os.Getenv("CRYPTO_SECRET")
+	// 优先从配置文件读取CRYPTO_SECRET
+	cryptoSecret := GetEnvOrDefaultString("CRYPTO_SECRET", "")
+	if cryptoSecret != "" {
+		CryptoSecret = cryptoSecret
 	} else {
 		CryptoSecret = SessionSecret
 	}
-	if os.Getenv("SQLITE_PATH") != "" {
-		SQLitePath = os.Getenv("SQLITE_PATH")
+	// 优先从配置文件读取SQLITE_PATH
+	sqlitePath := GetEnvOrDefaultString("SQLITE_PATH", "")
+	if sqlitePath != "" {
+		SQLitePath = sqlitePath
 	}
 	if *LogDir != "" {
 		var err error
@@ -79,9 +92,9 @@ func InitEnv() {
 	}
 
 	// Initialize variables from constants.go that were using environment variables
-	DebugEnabled = os.Getenv("DEBUG") == "true"
-	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
-	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
+	DebugEnabled = GetEnvOrDefaultBool("DEBUG", false)
+	MemoryCacheEnabled = GetEnvOrDefaultBool("MEMORY_CACHE_ENABLED", false)
+	IsMasterNode = GetEnvOrDefaultString("NODE_TYPE", "master") != "slave"
 	TLSInsecureSkipVerify = GetEnvOrDefaultBool("TLS_INSECURE_SKIP_VERIFY", false)
 	if TLSInsecureSkipVerify {
 		if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
@@ -94,7 +107,7 @@ func InitEnv() {
 	}
 
 	// Parse requestInterval and set RequestInterval
-	requestInterval, _ = strconv.Atoi(os.Getenv("POLLING_INTERVAL"))
+	requestInterval = GetEnvOrDefault("POLLING_INTERVAL", 0)
 	RequestInterval = time.Duration(requestInterval) * time.Second
 
 	// Initialize variables with GetEnvOrDefault
@@ -121,6 +134,52 @@ func InitEnv() {
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
 	initConstantEnv()
+}
+
+// loadConfigFile 加载配置文件，支持YAML格式，环境变量优先覆盖
+func loadConfigFile() {
+	Config = viper.New()
+
+	// 配置文件基本设置
+	Config.SetConfigType("yaml")
+	Config.SetConfigName("config")
+
+	// 添加配置文件搜索路径
+	Config.AddConfigPath(".")
+	Config.AddConfigPath("/etc/new-api/")
+	Config.AddConfigPath("$HOME/.new-api/")
+
+	// 支持通过环境变量指定配置文件路径
+	configFile := os.Getenv("CONFIG_FILE")
+	if configFile != "" {
+		Config.SetConfigFile(configFile)
+	}
+
+	// 读取配置文件
+	if err := Config.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// 配置文件不存在，不报错，使用默认值和环境变量
+			log.Println("配置文件未找到，将使用环境变量和默认配置")
+		} else {
+			// 配置文件存在但读取错误
+			log.Printf("配置文件读取失败: %v，将使用环境变量和默认配置", err)
+		}
+	} else {
+		log.Printf("已加载配置文件: %s", Config.ConfigFileUsed())
+	}
+
+	// 加载.env文件，优先级高于配置文件
+	err := godotenv.Load(".env")
+	if err != nil {
+		if DebugEnabled {
+			log.Println("No .env file found, using default environment variables. If needed, please create a .env file and set the relevant variables.")
+		}
+	}
+
+	// 自动绑定环境变量，环境变量优先级高于配置文件和.env
+	Config.AutomaticEnv()
+	// 环境变量前缀，避免冲突
+	Config.SetEnvPrefix("NEWAPI")
 }
 
 func initConstantEnv() {

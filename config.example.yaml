@@ -1,0 +1,94 @@
+PORT: 3000
+DEBUG: false
+GIN_MODE: release
+
+# 安全配置
+SESSION_SECRET: "your-secret-key-here"
+CRYPTO_SECRET: "your-crypto-secret-here"
+
+# 数据库配置（两种方式二选一）
+# 方式1：直接填写DSN（优先级更高）
+SQL_DSN: "sqlite://./new-api.db"
+LOG_SQL_DSN: ""
+SQLITE_PATH: "./new-api.db"
+
+# 方式2：结构化配置（无需拼接DSN）
+# Database:
+#   Type: mysql           # 支持: mysql, postgres, sqlite
+#   Host: 127.0.0.1
+#   Port: 3306            # 可选，默认mysql:3306, postgres:5432
+#   Username: root
+#   Password: yourpassword
+#   DBName: newapi
+#
+# # 日志数据库（可选，独立配置）
+# LogDatabase:
+#   Type: mysql
+#   Host: 127.0.0.1
+#   Port: 3306
+#   Username: root
+#   Password: yourpassword
+#   DBName: newapi_log
+
+# Redis 配置
+REDIS_URL: "redis://localhost:6379/0"
+
+# 节点配置
+NODE_TYPE: "master" # master 或 slave
+
+# 性能配置
+MEMORY_CACHE_ENABLED: true
+TLS_INSECURE_SKIP_VERIFY: false
+RELAY_TIMEOUT: 0
+RELAY_MAX_IDLE_CONNS: 500
+RELAY_MAX_IDLE_CONNS_PER_HOST: 100
+
+# 同步配置
+SYNC_FREQUENCY: 60 # 配置同步频率（秒）
+BATCH_UPDATE_INTERVAL: 5 # 批量更新间隔（秒）
+POLLING_INTERVAL: 0 # 任务轮询间隔（秒）
+
+# 限流配置
+GLOBAL_API_RATE_LIMIT_ENABLE: true
+GLOBAL_API_RATE_LIMIT: 180
+GLOBAL_API_RATE_LIMIT_DURATION: 180
+
+GLOBAL_WEB_RATE_LIMIT_ENABLE: true
+GLOBAL_WEB_RATE_LIMIT: 60
+GLOBAL_WEB_RATE_LIMIT_DURATION: 180
+
+CRITICAL_RATE_LIMIT_ENABLE: true
+CRITICAL_RATE_LIMIT: 20
+CRITICAL_RATE_LIMIT_DURATION: 1200 # 20分钟
+
+# 模型配置
+GEMINI_SAFETY_SETTING: "BLOCK_NONE"
+COHERE_SAFETY_SETTING: "NONE"
+AZURE_DEFAULT_API_VERSION: "2025-04-01-preview"
+
+# 功能开关
+FORCE_STREAM_OPTION: true
+COUNT_TOKEN: true
+GET_MEDIA_TOKEN: true
+GET_MEDIA_TOKEN_NOT_STREAM: false
+UPDATE_TASK: true
+GENERATE_DEFAULT_TOKEN: false
+ERROR_LOG_ENABLED: false
+DIFY_DEBUG: true
+
+# 上传配置
+MAX_FILE_DOWNLOAD_MB: 64
+STREAM_SCANNER_MAX_BUFFER_MB: 64
+MAX_REQUEST_BODY_MB: 128
+
+# 任务配置
+TASK_QUERY_LIMIT: 1000
+TASK_TIMEOUT_MINUTES: 1440 # 24小时
+TASK_PRICE_PATCH: ""
+
+# 通知配置
+NOTIFY_LIMIT_COUNT: 2
+NOTIFICATION_LIMIT_DURATION_MINUTE: 10
+
+# 安全配置
+TRUSTED_REDIRECT_DOMAINS: "" # 可信跳转域名，多个用逗号分隔
