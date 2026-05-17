@@ -130,7 +130,7 @@ Frontend Editor → Storage → Pre-consume → Settlement → Log Display
 
 ### 1. Frontend Editor
 
-**File**: `web/src/pages/Setting/Ratio/components/TieredPricingEditor.jsx`
+**File**: `frontend/src/features/system-settings/models/tiered-pricing-editor.tsx`
 
 Two editing modes:
 - **Visual mode**: Fill in prices per variable, conditions per tier. Generates expression via `generateExprFromVisualConfig()`.
@@ -180,7 +180,7 @@ After the upstream response returns with actual token usage:
 
 ### 5. Log Display
 
-**Files**: `service/log_info_generate.go`, `web/src/helpers/render.jsx`
+**Files**: `service/log_info_generate.go`, `frontend/src/features/usage-logs/lib/format.ts`
 
 Backend: `InjectTieredBillingInfo()` adds `billing_mode`, `expr_b64` (base64 expression), and `matched_tier` to the log's `other` JSON.
 
@@ -244,7 +244,7 @@ This enables future evolution without breaking existing expressions.
 | Pre-consume | `relay/helper/price.go`, `relay/helper/billing_expr_request.go` |
 | Settlement | `service/tiered_settle.go`, `service/quota.go` |
 | Log injection | `service/log_info_generate.go` |
-| Frontend editor | `web/src/pages/Setting/Ratio/components/TieredPricingEditor.jsx` |
-| Frontend display | `web/src/helpers/render.jsx`, `web/src/helpers/utils.jsx` |
-| Model detail | `web/src/components/table/model-pricing/modal/components/DynamicPricingBreakdown.jsx` |
-| Log display | `web/src/hooks/usage-logs/useUsageLogsData.jsx`, `web/src/components/table/usage-logs/UsageLogsColumnDefs.jsx` |
+| Frontend editor | `frontend/src/features/system-settings/models/tiered-pricing-editor.tsx` |
+| Frontend display | `frontend/src/features/usage-logs/lib/format.ts`, `frontend/src/features/usage-logs/components/columns/common-logs-columns.tsx` |
+| Model detail | `frontend/src/features/pricing/components/dynamic-pricing-breakdown.tsx` |
+| Log display | `frontend/src/features/usage-logs/lib/format.ts`, `frontend/src/features/usage-logs/components/dialogs/details-dialog.tsx` |

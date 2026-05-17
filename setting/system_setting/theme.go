@@ -10,7 +10,7 @@ type ThemeSettings struct {
 }
 
 var themeSettings = ThemeSettings{
-	Frontend: "classic",
+	Frontend: "default",
 }
 
 func init() {
@@ -19,6 +19,9 @@ func init() {
 }
 
 func syncThemeToCommon() {
+	if themeSettings.Frontend != "default" {
+		themeSettings.Frontend = "default"
+	}
 	common.SetTheme(themeSettings.Frontend)
 }
 

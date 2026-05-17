@@ -1,6 +1,6 @@
 # 前后端分离部署指南
 
-本文档说明如何将后端作为独立 API 服务运行，将 `web/default` 前端作为独立静态站点部署。
+本文档说明如何将后端作为独立 API 服务运行，将 `frontend` 前端作为独立静态站点部署。
 
 ## 部署目标
 
@@ -8,7 +8,7 @@
 
 | 服务 | 示例地址 | 说明 |
 | --- | --- | --- |
-| 前端静态站点 | `https://web.example.com` | 部署 `web/default/dist` |
+| 前端静态站点 | `https://web.example.com` | 部署 `frontend/dist` |
 | 后端 API | `https://api.example.com` | 运行 Go 后端服务 |
 
 也可以使用同一域名不同路径：
@@ -80,19 +80,19 @@ set +a
 ./new-api --log-dir ./logs
 ```
 
-后端现在是 API-only 服务，不需要 `web/default/dist` 或 `web/classic/dist` 存在。
+后端现在是 API-only 服务，不需要 `frontend/dist` 存在。
 
 ## 前端部署
 
 进入默认前端目录：
 
 ```bash
-cd web/default
+cd frontend
 bun install
 VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 ```
 
-构建完成后，将 `web/default/dist` 发布到静态站点服务。静态站点必须配置 SPA fallback：所有非文件路径返回 `index.html`。
+构建完成后，将 `frontend/dist` 发布到静态站点服务。静态站点必须配置 SPA fallback：所有非文件路径返回 `index.html`。
 
 ## Nginx 示例：子域名部署
 
@@ -150,7 +150,7 @@ server {
 前端构建时可以不设置 `VITE_REACT_APP_SERVER_URL`，让前端请求同源 API：
 
 ```bash
-cd web/default
+cd frontend
 bun install
 bun run build
 ```
@@ -247,4 +247,3 @@ proxy_send_timeout 3600s;
 - API 路径继续由后端处理
 - 非 API 路径在设置 `FRONTEND_BASE_URL` 时跳转到前端
 - 未设置 `FRONTEND_BASE_URL` 时返回 API 风格的 404
-

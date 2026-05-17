@@ -8,10 +8,8 @@ upload
 build
 *.db-journal
 logs
-web/default/dist
-web/classic/dist
-web/node_modules
-web/dist
+frontend/dist
+frontend/node_modules
 .env
 one-api
 new-api
@@ -26,8 +24,6 @@ plans
 .claude
 .cursor
 
-electron/node_modules
-electron/dist
 data/
 .gomodcache/
 .gocache-temp
