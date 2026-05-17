@@ -24,6 +24,13 @@
 
 优先选用成熟、维护良好的开源库；仅在现有库无法满足或需特殊适配时自行实现，并评估可维护性与通用性。
 
+### 当前分支约定
+
+- 当前前端源码只保留在仓库根目录的 `frontend/`，该目录由旧 `web/default` 迁移而来；不要恢复 `web/`、`web/default` 或 `web/classic`。
+- 前端按独立静态站点部署：在 `frontend/` 执行构建，发布 `frontend/dist`；后端按 API 服务运行，通过 `FRONTEND_BASE_URL`、反向代理和 CORS 配置与前端分离。
+- Classic 前端和 Electron 桌面端已移除；不要新增 classic 主题切换、classic 同步脚本或 Electron 构建流程，除非项目明确恢复这些产品形态。
+- 仓库只保留根目录 `README.md` 作为中文 README；不要恢复多语言 README 文件。
+
 ---
 
 ## 二、目录

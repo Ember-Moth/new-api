@@ -37,6 +37,14 @@ frontend/       — Frontend application (React 19, Rsbuild, Base UI, Tailwind)
  frontend/src/i18n/ — Frontend internationalization (i18next, zh/en/fr/ru/ja/vi)
 ```
 
+## Current Branch Conventions
+
+- `frontend/` is the only frontend source directory. It replaces the old `web/default` layout; do not recreate `web/`, `web/default`, or `web/classic`.
+- The frontend is deployed as an independent static application. Build it from `frontend/` and publish `frontend/dist`; treat the Go backend as an API service and use `FRONTEND_BASE_URL` plus proxy/CORS configuration for separation.
+- The classic frontend and Electron desktop packaging have been removed. Do not add classic theme switching, classic sync tooling, or Electron build workflows unless the project explicitly restores those products.
+- Keep a single root `README.md` in Chinese. Do not recreate localized README variants such as `README.en.md`, `README.fr.md`, `README.ja.md`, `README.zh_CN.md`, or `README.zh_TW.md`.
+- This fork keeps `origin` for the fork repository and uses `upstream` for `https://github.com/QuantumNous/new-api.git`.
+
 ## Internationalization (i18n)
 
 ### Backend (`i18n/`)
