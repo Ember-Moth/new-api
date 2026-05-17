@@ -1,0 +1,161 @@
+name: Container Images
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_api_base_url:
+        description: 'Frontend build-time API base URL. Leave empty for same-origin k3s ingress.'
+        required: false
+        default: ''
+      push:
+        description: 'Push images to GHCR'
+        type: boolean
+        required: false
+        default: true
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+      - '!*-alpha*'
+    paths:
+      - 'Containerfile.backend'
+      - 'Containerfile.frontend'
+      - '.dockerignore'
+      - 'go.mod'
+      - 'go.sum'
+      - 'main.go'
+      - 'common/**'
+      - 'constant/**'
+      - 'controller/**'
+      - 'dto/**'
+      - 'i18n/**'
+      - 'logger/**'
+      - 'middleware/**'
+      - 'model/**'
+      - 'oauth/**'
+      - 'pkg/**'
+      - 'relay/**'
+      - 'router/**'
+      - 'service/**'
+      - 'setting/**'
+      - 'types/**'
+      - 'frontend/**'
+      - 'deploy/container/**'
+      - '.github/workflows/container-images.yml'
+
+concurrency:
+  group: container-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare metadata
+        run: |
+          echo "IMAGE_NAMESPACE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "VERSION=$(git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: ${{ github.event_name == 'push' || inputs.push }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAMESPACE }}/backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile.backend
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' || inputs.push }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  frontend:
+    name: Frontend Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare metadata
+        run: |
+          echo "IMAGE_NAMESPACE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "VERSION=$(git describe --tags --always --dirty)" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: ${{ github.event_name == 'push' || inputs.push }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAMESPACE }}/frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile.frontend
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' || inputs.push }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VITE_REACT_APP_VERSION=${{ env.VERSION }}
+            VITE_REACT_APP_SERVER_URL=${{ inputs.frontend_api_base_url || vars.FRONTEND_API_BASE_URL || '' }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend

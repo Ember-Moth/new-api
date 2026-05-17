@@ -1,0 +1,103 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: new-api
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: new-api.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /v1beta
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /pg
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /mj
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /fast/mj
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /relax/mj
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /turbo/mj
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /suno
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /kling
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /jimeng
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /dashboard/billing
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-backend
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api-frontend
+                port:
+                  name: http

@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1.7
+
+ARG GO_VERSION=1.25.1
+
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
+
+WORKDIR /src
+
+RUN apk add --no-cache ca-certificates git tzdata
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY main.go VERSION ./
+COPY common ./common
+COPY constant ./constant
+COPY controller ./controller
+COPY dto ./dto
+COPY i18n ./i18n
+COPY logger ./logger
+COPY middleware ./middleware
+COPY model ./model
+COPY oauth ./oauth
+COPY pkg ./pkg
+COPY relay ./relay
+COPY router ./router
+COPY service ./service
+COPY setting ./setting
+COPY types ./types
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ARG VERSION=dev
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath \
+      -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${VERSION}'" \
+      -o /out/new-api .
+
+FROM alpine:3.22 AS runtime
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S newapi \
+    && adduser -S -D -H -u 10001 -G newapi newapi \
+    && mkdir -p /app/logs /app/data /licenses \
+    && chown -R newapi:newapi /app
+
+WORKDIR /app
+
+COPY --from=build /out/new-api /app/new-api
+COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
+
+ENV GIN_MODE=release \
+    PORT=3000 \
+    SQLITE_PATH=/app/data/new-api.db?_busy_timeout=30000
+
+EXPOSE 3000
+
+USER 10001:10001
+
+ENTRYPOINT ["/app/new-api"]
+CMD ["--log-dir", "/app/logs"]

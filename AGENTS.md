@@ -41,6 +41,9 @@ frontend/       — Frontend application (React 19, Rsbuild, Base UI, Tailwind)
 
 - `frontend/` is the only frontend source directory. It replaces the old `web/default` layout; do not recreate `web/`, `web/default`, or `web/classic`.
 - The frontend is deployed as an independent static application. Build it from `frontend/` and publish `frontend/dist`; treat the Go backend as an API service and use `FRONTEND_BASE_URL` plus proxy/CORS configuration for separation.
+- k3s is the preferred deployment target for this branch. OCI build definitions live at `Containerfile.backend` and `Containerfile.frontend`; k3s/Kustomize manifests live under `deploy/k3s/`. Keep backend and frontend images separate.
+- k3s manifests must assume external databases and external/cloud Redis. Do not add in-cluster database or Redis workloads to the default k3s deployment unless explicitly requested.
+- Container image publishing is handled by `.github/workflows/container-images.yml`, which publishes separate backend and frontend images to GHCR. Do not reintroduce compose-based deployment unless explicitly requested.
 - The classic frontend and Electron desktop packaging have been removed. Do not add classic theme switching, classic sync tooling, or Electron build workflows unless the project explicitly restores those products.
 - Keep a single root `README.md` in Chinese. Do not recreate localized README variants such as `README.en.md`, `README.fr.md`, `README.ja.md`, `README.zh_CN.md`, or `README.zh_TW.md`.
 - This fork keeps `origin` for the fork repository and uses `upstream` for `https://github.com/QuantumNous/new-api.git`.

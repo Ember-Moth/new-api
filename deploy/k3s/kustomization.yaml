@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: new-api
+
+resources:
+  - app.yaml
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: new-api
+
+images:
+  - name: ghcr.io/example/new-api/backend
+    newName: ghcr.io/your-org/new-api/backend
+    newTag: latest
+  - name: ghcr.io/example/new-api/frontend
+    newName: ghcr.io/your-org/new-api/frontend
+    newTag: latest

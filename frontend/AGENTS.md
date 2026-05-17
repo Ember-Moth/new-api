@@ -28,6 +28,7 @@
 
 - 当前前端源码只保留在仓库根目录的 `frontend/`，该目录由旧 `web/default` 迁移而来；不要恢复 `web/`、`web/default` 或 `web/classic`。
 - 前端按独立静态站点部署：在 `frontend/` 执行构建，发布 `frontend/dist`；后端按 API 服务运行，通过 `FRONTEND_BASE_URL`、反向代理和 CORS 配置与前端分离。
+- k3s 部署时前端使用根目录 `Containerfile.frontend` 构建独立静态站点镜像，容器内只提供静态文件和 SPA fallback；不要把前端重新嵌入后端二进制。
 - Classic 前端和 Electron 桌面端已移除；不要新增 classic 主题切换、classic 同步脚本或 Electron 构建流程，除非项目明确恢复这些产品形态。
 - 仓库只保留根目录 `README.md` 作为中文 README；不要恢复多语言 README 文件。
 

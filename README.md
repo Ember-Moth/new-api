@@ -282,8 +282,8 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 | **后端运行环境** | Linux、macOS 或 Windows，Go 1.22+ 构建 |
 | **前端运行环境** | 静态站点服务，发布 `frontend/dist` |
 | **本地数据库** | SQLite |
-| **远程数据库** | MySQL ≥ 5.7.8 或 PostgreSQL ≥ 9.6 |
-| **缓存** | Redis（可选，多节点或缓存场景建议使用） |
+| **生产数据库** | k3s 外部 MySQL ≥ 5.7.8、PostgreSQL ≥ 9.6 或云数据库 |
+| **缓存** | 外部 Redis（可选，多节点或缓存场景建议使用） |
 
 ### ⚙️ 环境变量配置
 
@@ -316,29 +316,35 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 
 ### 🔧 部署方式
 
-本分支不再提供容器化部署入口。推荐将 Go 后端作为 API 服务运行，将 `frontend/dist` 作为独立静态站点发布。
+本分支推荐使用 k3s 部署，后端和前端分别构建为独立 OCI 镜像，由 Ingress 按路径转发。完整说明见 [k3s 部署指南](./docs/installation/k3s.md)，清单位于 [`deploy/k3s`](./deploy/k3s)。
 
-**后端：**
-
-```bash
-go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
-
-export FRONTEND_BASE_URL=https://web.example.com
-export SESSION_SECRET=replace_with_a_random_secret
-export SQL_DSN=postgresql://user:password@127.0.0.1:5432/new-api
-
-./new-api --log-dir ./logs
-```
-
-**前端：**
+**镜像：**
 
 ```bash
-cd frontend
-bun install
-VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
+VERSION=$(cat VERSION)
+
+docker build -f Containerfile.backend \
+  --build-arg VERSION="$VERSION" \
+  -t ghcr.io/your-org/new-api/backend:$VERSION .
+
+docker build -f Containerfile.frontend \
+  --build-arg VITE_REACT_APP_VERSION="$VERSION" \
+  -t ghcr.io/your-org/new-api/frontend:$VERSION .
 ```
 
-将 `frontend/dist` 发布到静态站点服务，并配置 SPA fallback。完整说明见 [前后端分离部署指南](./docs/installation/frontend-backend-separate.md)。
+**k3s：**
+
+```bash
+cp deploy/k3s/secret.example.yaml /tmp/new-api-secret.yaml
+# 编辑 /tmp/new-api-secret.yaml，填写固定密钥、外部数据库 SQL_DSN 和外部 Redis
+kubectl create namespace new-api --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f /tmp/new-api-secret.yaml
+kubectl apply -k deploy/k3s
+```
+
+如需非 k3s 的前后端分离部署，可参考 [前后端分离部署指南](./docs/installation/frontend-backend-separate.md)。
+
+微服务拆分请参考 [微服务拆分设计文档](./docs/microservices/design.md) 和 [微服务开发文档](./docs/microservices/development.md)。
 
 ### ⚠️ 多机部署注意事项
 
