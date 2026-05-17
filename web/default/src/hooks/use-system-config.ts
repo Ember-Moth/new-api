@@ -24,6 +24,7 @@ import {
   type SystemConfig,
   DEFAULT_CURRENCY_CONFIG,
 } from '@/stores/system-config-store'
+import { withApiBaseUrl } from '@/lib/api'
 import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 
@@ -103,7 +104,7 @@ export function mapStatusDataToConfig(
 
 // Fetch system config from API
 async function fetchSystemConfig(): Promise<Partial<SystemConfig>> {
-  const response = await fetch('/api/status')
+  const response = await fetch(withApiBaseUrl('/api/status'))
   if (!response.ok) throw new Error('Failed to fetch status')
 
   const data: StatusApiResponse = await response.json()

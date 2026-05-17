@@ -16,7 +16,6 @@ require (
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-contrib/gzip v0.0.6
 	github.com/gin-contrib/sessions v0.0.5
-	github.com/gin-contrib/static v0.0.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/glebarez/sqlite v1.9.0
 	github.com/go-audio/aiff v1.1.0

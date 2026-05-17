@@ -21,6 +21,7 @@ import { useState, useMemo } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Music } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { withApiBaseUrl } from '@/lib/api'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -258,7 +259,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
         const isUrl = failReason?.startsWith('http')
 
         if (isSuccess && isVideoTask && isUrl) {
-          const videoUrl = `/v1/videos/${log.task_id}/content`
+          const videoUrl = withApiBaseUrl(`/v1/videos/${log.task_id}/content`)
           return (
             <a
               href={videoUrl}

@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { SiGithub, SiWechat, SiLinux } from 'react-icons/si'
 import { toast } from 'sonner'
 import { IconDiscord } from '@/assets/brand-icons'
+import { withApiBaseUrl } from '@/lib/api'
 import {
   handleGitHubOAuth,
   handleOIDCOAuth,
@@ -115,7 +116,9 @@ export function AccountBindingsTab({
 
   const handleBindCustomOAuth = (provider: { id: string; name: string }) => {
     const redirectUrl = `${window.location.origin}/oauth/${provider.id}?bind=true`
-    window.location.href = `/api/oauth/${provider.id}?redirect=${encodeURIComponent(redirectUrl)}`
+    window.location.href = withApiBaseUrl(
+      `/api/oauth/${provider.id}?redirect=${encodeURIComponent(redirectUrl)}`
+    )
   }
 
   useEffect(() => {

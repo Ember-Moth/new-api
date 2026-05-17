@@ -25,12 +25,29 @@ import { useAuthStore } from '@/stores/auth-store'
 // Axios Instance Configuration
 // ============================================================================
 
-// Base URL: empty string for same-origin API requests
-const baseURL = ''
+function normalizeBaseUrl(url?: string): string {
+  return (url || '').trim().replace(/\/+$/, '')
+}
+
+// Empty by default for same-origin deployments. Set VITE_REACT_APP_SERVER_URL
+// when the frontend is deployed independently from the backend.
+export const API_BASE_URL = normalizeBaseUrl(
+  import.meta.env.VITE_REACT_APP_SERVER_URL
+)
+
+export function withApiBaseUrl(path: string): string {
+  if (!path || /^https?:\/\//i.test(path) || path.startsWith('//')) {
+    return path
+  }
+  if (!API_BASE_URL) {
+    return path
+  }
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+}
 
 // Create axios instance with default config
 export const api = axios.create({
-  baseURL,
+  baseURL: API_BASE_URL,
   withCredentials: true, // Include cookies in cross-origin requests
   headers: {
     'Cache-Control': 'no-store', // Prevent caching
