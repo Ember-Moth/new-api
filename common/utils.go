@@ -92,26 +92,20 @@ func GetNetworkIps() []string {
 
 // IsRunningInContainer detects if the application is running inside a container
 func IsRunningInContainer() bool {
-	// Method 1: Check for .dockerenv file (Docker containers)
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return true
-	}
-
-	// Method 2: Check cgroup for container indicators
+	// Method 1: Check cgroup for container indicators
 	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
 		content := string(data)
-		if strings.Contains(content, "docker") ||
-			strings.Contains(content, "containerd") ||
+		if strings.Contains(content, "containerd") ||
 			strings.Contains(content, "kubepods") ||
+			strings.Contains(content, "libpod") ||
 			strings.Contains(content, "/lxc/") {
 			return true
 		}
 	}
 
-	// Method 3: Check environment variables commonly set by container runtimes
+	// Method 2: Check environment variables commonly set by container runtimes
 	containerEnvVars := []string{
 		"KUBERNETES_SERVICE_HOST",
-		"DOCKER_CONTAINER",
 		"container",
 	}
 
@@ -121,14 +115,13 @@ func IsRunningInContainer() bool {
 		}
 	}
 
-	// Method 4: Check if init process is not the traditional init
+	// Method 3: Check if init process is not the traditional init
 	if data, err := os.ReadFile("/proc/1/comm"); err == nil {
 		comm := strings.TrimSpace(string(data))
 		// In containers, process 1 is often not "init" or "systemd"
 		if comm != "init" && comm != "systemd" {
 			// Additional check: if it's a common container entrypoint
-			if strings.Contains(comm, "docker") ||
-				strings.Contains(comm, "containerd") ||
+			if strings.Contains(comm, "containerd") ||
 				strings.Contains(comm, "runc") {
 				return true
 			}

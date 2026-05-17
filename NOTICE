@@ -31,8 +31,8 @@ license terms for direct third-party dependencies are listed in
 THIRD-PARTY-LICENSES.md.
 
 Apache-2.0 upstream NOTICE entries identified for direct dependencies are
-reproduced below. Preserve this file with Docker images, standalone binaries,
-and frontend bundles distributed to users.
+reproduced below. Preserve this file with standalone binaries, frontend
+bundles, and other release artifacts distributed to users.
 
 ==== Apache-2.0 Notices ====
 

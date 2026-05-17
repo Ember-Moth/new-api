@@ -13,9 +13,6 @@
   --><a href="https://github.com/Calcium-Ion/new-api/releases/latest">
     <img src="https://img.shields.io/github/v/release/Calcium-Ion/new-api?color=brightgreen&include_prereleases" alt="release">
   </a><!--
-  --><a href="https://hub.docker.com/r/CalciumIon/new-api">
-    <img src="https://img.shields.io/badge/docker-dockerHub-blue" alt="docker">
-  </a><!--
   --><a href="https://goreportcard.com/report/github.com/Calcium-Ion/new-api">
     <img src="https://goreportcard.com/badge/github.com/Calcium-Ion/new-api" alt="GoReportCard">
   </a>
@@ -99,55 +96,47 @@
 
 ## 🚀 快速开始
 
-### 使用 Docker Compose（推荐）
+### 本地源码运行
 
 ```bash
 # 克隆项目
 git clone https://github.com/QuantumNous/new-api.git
 cd new-api
 
-# 编辑 docker-compose.yml 配置
-nano docker-compose.yml
-
-# 启动服务
-docker-compose up -d
+# 启动后端 API 服务
+go run main.go
 ```
 
-<details>
-<summary><strong>使用 Docker 命令</strong></summary>
+另开一个终端启动前端：
 
 ```bash
-# 拉取最新镜像
-docker pull calciumion/new-api:latest
-
-# 使用 SQLite（默认）
-docker run --name new-api -d --restart always \
-  -p 3000:3000 \
-  -e TZ=Asia/Shanghai \
-  -v ./data:/data \
-  calciumion/new-api:latest
-
-# 使用 MySQL
-docker run --name new-api -d --restart always \
-  -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
-  -e TZ=Asia/Shanghai \
-  -v ./data:/data \
-  calciumion/new-api:latest
+cd frontend
+bun install
+bun run dev
 ```
 
-> **💡 提示：** `-v ./data:/data` 会将数据保存在当前目录的 `data` 文件夹中，你也可以改为绝对路径如 `-v /your/custom/path:/data`
+默认情况下前端开发服务会调用本地后端 API。生产环境请按前后端分离方式部署，后端设置 `FRONTEND_BASE_URL`，前端构建时按需设置 `VITE_REACT_APP_SERVER_URL`。
 
-</details>
+### 生产构建
 
----
+后端：
 
-🎉 部署完成后，访问 `http://localhost:3000` 即可使用！
+```bash
+go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
+```
+
+前端：
+
+```bash
+cd frontend
+bun install
+VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
+```
 
 > [!WARNING]
 > 将本项目作为面向公众的生成式 AI 服务或 API 转售服务运营时，使用者应先完成备案、内容安全、实名、日志留存、税务、支付和上游授权等合规义务。
 
-📖 更多部署方式请参考 [部署指南](https://docs.newapi.pro/zh/docs/installation)
+📖 前后端分离部署请参考 [部署指南](./docs/installation/frontend-backend-separate.md)
 
 ---
 
@@ -286,16 +275,15 @@ docker run --name new-api -d --restart always \
 
 ## 🚢 部署
 
-> [!TIP]
-> **最新版 Docker 镜像：** `calciumion/new-api:latest`
-
 ### 📋 部署要求
 
 | 组件 | 要求 |
 |------|------|
-| **本地数据库** | SQLite（Docker 需挂载 `/data` 目录）|
+| **后端运行环境** | Linux、macOS 或 Windows，Go 1.22+ 构建 |
+| **前端运行环境** | 静态站点服务，发布 `frontend/dist` |
+| **本地数据库** | SQLite |
 | **远程数据库** | MySQL ≥ 5.7.8 或 PostgreSQL ≥ 9.6 |
-| **容器引擎** | Docker / Docker Compose |
+| **缓存** | Redis（可选，多节点或缓存场景建议使用） |
 
 ### ⚙️ 环境变量配置
 
@@ -320,6 +308,7 @@ docker run --name new-api -d --restart always \
 | `PYROSCOPE_MUTEX_RATE` | Pyroscope mutex 采样率                               | `5` |
 | `PYROSCOPE_BLOCK_RATE` | Pyroscope block 采样率                               | `5` |
 | `HOSTNAME` | Pyroscope 标签里的主机名                                          | `new-api` |
+| `FRONTEND_BASE_URL` | 前端公开地址，后端未命中的非 API 路径会跳转到这里 | - |
 
 📖 **完整配置：** [环境变量文档](https://docs.newapi.pro/zh/docs/installation/config-maintenance/environment-variables)
 
@@ -327,61 +316,29 @@ docker run --name new-api -d --restart always \
 
 ### 🔧 部署方式
 
-<details>
-<summary><strong>方式 1：Docker Compose（推荐）</strong></summary>
+本分支不再提供容器化部署入口。推荐将 Go 后端作为 API 服务运行，将 `frontend/dist` 作为独立静态站点发布。
+
+**后端：**
 
 ```bash
-# 克隆项目
-git clone https://github.com/QuantumNous/new-api.git
-cd new-api
+go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
 
-# 编辑配置
-nano docker-compose.yml
+export FRONTEND_BASE_URL=https://web.example.com
+export SESSION_SECRET=replace_with_a_random_secret
+export SQL_DSN=postgresql://user:password@127.0.0.1:5432/new-api
 
-# 启动服务
-docker-compose up -d
+./new-api --log-dir ./logs
 ```
 
-</details>
+**前端：**
 
-<details>
-<summary><strong>方式 2：Docker 命令</strong></summary>
-
-**使用 SQLite：**
 ```bash
-docker run --name new-api -d --restart always \
-  -p 3000:3000 \
-  -e TZ=Asia/Shanghai \
-  -v ./data:/data \
-  calciumion/new-api:latest
+cd frontend
+bun install
+VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 ```
 
-**使用 MySQL：**
-```bash
-docker run --name new-api -d --restart always \
-  -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
-  -e TZ=Asia/Shanghai \
-  -v ./data:/data \
-  calciumion/new-api:latest
-```
-
-> **💡 路径说明：**
-> - `./data:/data` - 相对路径，数据保存在当前目录的 data 文件夹
-> - 也可使用绝对路径，如：`/your/custom/path:/data`
-
-</details>
-
-<details>
-<summary><strong>方式 3：宝塔面板</strong></summary>
-
-1. 安装宝塔面板（≥ 9.2.0 版本）
-2. 在应用商店搜索 **New-API**
-3. 一键安装
-
-📖 [图文教程](./docs/installation/BT.md)
-
-</details>
+将 `frontend/dist` 发布到静态站点服务，并配置 SPA fallback。完整说明见 [前后端分离部署指南](./docs/installation/frontend-backend-separate.md)。
 
 ### ⚠️ 多机部署注意事项
 

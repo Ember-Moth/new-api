@@ -1,7 +1,7 @@
 # Third-Party Licenses
 
 This file summarizes direct third-party dependencies used by distributed builds of this project.
-It is an engineering compliance artifact and should be kept with Docker images, standalone binaries, and frontend bundles.
+It is an engineering compliance artifact and should be kept with standalone binaries, frontend bundles, and other distributed release artifacts.
 
 Scope: direct dependencies from `go.mod` and `frontend/package.json`.
 Transitive dependencies should be audited before a final external release.

@@ -1,0 +1,66 @@
+name: Frontend Release
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'reason'
+        required: false
+  push:
+    tags:
+      - '*'
+      - '!*-alpha*'
+
+jobs:
+  frontend:
+    name: Build Frontend Static Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version
+        run: |
+          VERSION=$(git describe --tags)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - name: Build Frontend
+        env:
+          CI: ""
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          cd frontend
+          bun install
+          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
+
+      - name: Package Frontend
+        run: |
+          tar -C frontend/dist -czf new-api-frontend-$VERSION.tar.gz .
+          sha256sum new-api-frontend-$VERSION.tar.gz > checksums-frontend.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-api-frontend-${{ env.VERSION }}
+          path: |
+            new-api-frontend-${{ env.VERSION }}.tar.gz
+            checksums-frontend.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            new-api-frontend-*.tar.gz
+            checksums-frontend.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
