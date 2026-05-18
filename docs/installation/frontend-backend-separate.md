@@ -113,6 +113,8 @@ Cloudflare Pages 项目配置：
 
 前端构建时不要设置 `VITE_REACT_APP_SERVER_URL`。这样浏览器请求会保持同源，Pages Function 再把请求转发到 `BACKEND_ORIGIN`。
 
+本仓库默认不保留 `frontend/wrangler.toml`，这样可以直接在 Cloudflare Dashboard 管理 `BACKEND_ORIGIN` 等普通环境变量。如果你自行添加了 Wrangler 配置文件，Cloudflare Pages 会把该文件作为项目配置来源，此时普通环境变量需要写入 Wrangler 配置的 `vars`，Dashboard 通常只能继续管理加密变量。
+
 生产流量建议分开：
 
 - 管理后台、登录、OAuth、Playground 可以走 Pages Function 同源反代。
