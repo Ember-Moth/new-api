@@ -41,6 +41,7 @@ frontend/       — Frontend application (React 19, Rsbuild, Base UI, Tailwind)
 
 - `frontend/` is the only frontend source directory. It replaces the old `web/default` layout; do not recreate `web/`, `web/default`, or `web/classic`.
 - The frontend is deployed as an independent static application. Build it from `frontend/` and publish `frontend/dist`; treat the Go backend as an API service and use `FRONTEND_BASE_URL` plus proxy/CORS configuration for separation.
+- Cloudflare Pages is supported through `frontend/functions/`, which proxies backend paths to `BACKEND_ORIGIN`. For this mode, do not set `VITE_REACT_APP_SERVER_URL`; keep frontend requests same-origin and configure backend cookies with `SESSION_COOKIE_SECURE=true`, `SESSION_COOKIE_SAMESITE=lax`, and no `SESSION_COOKIE_DOMAIN`.
 - k3s is the preferred deployment target for this branch. OCI build definitions live at `Containerfile.backend` and `Containerfile.frontend`; k3s/Kustomize manifests live under `deploy/k3s/`. Keep backend and frontend images separate.
 - k3s manifests must assume external databases and external/cloud Redis. Do not add in-cluster database or Redis workloads to the default k3s deployment unless explicitly requested.
 - Container image publishing is handled by `.github/workflows/container-images.yml`, which publishes separate backend and frontend images to GHCR. Do not reintroduce compose-based deployment unless explicitly requested.

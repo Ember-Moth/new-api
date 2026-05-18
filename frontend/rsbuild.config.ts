@@ -14,11 +14,25 @@ export default defineConfig(({ envMode }) => {
     'http://localhost:3000'
 
   const isProd = envMode === 'production'
+  const backendProxyPrefixes = [
+    '/api',
+    '/v1',
+    '/v1beta',
+    '/pg',
+    '/mj',
+    '/fast/mj',
+    '/relax/mj',
+    '/turbo/mj',
+    '/suno',
+    '/kling',
+    '/jimeng',
+    '/dashboard/billing',
+  ] as const
   const devProxy = Object.fromEntries(
-    (['/api', '/mj', '/pg'] as const).map((key) => [
+    backendProxyPrefixes.map((key) => [
       key,
       { target: serverUrl, changeOrigin: true },
-    ]),
+    ])
   ) as Record<string, { target: string; changeOrigin: boolean }>
 
   return {

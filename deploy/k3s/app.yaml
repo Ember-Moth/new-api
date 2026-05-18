@@ -12,6 +12,8 @@ data:
   GIN_MODE: release
   TZ: Asia/Shanghai
   FRONTEND_BASE_URL: https://new-api.example.com
+  SESSION_COOKIE_SECURE: "true"
+  SESSION_COOKIE_SAMESITE: lax
   MEMORY_CACHE_ENABLED: "true"
   SQL_MAX_OPEN_CONNS: "200"
   SQL_MAX_IDLE_CONNS: "50"

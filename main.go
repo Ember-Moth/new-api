@@ -163,13 +163,7 @@ func main() {
 	middleware.SetUpLogger(server)
 	// Initialize session store
 	store := cookie.NewStore([]byte(common.SessionSecret))
-	store.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000, // 30 days
-		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
-	})
+	store.Options(sessionCookieOptions())
 	server.Use(sessions.Sessions("session", store))
 
 	// 设置路由
@@ -185,6 +179,46 @@ func main() {
 	err = server.Run(":" + port)
 	if err != nil {
 		common.FatalLog("failed to start HTTP server: " + err.Error())
+	}
+}
+
+func sessionCookieOptions() sessions.Options {
+	sameSite := sessionCookieSameSite()
+	secure := common.GetEnvOrDefaultBool("SESSION_COOKIE_SECURE", false)
+	if sameSite == http.SameSiteNoneMode && !secure {
+		common.SysError("SESSION_COOKIE_SAMESITE=none requires SESSION_COOKIE_SECURE=true; enabling secure session cookies")
+		secure = true
+	}
+
+	options := sessions.Options{
+		Path:     "/",
+		MaxAge:   common.GetEnvOrDefault("SESSION_COOKIE_MAX_AGE", 2592000),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+	}
+
+	if domain := strings.TrimSpace(os.Getenv("SESSION_COOKIE_DOMAIN")); domain != "" {
+		options.Domain = domain
+	}
+
+	return options
+}
+
+func sessionCookieSameSite() http.SameSite {
+	value := strings.ToLower(strings.TrimSpace(common.GetEnvOrDefaultString("SESSION_COOKIE_SAMESITE", "strict")))
+	switch value {
+	case "", "strict":
+		return http.SameSiteStrictMode
+	case "lax":
+		return http.SameSiteLaxMode
+	case "none":
+		return http.SameSiteNoneMode
+	case "default":
+		return http.SameSiteDefaultMode
+	default:
+		common.SysError(fmt.Sprintf("invalid SESSION_COOKIE_SAMESITE=%q, using strict", value))
+		return http.SameSiteStrictMode
 	}
 }
 

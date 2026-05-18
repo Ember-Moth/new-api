@@ -4,7 +4,17 @@
 
 ## 部署目标
 
-推荐使用两个同一主域名下的子域名：
+推荐优先使用同源反向代理方案：
+
+| 服务 | 示例地址 | 说明 |
+| --- | --- | --- |
+| 前端静态站点 | `https://app.example.com` | 部署 `frontend/dist` |
+| 后端 API | `https://app.example.com/api/*` | 由边缘函数或网关反代到真实后端 |
+| 真实后端 | `https://api.internal.example.com` | 运行 Go 后端服务 |
+
+这种方案对浏览器来说是同源访问，Session Cookie 不会被当作第三方 Cookie，最适合 Cloudflare Pages。
+
+也可以使用两个同一主域名下的子域名：
 
 | 服务 | 示例地址 | 说明 |
 | --- | --- | --- |
@@ -29,6 +39,10 @@
 | `PORT` | `3000` | 后端监听端口 |
 | `FRONTEND_BASE_URL` | `https://web.example.com` | 前端公开地址；后端未命中的非 API 路径会跳转到这里，同时用于 CORS 允许来源 |
 | `SESSION_SECRET` | 随机字符串 | Web 登录会话密钥，生产环境必须设置 |
+| `SESSION_COOKIE_SECURE` | `true` | 是否给 Session Cookie 增加 `Secure`；HTTPS 生产环境应开启 |
+| `SESSION_COOKIE_SAMESITE` | `lax` | Session Cookie 的 `SameSite` 策略，可选 `strict`、`lax`、`none`、`default` |
+| `SESSION_COOKIE_DOMAIN` | 留空 | Session Cookie 的 `Domain`；Cloudflare Pages Functions 同源反代时应留空 |
+| `SESSION_COOKIE_MAX_AGE` | `2592000` | Session Cookie 有效期，单位秒 |
 | `SQL_DSN` | 按数据库类型填写 | 可选；不设置时默认使用 SQLite |
 | `REDIS_CONN_STRING` | `redis://...` | 可选；多节点或缓存场景建议使用 |
 
@@ -37,19 +51,72 @@
 | 变量 | 示例 | 说明 |
 | --- | --- | --- |
 | `VITE_REACT_APP_SERVER_URL` | `https://api.example.com` | 后端公开地址；构建前端时写入产物 |
+| `BACKEND_ORIGIN` | `https://api.example.com` | Cloudflare Pages Functions 使用的真实后端地址 |
 
 `VITE_REACT_APP_SERVER_URL` 是构建期变量，修改后需要重新执行前端构建。
+使用 Cloudflare Pages Functions 同源反代时，不要设置 `VITE_REACT_APP_SERVER_URL`，让前端请求 `/api`、`/pg` 等同源路径。
 
 ## Cookie 与跨域要求
 
-管理后台依赖后端 Session Cookie。推荐前端和后端使用同一主域名的子域名，并且都使用 HTTPS，例如：
+管理后台依赖后端 Session Cookie。前端和后端完全不同站点时，不建议长期依赖跨站 Cookie。推荐把前端公开域名作为浏览器唯一入口，并使用边缘函数或网关把后端路径反代到真实后端。
+
+Cloudflare Pages Functions 同源反代时：
+
+- 浏览器访问 `https://app.example.com`
+- 前端请求 `https://app.example.com/api/status`
+- Pages Function 转发到 `https://api.example.com/api/status`
+- 后端返回的 `Set-Cookie` 会落在 `app.example.com`，不是 `api.example.com`
+
+后端推荐配置：
+
+```bash
+FRONTEND_BASE_URL=https://app.example.com
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_SAMESITE=lax
+# SESSION_COOKIE_DOMAIN 保持未设置
+```
+
+也可以让前端和后端使用同一主域名的子域名，并且都使用 HTTPS，例如：
 
 - `https://web.example.com`
 - `https://api.example.com`
 
 这种部署属于同站点请求，后端的 Session Cookie 可以在前端跨 origin 调用 API 时正常携带。
 
-如果前端和后端是完全不同站点，例如 `https://web.example.app` 调用 `https://api.example.com`，当前默认 Cookie 策略可能导致登录态无法携带。此时应优先改为同一主域名子域名部署，或额外调整后端 Cookie 的 `SameSite=None; Secure` 策略。
+如果前端和后端是完全不同站点，例如 `https://web.example.app` 调用 `https://api.example.com`，跨站 Cookie 可能被浏览器策略拦截。此时优先使用 Pages Function 同源反代；只有明确需要开放第三方前端直连 API 时，才考虑 `SameSite=None; Secure` 或 JWT 模式。
+
+## Cloudflare Pages Functions 部署
+
+仓库已经在 `frontend/functions/` 中提供 Pages Function 反代实现，匹配以下后端路径：
+
+- `/api`
+- `/v1`
+- `/v1beta`
+- `/pg`
+- `/mj`
+- `/fast/mj`
+- `/relax/mj`
+- `/turbo/mj`
+- `/suno`
+- `/kling`
+- `/jimeng`
+- `/dashboard/billing`
+
+Cloudflare Pages 项目配置：
+
+| 配置项 | 值 |
+| --- | --- |
+| Root directory | `frontend` |
+| Build command | `bun install && bun run build` |
+| Build output directory | `dist` |
+| Environment variable | `BACKEND_ORIGIN=https://api.example.com` |
+
+前端构建时不要设置 `VITE_REACT_APP_SERVER_URL`。这样浏览器请求会保持同源，Pages Function 再把请求转发到 `BACKEND_ORIGIN`。
+
+生产流量建议分开：
+
+- 管理后台、登录、OAuth、Playground 可以走 Pages Function 同源反代。
+- 对外提供给客户端调用的大流量 `/v1` API 可以继续暴露后端 API 域名，减少边缘函数调用成本和链路复杂度。
 
 ## 后端部署
 
@@ -63,8 +130,10 @@ go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat
 
 ```bash
 PORT=3000
-FRONTEND_BASE_URL=https://web.example.com
+FRONTEND_BASE_URL=https://app.example.com
 SESSION_SECRET=replace_with_a_random_secret
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_SAMESITE=lax
 SQL_DSN=postgresql://user:password@127.0.0.1:5432/new-api
 REDIS_CONN_STRING=redis://:password@127.0.0.1:6379
 TZ=Asia/Shanghai
@@ -84,7 +153,7 @@ set +a
 
 ## 前端部署
 
-进入默认前端目录：
+进入前端目录：
 
 ```bash
 cd frontend
@@ -93,6 +162,20 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 ```
 
 构建完成后，将 `frontend/dist` 发布到静态站点服务。静态站点必须配置 SPA fallback：所有非文件路径返回 `index.html`。
+
+使用 Cloudflare Pages Functions 同源反代时，构建命令改为：
+
+```bash
+cd frontend
+bun install
+bun run build
+```
+
+并在 Cloudflare Pages 环境变量中设置：
+
+```bash
+BACKEND_ORIGIN=https://api.example.com
+```
 
 ## Nginx 示例：子域名部署
 
@@ -206,7 +289,7 @@ curl https://api.example.com/api/status
 前端：
 
 1. 访问 `https://web.example.com`
-2. 打开浏览器开发者工具，确认 `/api/status` 请求实际发往 `https://api.example.com/api/status`
+2. 打开浏览器开发者工具，确认 `/api/status` 请求成功；使用 Pages Function 时浏览器里应显示为前端同源地址
 3. 登录后台，刷新页面后确认仍保持登录态
 4. 在 Playground 发起一次流式请求，确认 SSE 可以持续返回
 
@@ -219,6 +302,8 @@ curl https://api.example.com/api/status
 ```bash
 VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 ```
+
+如果使用 Cloudflare Pages Functions 同源反代，则不要设置 `VITE_REACT_APP_SERVER_URL`，应检查 Cloudflare Pages 环境变量 `BACKEND_ORIGIN` 是否已设置为真实后端地址。
 
 ### 登录成功后刷新又变成未登录
 

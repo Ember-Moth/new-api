@@ -2,7 +2,7 @@
 
 这里放置 new-api 的 k3s/Kubernetes 部署清单。资源已合并为少量文件，默认使用同域名路径部署：
 
-- `/api`、`/v1`、`/v1beta`、`/pg`、`/mj`、`/suno`、`/kling`、`/jimeng`、`/dashboard/billing` 转发到后端。
+- `/api`、`/v1`、`/v1beta`、`/pg`、`/mj`、`/fast/mj`、`/relax/mj`、`/turbo/mj`、`/suno`、`/kling`、`/jimeng`、`/dashboard/billing` 转发到后端。
 - 其他路径转发到前端静态服务。
 
 ## 准备密钥
@@ -25,6 +25,8 @@ kubectl apply -f /tmp/new-api-secret.yaml
 ## 修改镜像和域名
 
 编辑 `deploy/k3s/kustomization.yaml` 中的镜像地址，编辑 `deploy/k3s/app.yaml` 和 `deploy/k3s/ingress.yaml` 中的域名。
+
+如果前端部署到 Cloudflare Pages，可以保留 k3s 后端 API 域名，并在 Pages 环境变量中设置 `BACKEND_ORIGIN=https://api.example.com`。后端建议保持 `SESSION_COOKIE_SECURE=true`、`SESSION_COOKIE_SAMESITE=lax`，不要设置 `SESSION_COOKIE_DOMAIN`。
 
 ## 部署
 

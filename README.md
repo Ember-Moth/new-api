@@ -293,6 +293,10 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 | 变量名 | 说明                                                           | 默认值 |
 |--------|--------------------------------------------------------------|--------|
 | `SESSION_SECRET` | 会话密钥（多机部署必须）                                                 | - |
+| `SESSION_COOKIE_SECURE` | Session Cookie 是否启用 `Secure`，HTTPS 生产环境建议开启 | `false` |
+| `SESSION_COOKIE_SAMESITE` | Session Cookie 的 `SameSite` 策略，可选 `strict`、`lax`、`none`、`default` | `strict` |
+| `SESSION_COOKIE_DOMAIN` | Session Cookie 的 `Domain`，Cloudflare Pages Functions 同源反代时保持未设置 | - |
+| `SESSION_COOKIE_MAX_AGE` | Session Cookie 有效期，单位秒 | `2592000` |
 | `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
@@ -342,7 +346,7 @@ kubectl apply -f /tmp/new-api-secret.yaml
 kubectl apply -k deploy/k3s
 ```
 
-如需非 k3s 的前后端分离部署，可参考 [前后端分离部署指南](./docs/installation/frontend-backend-separate.md)。
+如需 Cloudflare Pages Functions 同源反代或非 k3s 的前后端分离部署，可参考 [前后端分离部署指南](./docs/installation/frontend-backend-separate.md)。
 
 微服务拆分请参考 [微服务拆分设计文档](./docs/microservices/design.md) 和 [微服务开发文档](./docs/microservices/development.md)。
 

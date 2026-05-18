@@ -67,8 +67,10 @@ deploy/k3s/
 
 | 路径 | 服务 |
 | --- | --- |
-| `/api`、`/v1`、`/v1beta`、`/pg`、`/mj`、`/suno`、`/kling`、`/jimeng`、`/dashboard/billing` | 后端 |
+| `/api`、`/v1`、`/v1beta`、`/pg`、`/mj`、`/fast/mj`、`/relax/mj`、`/turbo/mj`、`/suno`、`/kling`、`/jimeng`、`/dashboard/billing` | 后端 |
 | `/` | 前端 |
+
+如果前端部署到 Cloudflare Pages，可以只把 k3s 后端暴露为 API 域名，并在 Pages 环境变量中设置 `BACKEND_ORIGIN=https://api.example.com`。此时前端构建不要设置 `VITE_REACT_APP_SERVER_URL`，由 Pages Function 把 `/api`、`/pg` 等同源路径反代到 k3s 后端。
 
 ## 部署步骤
 
@@ -101,5 +103,6 @@ curl https://new-api.example.com/api/status
 
 - 生产环境必须使用 k3s 外部 PostgreSQL/MySQL 或云数据库，不在集群内创建数据库 Pod。
 - 多副本部署必须设置固定 `SESSION_SECRET`、`CRYPTO_SECRET`，并配置外部 Redis。
+- HTTPS 生产环境建议保持 `SESSION_COOKIE_SECURE=true`、`SESSION_COOKIE_SAMESITE=lax`；Cloudflare Pages Functions 同源反代时不要设置 `SESSION_COOKIE_DOMAIN`。
 - 默认清单不挂载数据库 PVC，后端 Pod 可无状态重建；持久化数据由外部数据库承担。
 - 云数据库安全组需允许 k3s 节点或出口网关访问，并建议启用 TLS、备份和监控。
