@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import { type Table } from '@tanstack/react-table'
@@ -33,6 +33,11 @@ const route = getRouteApi('/_authenticated/usage-logs/$section')
 
 type TaskLikeLogCategory = Extract<LogCategory, 'drawing' | 'task'>
 type TaskLogsFilters = DrawingLogFilters | TaskLogFilters
+
+type TaskLogsFilterDraft = {
+  searchSignature: string
+  filters: TaskLogsFilters
+}
 
 interface TaskLogsFilterBarProps<TData> {
   table: Table<TData>
@@ -68,12 +73,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const isAdmin = useIsAdmin()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
-  const [filters, setFilters] = useState<TaskLogsFilters>(() => {
-    const { start, end } = getDefaultTimeRange()
-    return { startTime: start, endTime: end }
-  })
-
-  useEffect(() => {
+  const searchDraft = useMemo<TaskLogsFilterDraft>(() => {
     const { start, end } = getDefaultTimeRange()
     const baseFilters = {
       startTime: searchParams.startTime
@@ -95,7 +95,16 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
             ...(searchParams.filter ? { taskId: searchParams.filter } : {}),
           }
 
-    setFilters(next)
+    return {
+      searchSignature: JSON.stringify([
+        props.logCategory,
+        searchParams.startTime ?? '',
+        searchParams.endTime ?? '',
+        searchParams.channel ?? '',
+        searchParams.filter ?? '',
+      ]),
+      filters: next,
+    }
   }, [
     props.logCategory,
     searchParams.startTime,
@@ -103,10 +112,21 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     searchParams.channel,
     searchParams.filter,
   ])
+  const [draft, setDraft] = useState<TaskLogsFilterDraft>(searchDraft)
+  const activeDraft =
+    draft.searchSignature === searchDraft.searchSignature ? draft : searchDraft
+  const filters = activeDraft.filters
+
+  if (draft.searchSignature !== searchDraft.searchSignature) {
+    setDraft(searchDraft)
+  }
 
   const handleChange = useCallback(
     (field: keyof TaskLogsFilters, value: Date | string | undefined) => {
-      setFilters((prev) => ({ ...prev, [field]: value }))
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        filters: { ...currentDraft.filters, [field]: value },
+      }))
     },
     []
   )
@@ -127,7 +147,10 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: TaskLogsFilters = { startTime: start, endTime: end }
-    setFilters(resetFilters)
+    setDraft({
+      searchSignature: searchDraft.searchSignature,
+      filters: resetFilters,
+    })
 
     navigate({
       to: '/usage-logs/$section',
@@ -139,7 +162,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       },
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
-  }, [navigate, props.logCategory, queryClient])
+  }, [navigate, props.logCategory, queryClient, searchDraft.searchSignature])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -150,7 +173,10 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
 
   const handleFilterChange = useCallback(
     (value: string) => {
-      setFilters((prev) => setFilterValue(prev, props.logCategory, value))
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        filters: setFilterValue(currentDraft.filters, props.logCategory, value),
+      }))
     },
     [props.logCategory]
   )

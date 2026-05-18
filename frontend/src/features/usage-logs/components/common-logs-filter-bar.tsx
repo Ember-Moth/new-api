@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import { type Table } from '@tanstack/react-table'
@@ -52,6 +52,12 @@ const logTypeValues = ['0', '1', '2', '3', '4', '5', '6'] as const
 
 type LogTypeValue = (typeof logTypeValues)[number]
 
+type CommonLogsFilterDraft = {
+  searchSignature: string
+  filters: CommonLogFilters
+  logType: LogTypeValue | ''
+}
+
 function isLogTypeValue(value: string): value is LogTypeValue {
   return (logTypeValues as readonly string[]).includes(value)
 }
@@ -71,33 +77,45 @@ export function CommonLogsFilterBar<TData>(
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
-  const [filters, setFilters] = useState<CommonLogFilters>(() => {
+  const searchDraft = useMemo<CommonLogsFilterDraft>(() => {
     const { start, end } = getDefaultTimeRange()
-    return { startTime: start, endTime: end }
-  })
-  const [logType, setLogType] = useState<LogTypeValue | ''>('')
-
-  useEffect(() => {
-    const next: Partial<CommonLogFilters> = {}
-    if (searchParams.startTime)
-      next.startTime = new Date(searchParams.startTime)
-    if (searchParams.endTime) next.endTime = new Date(searchParams.endTime)
-    if (searchParams.channel) next.channel = String(searchParams.channel)
-    if (searchParams.model) next.model = searchParams.model
-    if (searchParams.token) next.token = searchParams.token
-    if (searchParams.group) next.group = searchParams.group
-    if (searchParams.username) next.username = searchParams.username
-    if (searchParams.requestId) next.requestId = searchParams.requestId
-    if (searchParams.upstreamRequestId)
-      next.upstreamRequestId = searchParams.upstreamRequestId
-
-    if (Object.keys(next).length > 0) {
-      setFilters((prev) => ({ ...prev, ...next }))
-    }
-
     const typeArr = searchParams.type
-    if (Array.isArray(typeArr) && typeArr.length === 1) {
-      setLogType(typeArr[0])
+    const nextLogType =
+      Array.isArray(typeArr) &&
+      typeArr.length === 1 &&
+      isLogTypeValue(typeArr[0])
+        ? typeArr[0]
+        : ''
+    const nextFilters: CommonLogFilters = {
+      startTime: searchParams.startTime
+        ? new Date(searchParams.startTime)
+        : start,
+      endTime: searchParams.endTime ? new Date(searchParams.endTime) : end,
+    }
+    if (searchParams.channel) nextFilters.channel = String(searchParams.channel)
+    if (searchParams.model) nextFilters.model = searchParams.model
+    if (searchParams.token) nextFilters.token = searchParams.token
+    if (searchParams.group) nextFilters.group = searchParams.group
+    if (searchParams.username) nextFilters.username = searchParams.username
+    if (searchParams.requestId) nextFilters.requestId = searchParams.requestId
+    if (searchParams.upstreamRequestId)
+      nextFilters.upstreamRequestId = searchParams.upstreamRequestId
+
+    return {
+      searchSignature: JSON.stringify([
+        searchParams.startTime ?? '',
+        searchParams.endTime ?? '',
+        searchParams.channel ?? '',
+        searchParams.model ?? '',
+        searchParams.token ?? '',
+        searchParams.group ?? '',
+        searchParams.username ?? '',
+        searchParams.requestId ?? '',
+        searchParams.upstreamRequestId ?? '',
+        Array.isArray(typeArr) ? typeArr.join(',') : '',
+      ]),
+      filters: nextFilters,
+      logType: nextLogType,
     }
   }, [
     searchParams.startTime,
@@ -111,10 +129,22 @@ export function CommonLogsFilterBar<TData>(
     searchParams.upstreamRequestId,
     searchParams.type,
   ])
+  const [draft, setDraft] = useState<CommonLogsFilterDraft>(searchDraft)
+  const activeDraft =
+    draft.searchSignature === searchDraft.searchSignature ? draft : searchDraft
+  const filters = activeDraft.filters
+  const logType = activeDraft.logType
+
+  if (draft.searchSignature !== searchDraft.searchSignature) {
+    setDraft(searchDraft)
+  }
 
   const handleChange = useCallback(
     (field: keyof CommonLogFilters, value: Date | string | undefined) => {
-      setFilters((prev) => ({ ...prev, [field]: value }))
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        filters: { ...currentDraft.filters, [field]: value },
+      }))
     },
     []
   )
@@ -137,8 +167,11 @@ export function CommonLogsFilterBar<TData>(
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: CommonLogFilters = { startTime: start, endTime: end }
-    setFilters(resetFilters)
-    setLogType('')
+    setDraft({
+      searchSignature: searchDraft.searchSignature,
+      filters: resetFilters,
+      logType: '',
+    })
 
     navigate({
       to: '/usage-logs/$section',
@@ -151,7 +184,7 @@ export function CommonLogsFilterBar<TData>(
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
     queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [navigate, queryClient])
+  }, [navigate, queryClient, searchDraft.searchSignature])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -239,7 +272,10 @@ export function CommonLogsFilterBar<TData>(
             ]}
             value={logType}
             onValueChange={(value) => {
-              setLogType(value !== null && isLogTypeValue(value) ? value : '')
+              setDraft((currentDraft) => ({
+                ...currentDraft,
+                logType: value !== null && isLogTypeValue(value) ? value : '',
+              }))
             }}
           >
             <SelectTrigger className={inputClass}>
@@ -297,9 +333,7 @@ export function CommonLogsFilterBar<TData>(
           <Input
             placeholder={t('Upstream Request ID')}
             value={filters.upstreamRequestId || ''}
-            onChange={(e) =>
-              handleChange('upstreamRequestId', e.target.value)
-            }
+            onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
             onKeyDown={handleKeyDown}
             className={inputClass}
           />

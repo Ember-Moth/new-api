@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo, useEffect, useCallback, memo } from 'react'
+import { useState, useMemo, useCallback, memo } from 'react'
 import { Pencil, Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -756,32 +756,49 @@ type GroupPricingTableProps = {
   onChange: (field: string, value: string) => void
 }
 
+type GroupPricingTableState = {
+  sourceSignature: string
+  rows: GroupPricingRow[]
+}
+
 function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   onChange,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
-  const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups)
+  const sourceSignature = useMemo(
+    () => sourceGroupPricingSignature(groupRatio, userUsableGroups),
+    [groupRatio, userUsableGroups]
   )
+  const sourceRows = useMemo(
+    () => buildGroupPricingRows(groupRatio, userUsableGroups),
+    [groupRatio, userUsableGroups]
+  )
+  const [rowState, setRowState] = useState<GroupPricingTableState>(() => ({
+    sourceSignature,
+    rows: sourceRows,
+  }))
+  const currentRowsSignature = groupPricingSignature(rowState.rows)
+  const rows =
+    rowState.sourceSignature === sourceSignature ||
+    currentRowsSignature === sourceSignature
+      ? rowState.rows
+      : sourceRows
 
-  useEffect(() => {
-    const incomingSignature = sourceGroupPricingSignature(
-      groupRatio,
-      userUsableGroups
-    )
-    setRows((currentRows) => {
-      if (groupPricingSignature(currentRows) === incomingSignature) {
-        return currentRows
-      }
-      return buildGroupPricingRows(groupRatio, userUsableGroups)
+  if (rowState.sourceSignature !== sourceSignature) {
+    setRowState({
+      sourceSignature,
+      rows,
     })
-  }, [groupRatio, userUsableGroups])
+  }
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
-      setRows(nextRows)
+      setRowState((currentState) => ({
+        ...currentState,
+        rows: nextRows,
+      }))
       const serialized = serializeGroupPricingRows(nextRows)
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
@@ -984,6 +1001,12 @@ type SimpleGroupDialogProps = {
   type: 'groupRatio' | 'topupGroupRatio' | null
 }
 
+type SimpleGroupFormState = {
+  formKey: string
+  name: string
+  value: string
+}
+
 function SimpleGroupDialog({
   open,
   onOpenChange,
@@ -992,27 +1015,39 @@ function SimpleGroupDialog({
   type,
 }: SimpleGroupDialogProps) {
   const { t } = useTranslation()
-  const [name, setName] = useState('')
-  const [value, setValue] = useState('')
-
   const title = type === 'groupRatio' ? t('group ratio') : t('top-up ratio')
+  const nextFormState = useMemo<SimpleGroupFormState>(
+    () => ({
+      formKey: JSON.stringify([
+        open,
+        type ?? '',
+        editData?.name ?? '',
+        editData?.value ?? '',
+      ]),
+      name: open ? (editData?.name ?? '') : '',
+      value: open ? (editData?.value ?? '') : '',
+    }),
+    [editData?.name, editData?.value, open, type]
+  )
+  const [formState, setFormState] =
+    useState<SimpleGroupFormState>(nextFormState)
+  const activeFormState =
+    formState.formKey === nextFormState.formKey ? formState : nextFormState
+  const name = activeFormState.name
+  const value = activeFormState.value
 
-  useEffect(() => {
-    if (!open) {
-      setName('')
-      setValue('')
-      return
-    }
-
-    setName(editData?.name ?? '')
-    setValue(editData?.value ?? '')
-  }, [editData, open])
+  if (formState.formKey !== nextFormState.formKey) {
+    setFormState(nextFormState)
+  }
 
   const handleSave = () => {
     if (!name.trim() || !value.trim()) return
     onSave(name.trim(), value.trim())
-    setName('')
-    setValue('')
+    setFormState({
+      formKey: nextFormState.formKey,
+      name: '',
+      value: '',
+    })
   }
 
   return (
@@ -1033,7 +1068,12 @@ function SimpleGroupDialog({
             <Label>{t('Group name')}</Label>
             <Input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) =>
+                setFormState((currentState) => ({
+                  ...currentState,
+                  name: e.target.value,
+                }))
+              }
               placeholder={t('default')}
               disabled={!!editData}
             />
@@ -1045,7 +1085,10 @@ function SimpleGroupDialog({
               onChange={(e) => {
                 const val = e.target.value
                 if (val === '' || !isNaN(parseFloat(val))) {
-                  setValue(val)
+                  setFormState((currentState) => ({
+                    ...currentState,
+                    value: val,
+                  }))
                 }
               }}
               placeholder='1.0'
@@ -1074,6 +1117,12 @@ type GroupOverrideDialogProps = {
   userGroup: string | null
 }
 
+type GroupOverrideFormState = {
+  formKey: string
+  targetGroup: string
+  ratio: string
+}
+
 function GroupOverrideDialog({
   open,
   onOpenChange,
@@ -1082,19 +1131,30 @@ function GroupOverrideDialog({
   userGroup,
 }: GroupOverrideDialogProps) {
   const { t } = useTranslation()
-  const [targetGroup, setTargetGroup] = useState('')
-  const [ratio, setRatio] = useState('')
+  const nextFormState = useMemo<GroupOverrideFormState>(
+    () => ({
+      formKey: JSON.stringify([
+        open,
+        editData?.targetGroup ?? '',
+        editData?.ratio ?? '',
+        userGroup ?? '',
+      ]),
+      targetGroup: open ? (editData?.targetGroup ?? '') : '',
+      ratio:
+        open && editData?.ratio !== undefined ? String(editData.ratio) : '',
+    }),
+    [editData?.ratio, editData?.targetGroup, open, userGroup]
+  )
+  const [formState, setFormState] =
+    useState<GroupOverrideFormState>(nextFormState)
+  const activeFormState =
+    formState.formKey === nextFormState.formKey ? formState : nextFormState
+  const targetGroup = activeFormState.targetGroup
+  const ratio = activeFormState.ratio
 
-  useEffect(() => {
-    if (!open) {
-      setTargetGroup('')
-      setRatio('')
-      return
-    }
-
-    setTargetGroup(editData?.targetGroup ?? '')
-    setRatio(editData ? String(editData.ratio) : '')
-  }, [editData, open])
+  if (formState.formKey !== nextFormState.formKey) {
+    setFormState(nextFormState)
+  }
 
   const handleSave = () => {
     if (!targetGroup.trim() || !ratio.trim()) return
@@ -1102,8 +1162,11 @@ function GroupOverrideDialog({
     if (isNaN(parsedRatio)) return
 
     onSave(targetGroup.trim(), parsedRatio, editData?.targetGroup)
-    setTargetGroup('')
-    setRatio('')
+    setFormState({
+      formKey: nextFormState.formKey,
+      targetGroup: '',
+      ratio: '',
+    })
   }
 
   return (
@@ -1129,7 +1192,12 @@ function GroupOverrideDialog({
             <Label>{t('Target group')}</Label>
             <Input
               value={targetGroup}
-              onChange={(e) => setTargetGroup(e.target.value)}
+              onChange={(e) =>
+                setFormState((currentState) => ({
+                  ...currentState,
+                  targetGroup: e.target.value,
+                }))
+              }
               placeholder={t('edit_this')}
               disabled={!!editData}
             />
@@ -1144,7 +1212,10 @@ function GroupOverrideDialog({
               onChange={(e) => {
                 const val = e.target.value
                 if (val === '' || !isNaN(parseFloat(val))) {
-                  setRatio(val)
+                  setFormState((currentState) => ({
+                    ...currentState,
+                    ratio: val,
+                  }))
                 }
               }}
               placeholder='0.9'
