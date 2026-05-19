@@ -73,6 +73,7 @@ const PAYMENT_TYPES = [
   { value: 'alipay', label: 'Alipay' },
   { value: 'wxpay', label: 'WeChat Pay' },
   { value: 'stripe', label: 'Stripe' },
+  { value: 'stripe_payment_intent', label: 'Stripe Payment Element' },
 ]
 
 const getColorPreview = (color: string) => {

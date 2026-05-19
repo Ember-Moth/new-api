@@ -260,6 +260,34 @@ export function BillingHistoryDialog({
                               {formatNumber(record.money)}
                             </div>
                           </div>
+                          {record.gateway_trade_no && (
+                            <div className='space-y-1 sm:col-span-3'>
+                              <Label className='text-muted-foreground text-xs'>
+                                {t('Gateway Order')}
+                              </Label>
+                              <div className='flex min-w-0 items-center gap-2'>
+                                <code className='text-foreground truncate font-mono text-sm'>
+                                  {record.gateway_trade_no}
+                                </code>
+                                <Button
+                                  variant='ghost'
+                                  size='sm'
+                                  className='h-5 w-5 p-0'
+                                  onClick={() =>
+                                    copyToClipboard(
+                                      record.gateway_trade_no || ''
+                                    )
+                                  }
+                                >
+                                  {copiedText === record.gateway_trade_no ? (
+                                    <Check className='h-3 w-3' />
+                                  ) : (
+                                    <Copy className='h-3 w-3' />
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Admin Actions */}

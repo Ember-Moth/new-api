@@ -57,6 +57,8 @@ const SENSITIVE_OPTION_KEYS = new Set([
   'EpayKey',
   'StripeApiSecret',
   'StripeWebhookSecret',
+  'StripePaymentIntentApiSecret',
+  'StripePaymentIntentWebhookSecret',
   'CreemApiKey',
   'CreemWebhookSecret',
   'WaffoApiKey',

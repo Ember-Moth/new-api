@@ -247,6 +247,15 @@ export type BillingSettings = {
   StripeUnitPrice: number
   StripeMinTopUp: number
   StripePromotionCodesEnabled: boolean
+  StripePaymentIntentEnabled: boolean
+  StripePaymentIntentPublishableKey: string
+  StripePaymentIntentApiSecret: string
+  StripePaymentIntentApiSecret_configured: boolean
+  StripePaymentIntentWebhookSecret: string
+  StripePaymentIntentWebhookSecret_configured: boolean
+  StripePaymentIntentCurrency: string
+  StripePaymentIntentUnitPrice: number
+  StripePaymentIntentMinTopUp: number
   CreemApiKey: string
   CreemApiKey_configured: boolean
   CreemWebhookSecret: string

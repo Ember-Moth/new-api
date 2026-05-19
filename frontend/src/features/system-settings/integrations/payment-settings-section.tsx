@@ -124,6 +124,13 @@ const paymentSchema = z.object({
   StripeUnitPrice: z.coerce.number().min(0),
   StripeMinTopUp: z.coerce.number().min(0),
   StripePromotionCodesEnabled: z.boolean(),
+  StripePaymentIntentEnabled: z.boolean(),
+  StripePaymentIntentPublishableKey: z.string(),
+  StripePaymentIntentApiSecret: z.string(),
+  StripePaymentIntentWebhookSecret: z.string(),
+  StripePaymentIntentCurrency: z.string(),
+  StripePaymentIntentUnitPrice: z.coerce.number().min(0),
+  StripePaymentIntentMinTopUp: z.coerce.number().min(0),
   CreemApiKey: z.string(),
   CreemWebhookSecret: z.string(),
   CreemTestMode: z.boolean(),
@@ -153,6 +160,8 @@ type PaymentSecretConfigured = {
   EpayKey?: boolean
   StripeApiSecret?: boolean
   StripeWebhookSecret?: boolean
+  StripePaymentIntentApiSecret?: boolean
+  StripePaymentIntentWebhookSecret?: boolean
   CreemApiKey?: boolean
   CreemWebhookSecret?: boolean
 }
@@ -487,6 +496,132 @@ export function PaymentSettingsSection({
     }
   }
 
+  const saveStripePaymentIntentSettings = async () => {
+    const values = form.getValues()
+    const sanitized = {
+      StripePaymentIntentEnabled: values.StripePaymentIntentEnabled as boolean,
+      StripePaymentIntentPublishableKey:
+        values.StripePaymentIntentPublishableKey.trim(),
+      StripePaymentIntentApiSecret: values.StripePaymentIntentApiSecret.trim(),
+      StripePaymentIntentWebhookSecret:
+        values.StripePaymentIntentWebhookSecret.trim(),
+      StripePaymentIntentCurrency:
+        values.StripePaymentIntentCurrency.trim().toLowerCase(),
+      StripePaymentIntentUnitPrice:
+        values.StripePaymentIntentUnitPrice as number,
+      StripePaymentIntentMinTopUp: values.StripePaymentIntentMinTopUp as number,
+    }
+
+    const initial = {
+      StripePaymentIntentEnabled: initialRef.current.StripePaymentIntentEnabled,
+      StripePaymentIntentPublishableKey:
+        initialRef.current.StripePaymentIntentPublishableKey.trim(),
+      StripePaymentIntentApiSecret:
+        initialRef.current.StripePaymentIntentApiSecret.trim(),
+      StripePaymentIntentWebhookSecret:
+        initialRef.current.StripePaymentIntentWebhookSecret.trim(),
+      StripePaymentIntentCurrency:
+        initialRef.current.StripePaymentIntentCurrency.trim().toLowerCase(),
+      StripePaymentIntentUnitPrice:
+        initialRef.current.StripePaymentIntentUnitPrice,
+      StripePaymentIntentMinTopUp:
+        initialRef.current.StripePaymentIntentMinTopUp,
+    }
+
+    const updates: Array<{ key: string; value: string | number | boolean }> = []
+
+    if (
+      sanitized.StripePaymentIntentEnabled !==
+      initial.StripePaymentIntentEnabled
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentEnabled',
+        value: sanitized.StripePaymentIntentEnabled,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentPublishableKey !==
+      initial.StripePaymentIntentPublishableKey
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentPublishableKey',
+        value: sanitized.StripePaymentIntentPublishableKey,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentApiSecret &&
+      sanitized.StripePaymentIntentApiSecret !==
+        initial.StripePaymentIntentApiSecret
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentApiSecret',
+        value: sanitized.StripePaymentIntentApiSecret,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentWebhookSecret &&
+      sanitized.StripePaymentIntentWebhookSecret !==
+        initial.StripePaymentIntentWebhookSecret
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentWebhookSecret',
+        value: sanitized.StripePaymentIntentWebhookSecret,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentCurrency !==
+      initial.StripePaymentIntentCurrency
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentCurrency',
+        value: sanitized.StripePaymentIntentCurrency,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentUnitPrice !==
+      initial.StripePaymentIntentUnitPrice
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentUnitPrice',
+        value: sanitized.StripePaymentIntentUnitPrice,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentMinTopUp !==
+      initial.StripePaymentIntentMinTopUp
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentMinTopUp',
+        value: sanitized.StripePaymentIntentMinTopUp,
+      })
+    }
+
+    if (updates.length === 0) {
+      return
+    }
+
+    for (const update of updates) {
+      await updateOption.mutateAsync(update)
+    }
+
+    if (sanitized.StripePaymentIntentApiSecret) {
+      form.setValue('StripePaymentIntentApiSecret', '', {
+        shouldDirty: false,
+      })
+    }
+    if (sanitized.StripePaymentIntentWebhookSecret) {
+      form.setValue('StripePaymentIntentWebhookSecret', '', {
+        shouldDirty: false,
+      })
+    }
+  }
+
   const saveCreemSettings = async () => {
     const values = form.getValues()
     const sanitized = {
@@ -566,6 +701,16 @@ export function PaymentSettingsSection({
       StripeUnitPrice: values.StripeUnitPrice,
       StripeMinTopUp: values.StripeMinTopUp,
       StripePromotionCodesEnabled: values.StripePromotionCodesEnabled,
+      StripePaymentIntentEnabled: values.StripePaymentIntentEnabled,
+      StripePaymentIntentPublishableKey:
+        values.StripePaymentIntentPublishableKey.trim(),
+      StripePaymentIntentApiSecret: values.StripePaymentIntentApiSecret.trim(),
+      StripePaymentIntentWebhookSecret:
+        values.StripePaymentIntentWebhookSecret.trim(),
+      StripePaymentIntentCurrency:
+        values.StripePaymentIntentCurrency.trim().toLowerCase(),
+      StripePaymentIntentUnitPrice: values.StripePaymentIntentUnitPrice,
+      StripePaymentIntentMinTopUp: values.StripePaymentIntentMinTopUp,
       CreemApiKey: values.CreemApiKey.trim(),
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
@@ -591,6 +736,19 @@ export function PaymentSettingsSection({
       StripeMinTopUp: initialRef.current.StripeMinTopUp,
       StripePromotionCodesEnabled:
         initialRef.current.StripePromotionCodesEnabled,
+      StripePaymentIntentEnabled: initialRef.current.StripePaymentIntentEnabled,
+      StripePaymentIntentPublishableKey:
+        initialRef.current.StripePaymentIntentPublishableKey.trim(),
+      StripePaymentIntentApiSecret:
+        initialRef.current.StripePaymentIntentApiSecret.trim(),
+      StripePaymentIntentWebhookSecret:
+        initialRef.current.StripePaymentIntentWebhookSecret.trim(),
+      StripePaymentIntentCurrency:
+        initialRef.current.StripePaymentIntentCurrency.trim().toLowerCase(),
+      StripePaymentIntentUnitPrice:
+        initialRef.current.StripePaymentIntentUnitPrice,
+      StripePaymentIntentMinTopUp:
+        initialRef.current.StripePaymentIntentMinTopUp,
       CreemApiKey: initialRef.current.CreemApiKey.trim(),
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
@@ -693,6 +851,78 @@ export function PaymentSettingsSection({
     }
 
     if (
+      sanitized.StripePaymentIntentEnabled !==
+      initial.StripePaymentIntentEnabled
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentEnabled',
+        value: sanitized.StripePaymentIntentEnabled,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentPublishableKey !==
+      initial.StripePaymentIntentPublishableKey
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentPublishableKey',
+        value: sanitized.StripePaymentIntentPublishableKey,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentApiSecret &&
+      sanitized.StripePaymentIntentApiSecret !==
+        initial.StripePaymentIntentApiSecret
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentApiSecret',
+        value: sanitized.StripePaymentIntentApiSecret,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentWebhookSecret &&
+      sanitized.StripePaymentIntentWebhookSecret !==
+        initial.StripePaymentIntentWebhookSecret
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentWebhookSecret',
+        value: sanitized.StripePaymentIntentWebhookSecret,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentCurrency !==
+      initial.StripePaymentIntentCurrency
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentCurrency',
+        value: sanitized.StripePaymentIntentCurrency,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentUnitPrice !==
+      initial.StripePaymentIntentUnitPrice
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentUnitPrice',
+        value: sanitized.StripePaymentIntentUnitPrice,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentMinTopUp !==
+      initial.StripePaymentIntentMinTopUp
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentMinTopUp',
+        value: sanitized.StripePaymentIntentMinTopUp,
+      })
+    }
+
+    if (
       sanitized.CreemApiKey &&
       sanitized.CreemApiKey !== initial.CreemApiKey
     ) {
@@ -732,6 +962,16 @@ export function PaymentSettingsSection({
     }
     if (sanitized.StripeWebhookSecret) {
       form.setValue('StripeWebhookSecret', '', { shouldDirty: false })
+    }
+    if (sanitized.StripePaymentIntentApiSecret) {
+      form.setValue('StripePaymentIntentApiSecret', '', {
+        shouldDirty: false,
+      })
+    }
+    if (sanitized.StripePaymentIntentWebhookSecret) {
+      form.setValue('StripePaymentIntentWebhookSecret', '', {
+        shouldDirty: false,
+      })
     }
     if (sanitized.CreemApiKey) {
       form.setValue('CreemApiKey', '', { shouldDirty: false })
@@ -1382,6 +1622,246 @@ export function PaymentSettingsSection({
               {updateOption.isPending
                 ? t('Saving...')
                 : t('Save Stripe settings')}
+            </Button>
+          </div>
+
+          <Separator />
+
+          <div className='space-y-4'>
+            <div>
+              <h3 className='text-lg font-medium'>
+                {t('Stripe PaymentIntent Gateway')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'Configuration for embedded Stripe Payment Element payments'
+                )}
+              </p>
+            </div>
+
+            <div className='rounded-md bg-blue-50 p-4 text-sm text-blue-900 dark:bg-blue-950 dark:text-blue-100'>
+              <p className='mb-2 font-medium'>{t('Webhook Configuration:')}</p>
+              <ul className='list-inside list-disc space-y-1'>
+                <li>
+                  {t('Webhook URL:')}{' '}
+                  <code className='rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900'>
+                    {'<ServerAddress>/api/stripe-payment-intent/webhook'}
+                  </code>
+                </li>
+                <li>
+                  {t('Required events:')}{' '}
+                  <code className='rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900'>
+                    payment_intent.succeeded
+                  </code>
+                  {', '}
+                  <code className='rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900'>
+                    payment_intent.payment_failed
+                  </code>
+                  {', '}
+                  <code className='rounded bg-blue-100 px-1 py-0.5 text-xs dark:bg-blue-900'>
+                    payment_intent.canceled
+                  </code>
+                </li>
+                <li>
+                  {t(
+                    'This gateway creates PaymentIntents directly and does not use Stripe Price IDs.'
+                  )}
+                </li>
+              </ul>
+            </div>
+
+            <FormField
+              control={form.control}
+              name='StripePaymentIntentEnabled'
+              render={({ field }) => (
+                <FormItem className='flex flex-row items-center justify-between rounded-lg border p-4'>
+                  <div className='space-y-0.5'>
+                    <FormLabel className='text-base'>
+                      {t('Enable Stripe PaymentIntent')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Show Stripe Payment Element as an independent top-up gateway'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            <div className='grid gap-6 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='StripePaymentIntentPublishableKey'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Publishable key')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='pk_xxx'
+                        autoComplete='off'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Stripe publishable key used by Payment Element')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='StripePaymentIntentCurrency'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Currency')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='cny'
+                        {...field}
+                        onChange={(event) =>
+                          field.onChange(event.target.value.toLowerCase())
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Stripe charge currency, for example cny or usd')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='StripePaymentIntentApiSecret'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('API secret')}</FormLabel>
+                    <FormControl>
+                      <SecretInput
+                        configured={
+                          secretConfigured.StripePaymentIntentApiSecret
+                        }
+                        placeholder={t('sk_xxx or rk_xxx')}
+                        autoComplete='new-password'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Stripe API key (leave blank unless updating)')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='StripePaymentIntentWebhookSecret'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Webhook secret')}</FormLabel>
+                    <FormControl>
+                      <SecretInput
+                        configured={
+                          secretConfigured.StripePaymentIntentWebhookSecret
+                        }
+                        placeholder={t('whsec_xxx')}
+                        autoComplete='new-password'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Webhook signing secret (leave blank unless updating)'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='StripePaymentIntentUnitPrice'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('Unit price (charge currency / USD)')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        step='0.01'
+                        min={0}
+                        value={(field.value ?? 0) as number}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('e.g., 1 means 1 CNY is charged for each USD')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='StripePaymentIntentMinTopUp'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Minimum top-up (USD)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        step='0.01'
+                        min={0}
+                        value={(field.value ?? 0) as number}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Minimum recharge amount in USD')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <Button
+              type='button'
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                saveStripePaymentIntentSettings()
+              }}
+              disabled={updateOption.isPending}
+            >
+              {updateOption.isPending
+                ? t('Saving...')
+                : t('Save Stripe PaymentIntent settings')}
             </Button>
           </div>
 

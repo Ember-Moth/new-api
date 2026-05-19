@@ -28,6 +28,21 @@ func isStripeWebhookEnabled() bool {
 	return isStripeTopUpEnabled()
 }
 
+func isStripePaymentIntentTopUpEnabled() bool {
+	if !isPaymentComplianceConfirmed() {
+		return false
+	}
+	return setting.StripePaymentIntentEnabled &&
+		strings.TrimSpace(setting.StripePaymentIntentPublishableKey) != "" &&
+		strings.TrimSpace(setting.StripePaymentIntentApiSecret) != "" &&
+		strings.TrimSpace(setting.StripePaymentIntentWebhookSecret) != "" &&
+		strings.TrimSpace(setting.StripePaymentIntentCurrency) != ""
+}
+
+func isStripePaymentIntentWebhookEnabled() bool {
+	return strings.TrimSpace(setting.StripePaymentIntentWebhookSecret) != ""
+}
+
 func isCreemTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false

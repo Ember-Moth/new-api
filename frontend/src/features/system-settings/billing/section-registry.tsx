@@ -154,6 +154,20 @@ const BILLING_SECTIONS = [
           StripeUnitPrice: settings.StripeUnitPrice,
           StripeMinTopUp: settings.StripeMinTopUp,
           StripePromotionCodesEnabled: settings.StripePromotionCodesEnabled,
+          StripePaymentIntentEnabled:
+            settings.StripePaymentIntentEnabled ?? false,
+          StripePaymentIntentPublishableKey:
+            settings.StripePaymentIntentPublishableKey ?? '',
+          StripePaymentIntentApiSecret:
+            settings.StripePaymentIntentApiSecret ?? '',
+          StripePaymentIntentWebhookSecret:
+            settings.StripePaymentIntentWebhookSecret ?? '',
+          StripePaymentIntentCurrency:
+            settings.StripePaymentIntentCurrency ?? 'cny',
+          StripePaymentIntentUnitPrice:
+            settings.StripePaymentIntentUnitPrice ?? 1,
+          StripePaymentIntentMinTopUp:
+            settings.StripePaymentIntentMinTopUp ?? 1,
           CreemApiKey: settings.CreemApiKey,
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
@@ -163,6 +177,10 @@ const BILLING_SECTIONS = [
           EpayKey: settings.EpayKey_configured,
           StripeApiSecret: settings.StripeApiSecret_configured,
           StripeWebhookSecret: settings.StripeWebhookSecret_configured,
+          StripePaymentIntentApiSecret:
+            settings.StripePaymentIntentApiSecret_configured,
+          StripePaymentIntentWebhookSecret:
+            settings.StripePaymentIntentWebhookSecret_configured,
           CreemApiKey: settings.CreemApiKey_configured,
           CreemWebhookSecret: settings.CreemWebhookSecret_configured,
         }}

@@ -39,6 +39,14 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string
 }
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
+export type StripePaymentIntentResponse = ApiResponse<{
+  client_secret: string
+  publishable_key: string
+  trade_no: string
+  payment_intent_id: string
+  amount: number
+  currency: string
+}>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
@@ -119,12 +127,16 @@ export interface TopupInfo {
   enable_online_topup: boolean
   /** Whether Stripe topup is enabled */
   enable_stripe_topup: boolean
+  /** Whether Stripe PaymentIntent topup is enabled */
+  enable_stripe_payment_intent_topup?: boolean
   /** Available payment methods */
   pay_methods: PaymentMethod[]
   /** Minimum topup amount for online topup */
   min_topup: number
   /** Minimum topup amount for Stripe */
   stripe_min_topup: number
+  /** Minimum topup amount for Stripe PaymentIntent */
+  stripe_payment_intent_min_topup?: number
   /** Preset amount options */
   amount_options: number[]
   /** Discount rates by amount */
@@ -242,7 +254,7 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus = 'success' | 'pending' | 'expired' | 'failed'
 
 /**
  * Topup billing record
@@ -258,6 +270,12 @@ export interface TopupRecord {
   money: number
   /** Trade/order number */
   trade_no: string
+  /** Third-party payment gateway order number */
+  gateway_trade_no?: string
+  /** Third-party payment gateway amount in minor units */
+  gateway_amount?: number
+  /** Third-party payment gateway currency */
+  gateway_currency?: string
   /** Payment method type */
   payment_method: string
   /** Creation timestamp */

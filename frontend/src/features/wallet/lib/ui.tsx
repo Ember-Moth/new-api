@@ -101,6 +101,7 @@ export function getPaymentIcon(
         />
       )
     case PAYMENT_TYPES.STRIPE:
+    case PAYMENT_TYPES.STRIPE_PAYMENT_INTENT:
       return (
         <SiStripe
           className={className}

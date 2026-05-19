@@ -66,6 +66,24 @@ func insertTopUpForPaymentGuardTest(t *testing.T, tradeNo string, userID int, pa
 	require.NoError(t, topUp.Insert())
 }
 
+func insertStripePaymentIntentTopUpForPaymentGuardTest(t *testing.T, tradeNo string, userID int, gatewayTradeNo string, gatewayAmount int64, gatewayCurrency string) {
+	t.Helper()
+	topUp := &TopUp{
+		UserId:          userID,
+		Amount:          2,
+		Money:           2,
+		TradeNo:         tradeNo,
+		GatewayTradeNo:  gatewayTradeNo,
+		GatewayAmount:   gatewayAmount,
+		GatewayCurrency: gatewayCurrency,
+		PaymentMethod:   PaymentMethodStripeIntent,
+		PaymentProvider: PaymentProviderStripeIntent,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, topUp.Insert())
+}
+
 func getTopUpStatusForPaymentGuardTest(t *testing.T, tradeNo string) string {
 	t.Helper()
 	topUp := GetTopUpByTradeNo(tradeNo)
@@ -85,6 +103,73 @@ func getUserQuotaForPaymentGuardTest(t *testing.T, userID int) int {
 	var user User
 	require.NoError(t, DB.Select("quota").Where("id = ?", userID).First(&user).Error)
 	return user.Quota
+}
+
+func TestRechargeStripePaymentIntent_RequiresGatewayAmountAndCurrencyMatch(t *testing.T) {
+	testCases := []struct {
+		name            string
+		gatewayTradeNo  string
+		gatewayAmount   int64
+		gatewayCurrency string
+		expectedError   error
+	}{
+		{
+			name:            "gateway trade number mismatch",
+			gatewayTradeNo:  "pi_other",
+			gatewayAmount:   100,
+			gatewayCurrency: "cny",
+			expectedError:   ErrGatewayTradeNoMismatch,
+		},
+		{
+			name:            "amount mismatch",
+			gatewayTradeNo:  "pi_expected",
+			gatewayAmount:   101,
+			gatewayCurrency: "cny",
+			expectedError:   ErrTopUpAmountMismatch,
+		},
+		{
+			name:            "currency mismatch",
+			gatewayTradeNo:  "pi_expected",
+			gatewayAmount:   100,
+			gatewayCurrency: "usd",
+			expectedError:   ErrTopUpCurrencyMismatch,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			truncateTables(t)
+			insertUserForPaymentGuardTest(t, 175, 0)
+			insertStripePaymentIntentTopUpForPaymentGuardTest(t, "stripe-pi-guard", 175, "pi_expected", 100, "cny")
+
+			err := RechargeStripePaymentIntent("stripe-pi-guard", tc.gatewayTradeNo, tc.gatewayAmount, tc.gatewayCurrency, "127.0.0.1")
+			require.ErrorIs(t, err, tc.expectedError)
+			assert.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, "stripe-pi-guard"))
+			assert.Equal(t, 0, getUserQuotaForPaymentGuardTest(t, 175))
+		})
+	}
+}
+
+func TestRechargeStripePaymentIntent_CompletesMatchingOrder(t *testing.T) {
+	truncateTables(t)
+	insertUserForPaymentGuardTest(t, 176, 0)
+	insertStripePaymentIntentTopUpForPaymentGuardTest(t, "stripe-pi-success", 176, "pi_success", 100, "cny")
+
+	err := RechargeStripePaymentIntent("stripe-pi-success", "pi_success", 100, "CNY", "127.0.0.1")
+	require.NoError(t, err)
+
+	assert.Equal(t, common.TopUpStatusSuccess, getTopUpStatusForPaymentGuardTest(t, "stripe-pi-success"))
+	assert.Equal(t, int(2*common.QuotaPerUnit), getUserQuotaForPaymentGuardTest(t, 176))
+}
+
+func TestUpdatePendingTopUpStatusWithGatewayTradeNo_RejectsMismatchedGatewayTradeNo(t *testing.T) {
+	truncateTables(t)
+	insertUserForPaymentGuardTest(t, 177, 0)
+	insertStripePaymentIntentTopUpForPaymentGuardTest(t, "stripe-pi-failed", 177, "pi_expected", 100, "cny")
+
+	err := UpdatePendingTopUpStatusWithGatewayTradeNo("stripe-pi-failed", PaymentProviderStripeIntent, "pi_other", common.TopUpStatusFailed)
+	require.ErrorIs(t, err, ErrGatewayTradeNoMismatch)
+	assert.Equal(t, common.TopUpStatusPending, getTopUpStatusForPaymentGuardTest(t, "stripe-pi-failed"))
 }
 
 func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {

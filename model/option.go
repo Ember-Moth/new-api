@@ -86,6 +86,13 @@ func InitOptionMap() {
 	common.OptionMap["StripePriceId"] = setting.StripePriceId
 	common.OptionMap["StripeUnitPrice"] = strconv.FormatFloat(setting.StripeUnitPrice, 'f', -1, 64)
 	common.OptionMap["StripePromotionCodesEnabled"] = strconv.FormatBool(setting.StripePromotionCodesEnabled)
+	common.OptionMap["StripePaymentIntentEnabled"] = strconv.FormatBool(setting.StripePaymentIntentEnabled)
+	common.OptionMap["StripePaymentIntentPublishableKey"] = setting.StripePaymentIntentPublishableKey
+	common.OptionMap["StripePaymentIntentApiSecret"] = setting.StripePaymentIntentApiSecret
+	common.OptionMap["StripePaymentIntentWebhookSecret"] = setting.StripePaymentIntentWebhookSecret
+	common.OptionMap["StripePaymentIntentCurrency"] = setting.StripePaymentIntentCurrency
+	common.OptionMap["StripePaymentIntentUnitPrice"] = strconv.FormatFloat(setting.StripePaymentIntentUnitPrice, 'f', -1, 64)
+	common.OptionMap["StripePaymentIntentMinTopUp"] = strconv.Itoa(setting.StripePaymentIntentMinTopUp)
 	common.OptionMap["CreemApiKey"] = setting.CreemApiKey
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
@@ -381,6 +388,20 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StripeMinTopUp, _ = strconv.Atoi(value)
 	case "StripePromotionCodesEnabled":
 		setting.StripePromotionCodesEnabled = value == "true"
+	case "StripePaymentIntentEnabled":
+		setting.StripePaymentIntentEnabled = value == "true"
+	case "StripePaymentIntentPublishableKey":
+		setting.StripePaymentIntentPublishableKey = value
+	case "StripePaymentIntentApiSecret":
+		setting.StripePaymentIntentApiSecret = value
+	case "StripePaymentIntentWebhookSecret":
+		setting.StripePaymentIntentWebhookSecret = value
+	case "StripePaymentIntentCurrency":
+		setting.StripePaymentIntentCurrency = strings.ToLower(strings.TrimSpace(value))
+	case "StripePaymentIntentUnitPrice":
+		setting.StripePaymentIntentUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "StripePaymentIntentMinTopUp":
+		setting.StripePaymentIntentMinTopUp, _ = strconv.Atoi(value)
 	case "CreemApiKey":
 		setting.CreemApiKey = value
 	case "CreemProducts":

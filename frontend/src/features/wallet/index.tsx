@@ -26,16 +26,19 @@ import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
+import { StripePaymentIntentDialog } from './components/dialogs/stripe-payment-intent-dialog'
 import { TransferDialog } from './components/dialogs/transfer-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE } from './constants'
 import {
+  type StripePaymentIntentData,
   useAffiliate,
   useCreemPayment,
   usePayment,
   useRedemption,
+  useStripePaymentIntent,
   useTopupInfo,
   useWaffoPancakePayment,
   useWaffoPayment,
@@ -43,6 +46,7 @@ import {
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
+  isStripePaymentIntentPayment,
   isWaffoPancakePayment,
 } from './lib'
 import type {
@@ -72,6 +76,10 @@ export function Wallet(props: WalletProps) {
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
+  const [stripePaymentIntentDialogOpen, setStripePaymentIntentDialogOpen] =
+    useState(false)
+  const [stripePaymentIntent, setStripePaymentIntent] =
+    useState<StripePaymentIntentData | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
 
   const { status } = useStatus()
@@ -99,6 +107,10 @@ export function Wallet(props: WalletProps) {
   } = useAffiliate()
   const { redeeming, redeemCode } = useRedemption()
   const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
+  const {
+    processing: stripePaymentIntentProcessing,
+    createStripePaymentIntent,
+  } = useStripePaymentIntent()
   const { processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
@@ -185,6 +197,16 @@ export function Wallet(props: WalletProps) {
   const handlePaymentConfirm = async () => {
     if (!selectedPaymentMethod) return
 
+    if (isStripePaymentIntentPayment(selectedPaymentMethod.type)) {
+      const intent = await createStripePaymentIntent(topupAmount)
+      if (intent) {
+        setStripePaymentIntent(intent)
+        setConfirmDialogOpen(false)
+        setStripePaymentIntentDialogOpen(true)
+      }
+      return
+    }
+
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
     const success = isPancake
       ? await processWaffoPancakePayment(topupAmount)
@@ -253,6 +275,16 @@ export function Wallet(props: WalletProps) {
   const handleSubscriptionAvailabilityChange = useCallback(
     (available: boolean) => {
       setShowSubscriptionPanel(available)
+    },
+    []
+  )
+
+  const handleStripePaymentIntentDialogOpenChange = useCallback(
+    (open: boolean) => {
+      setStripePaymentIntentDialogOpen(open)
+      if (!open) {
+        setStripePaymentIntent(null)
+      }
     },
     []
   )
@@ -336,7 +368,9 @@ export function Wallet(props: WalletProps) {
         paymentAmount={paymentAmount}
         paymentMethod={selectedPaymentMethod}
         calculating={calculating}
-        processing={processing || pancakeProcessing}
+        processing={
+          processing || pancakeProcessing || stripePaymentIntentProcessing
+        }
         discountRate={getDiscountRate()}
         usdExchangeRate={effectiveUsdExchangeRate}
       />
@@ -360,6 +394,13 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleCreemConfirm}
         product={selectedCreemProduct}
         processing={creemProcessing}
+      />
+
+      <StripePaymentIntentDialog
+        open={stripePaymentIntentDialogOpen}
+        onOpenChange={handleStripePaymentIntentDialogOpenChange}
+        paymentIntent={stripePaymentIntent}
+        onPaymentSettled={fetchUser}
       />
     </>
   )

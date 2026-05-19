@@ -32,6 +32,7 @@ import type {
   PaymentResponse,
   RedemptionRequest,
   RedemptionResponse,
+  StripePaymentIntentResponse,
   StripePaymentResponse,
   TopupInfoResponse,
   WaffoPancakePaymentRequest,
@@ -94,6 +95,22 @@ export async function calculateStripeAmount(
 }
 
 /**
+ * Calculate payment amount for Stripe PaymentIntent payment
+ */
+export async function calculateStripePaymentIntentAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post(
+    '/api/user/stripe-payment-intent/amount',
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
+  return res.data
+}
+
+/**
  * Request regular payment
  */
 export async function requestPayment(
@@ -115,6 +132,18 @@ export async function requestStripePayment(
   request: PaymentRequest
 ): Promise<StripePaymentResponse> {
   const res = await api.post('/api/user/stripe/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request Stripe PaymentIntent payment
+ */
+export async function requestStripePaymentIntent(
+  request: PaymentRequest
+): Promise<StripePaymentIntentResponse> {
+  const res = await api.post('/api/user/stripe-payment-intent/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data
