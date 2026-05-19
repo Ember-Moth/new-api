@@ -76,6 +76,13 @@ function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
   return payMethods.filter((m) => m?.type && !nonEpayTypes.has(m.type))
 }
 
+function getPaymentMethod(
+  payMethods: PaymentMethod[] = [],
+  type: string
+): PaymentMethod | undefined {
+  return payMethods.find((m) => m?.type === type)
+}
+
 function getBillingPreferenceLabel(
   preference: string,
   t: (key: string) => string
@@ -122,6 +129,10 @@ export function SubscriptionPlansCard({
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
   const epayMethods = useMemo(
     () => getEpayMethods(topupInfo?.pay_methods),
+    [topupInfo?.pay_methods]
+  )
+  const stripePaymentIntentMethod = useMemo(
+    () => getPaymentMethod(topupInfo?.pay_methods, 'stripe_payment_intent'),
     [topupInfo?.pay_methods]
   )
 
@@ -637,6 +648,7 @@ export function SubscriptionPlansCard({
         plan={selectedPlan}
         enableStripe={enableStripe}
         enableStripePaymentIntent={enableStripePaymentIntent}
+        stripePaymentIntentMethod={stripePaymentIntentMethod}
         enableCreem={enableCreem}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}

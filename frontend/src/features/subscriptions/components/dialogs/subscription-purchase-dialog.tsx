@@ -63,6 +63,7 @@ interface Props {
   plan: PlanRecord | null
   enableStripe?: boolean
   enableStripePaymentIntent?: boolean
+  stripePaymentIntentMethod?: PaymentMethod
   enableCreem?: boolean
   enableOnlineTopUp?: boolean
   epayMethods?: PaymentMethod[]
@@ -104,6 +105,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
       ?.name ||
     selectedEpayMethod ||
     t('Select payment method')
+  const stripePaymentIntentLabel =
+    props.stripePaymentIntentMethod?.name?.trim() || t('Stripe Payment Element')
   const totalAmount = Number(plan.total_amount || 0)
   const price = Number(plan.price_amount || 0).toFixed(2)
   const limitReached =
@@ -362,7 +365,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         onClick={handlePayStripePaymentIntent}
                         disabled={paying || limitReached}
                       >
-                        {t('Stripe Payment Element')}
+                        {stripePaymentIntentLabel}
                       </Button>
                     )}
                     {hasCreem && (

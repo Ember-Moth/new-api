@@ -24,12 +24,17 @@ import (
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
 	stripeTopUpVisible := isStripeTopUpVisible()
+	stripePaymentIntentTopUpEnabled := isStripePaymentIntentTopUpEnabled()
 
 	// 获取支付方式
 	payMethods := make([]map[string]string, 0, len(operation_setting.PayMethods))
 	if complianceConfirmed {
 		for _, method := range operation_setting.PayMethods {
-			if method["type"] == model.PaymentMethodStripe && !stripeTopUpVisible {
+			methodType := method["type"]
+			if methodType == model.PaymentMethodStripe && !stripeTopUpVisible {
+				continue
+			}
+			if methodType == model.PaymentMethodStripeIntent && !stripePaymentIntentTopUpEnabled {
 				continue
 			}
 			payMethods = append(payMethods, method)
@@ -58,7 +63,7 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
-	if isStripePaymentIntentTopUpEnabled() {
+	if stripePaymentIntentTopUpEnabled {
 		hasStripeIntent := false
 		for _, method := range payMethods {
 			if method["type"] == model.PaymentMethodStripeIntent {
@@ -68,12 +73,21 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 
 		if !hasStripeIntent {
-			payMethods = append(payMethods, map[string]string{
-				"name":      "Stripe Payment Element",
-				"type":      model.PaymentMethodStripeIntent,
-				"color":     "rgba(var(--semi-purple-5), 1)",
-				"min_topup": strconv.Itoa(setting.StripePaymentIntentMinTopUp),
-			})
+			stripeIntentMethod := getConfiguredPayMethod(model.PaymentMethodStripeIntent)
+			if stripeIntentMethod == nil {
+				stripeIntentMethod = map[string]string{}
+			}
+			if stripeIntentMethod["name"] == "" {
+				stripeIntentMethod["name"] = "Stripe Payment Element"
+			}
+			stripeIntentMethod["type"] = model.PaymentMethodStripeIntent
+			if stripeIntentMethod["color"] == "" {
+				stripeIntentMethod["color"] = "rgba(var(--semi-purple-5), 1)"
+			}
+			if stripeIntentMethod["min_topup"] == "" {
+				stripeIntentMethod["min_topup"] = strconv.Itoa(setting.StripePaymentIntentMinTopUp)
+			}
+			payMethods = append(payMethods, stripeIntentMethod)
 		}
 	}
 
@@ -122,7 +136,7 @@ func GetTopUpInfo(c *gin.Context) {
 	data := gin.H{
 		"enable_online_topup":                isEpayTopUpEnabled(),
 		"enable_stripe_topup":                stripeTopUpVisible,
-		"enable_stripe_payment_intent_topup": isStripePaymentIntentTopUpEnabled(),
+		"enable_stripe_payment_intent_topup": stripePaymentIntentTopUpEnabled,
 		"enable_creem_topup":                 isCreemTopUpEnabled(),
 		"enable_waffo_topup":                 enableWaffo,
 		"enable_waffo_pancake_topup":         enableWaffoPancake,
@@ -147,6 +161,20 @@ func GetTopUpInfo(c *gin.Context) {
 		"topup_link":                      common.TopUpLink,
 	}
 	common.ApiSuccess(c, data)
+}
+
+func getConfiguredPayMethod(methodType string) map[string]string {
+	for _, method := range operation_setting.PayMethods {
+		if method["type"] != methodType {
+			continue
+		}
+		copied := make(map[string]string, len(method))
+		for key, value := range method {
+			copied[key] = value
+		}
+		return copied
+	}
+	return nil
 }
 
 type EpayRequest struct {

@@ -117,7 +117,7 @@ func TestGetTopUpInfoHidesStripeCheckoutOnlyFromUserDisplay(t *testing.T) {
 	setting.StripePaymentIntentMinTopUp = 1
 	operation_setting.PayMethods = []map[string]string{
 		{"name": "Stripe", "type": model.PaymentMethodStripe},
-		{"name": "Stripe Payment Element", "type": model.PaymentMethodStripeIntent},
+		{"name": "Herta Payment", "type": model.PaymentMethodStripeIntent},
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -147,6 +147,11 @@ func TestGetTopUpInfoHidesStripeCheckoutOnlyFromUserDisplay(t *testing.T) {
 	}
 	require.NotContains(t, methodTypes, model.PaymentMethodStripe)
 	require.Contains(t, methodTypes, model.PaymentMethodStripeIntent)
+	for _, method := range response.Data.PayMethods {
+		if method["type"] == model.PaymentMethodStripeIntent {
+			require.Equal(t, "Herta Payment", method["name"])
+		}
+	}
 	require.True(t, isStripeTopUpEnabled())
 }
 
