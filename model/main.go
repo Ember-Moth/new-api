@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var commonGroupCol string
@@ -35,6 +36,10 @@ func initCol() {
 		logGroupCol = commonGroupCol
 		logKeyCol = commonKeyCol
 	}
+}
+
+func lockForUpdate(tx *gorm.DB) *gorm.DB {
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 }
 
 var DB *gorm.DB
@@ -210,7 +215,7 @@ func migrateDB() error {
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 		return err
 	}
-	return nil
+	return ensurePostgresPerformanceIndexes(DB)
 }
 
 func migrateDBFast() error {
@@ -273,6 +278,9 @@ func migrateDBFast() error {
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 		return err
 	}
+	if err := ensurePostgresPerformanceIndexes(DB); err != nil {
+		return err
+	}
 	common.SysLog("database migrated")
 	return nil
 }
@@ -281,6 +289,41 @@ func migrateLOGDB() error {
 	var err error
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
+	}
+	return ensurePostgresLogPerformanceIndexes(LOG_DB)
+}
+
+func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
+	if err := ensurePostgresLogPerformanceIndexes(db); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_abilities_lookup ON abilities ("group", model, enabled, priority DESC, weight DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id_id ON tasks (user_id, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_submit_time_id ON tasks (submit_time, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_create_id ON top_ups (user_id, create_time DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_user_model_created ON quota_data (user_id, username, model_name, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_created_model ON quota_data (created_at, model_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_end_id ON user_subscriptions (status, end_time, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_next_reset ON user_subscriptions (status, next_reset_time, id)`,
+	}
+	return execIndexStatements(db, statements)
+}
+
+func ensurePostgresLogPerformanceIndexes(db *gorm.DB) error {
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_logs_type_created_at ON logs (type, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_user_type_id ON logs (user_id, type, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_created_at_id_desc ON logs (created_at DESC, id DESC)`,
+	}
+	return execIndexStatements(db, statements)
+}
+
+func execIndexStatements(db *gorm.DB, statements []string) error {
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			return fmt.Errorf("failed to create PostgreSQL performance index: %w", err)
+		}
 	}
 	return nil
 }
