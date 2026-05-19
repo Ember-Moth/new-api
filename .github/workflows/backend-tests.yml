@@ -1,0 +1,96 @@
+name: Backend Tests
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/backend-tests.yml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'main.go'
+      - 'common/**'
+      - 'constant/**'
+      - 'controller/**'
+      - 'dto/**'
+      - 'i18n/**'
+      - 'internal/**'
+      - 'logger/**'
+      - 'middleware/**'
+      - 'model/**'
+      - 'oauth/**'
+      - 'pkg/**'
+      - 'relay/**'
+      - 'router/**'
+      - 'service/**'
+      - 'setting/**'
+      - 'types/**'
+  pull_request:
+    paths:
+      - '.github/workflows/backend-tests.yml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'main.go'
+      - 'common/**'
+      - 'constant/**'
+      - 'controller/**'
+      - 'dto/**'
+      - 'i18n/**'
+      - 'internal/**'
+      - 'logger/**'
+      - 'middleware/**'
+      - 'model/**'
+      - 'oauth/**'
+      - 'pkg/**'
+      - 'relay/**'
+      - 'router/**'
+      - 'service/**'
+      - 'setting/**'
+      - 'types/**'
+
+concurrency:
+  group: backend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    name: Go Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: newapi
+          POSTGRES_PASSWORD: newapi
+          POSTGRES_DB: newapi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U newapi -d newapi_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      SQL_DSN: postgresql://newapi:newapi@localhost:5432/newapi_test?sslmode=disable
+      TEST_POSTGRES_DSN: postgresql://newapi:newapi@localhost:5432/newapi_test?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '>=1.25.1'
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./...
