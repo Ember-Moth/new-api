@@ -89,6 +89,7 @@ const defaultBillingSettings: BillingSettings = {
   StripePaymentIntentCurrency: 'cny',
   StripePaymentIntentUnitPrice: 1,
   StripePaymentIntentMinTopUp: 1,
+  StripePaymentIntentPaymentMethodTypes: '',
   CreemApiKey: '',
   CreemApiKey_configured: false,
   CreemWebhookSecret: '',

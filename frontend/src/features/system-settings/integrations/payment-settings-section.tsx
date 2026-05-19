@@ -131,6 +131,7 @@ const paymentSchema = z.object({
   StripePaymentIntentCurrency: z.string(),
   StripePaymentIntentUnitPrice: z.coerce.number().min(0),
   StripePaymentIntentMinTopUp: z.coerce.number().min(0),
+  StripePaymentIntentPaymentMethodTypes: z.string(),
   CreemApiKey: z.string(),
   CreemWebhookSecret: z.string(),
   CreemTestMode: z.boolean(),
@@ -174,6 +175,19 @@ type PaymentSettingsSectionProps = {
   waffoPancakeDefaultValues: WaffoPancakeSettingsValues
   waffoPancakeSecretConfigured?: WaffoPancakeSecretConfigured
   complianceDefaults: PaymentComplianceDefaults
+}
+
+function normalizePaymentMethodTypes(value: string) {
+  const seen = new Set<string>()
+  return value
+    .split(/[,\s;]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => {
+      if (!item || seen.has(item)) return false
+      seen.add(item)
+      return true
+    })
+    .join(',')
 }
 
 export function PaymentSettingsSection({
@@ -510,6 +524,9 @@ export function PaymentSettingsSection({
       StripePaymentIntentUnitPrice:
         values.StripePaymentIntentUnitPrice as number,
       StripePaymentIntentMinTopUp: values.StripePaymentIntentMinTopUp as number,
+      StripePaymentIntentPaymentMethodTypes: normalizePaymentMethodTypes(
+        values.StripePaymentIntentPaymentMethodTypes
+      ),
     }
 
     const initial = {
@@ -526,6 +543,9 @@ export function PaymentSettingsSection({
         initialRef.current.StripePaymentIntentUnitPrice,
       StripePaymentIntentMinTopUp:
         initialRef.current.StripePaymentIntentMinTopUp,
+      StripePaymentIntentPaymentMethodTypes: normalizePaymentMethodTypes(
+        initialRef.current.StripePaymentIntentPaymentMethodTypes
+      ),
     }
 
     const updates: Array<{ key: string; value: string | number | boolean }> = []
@@ -599,6 +619,16 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'StripePaymentIntentMinTopUp',
         value: sanitized.StripePaymentIntentMinTopUp,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentPaymentMethodTypes !==
+      initial.StripePaymentIntentPaymentMethodTypes
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentPaymentMethodTypes',
+        value: sanitized.StripePaymentIntentPaymentMethodTypes,
       })
     }
 
@@ -711,6 +741,9 @@ export function PaymentSettingsSection({
         values.StripePaymentIntentCurrency.trim().toLowerCase(),
       StripePaymentIntentUnitPrice: values.StripePaymentIntentUnitPrice,
       StripePaymentIntentMinTopUp: values.StripePaymentIntentMinTopUp,
+      StripePaymentIntentPaymentMethodTypes: normalizePaymentMethodTypes(
+        values.StripePaymentIntentPaymentMethodTypes
+      ),
       CreemApiKey: values.CreemApiKey.trim(),
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
@@ -749,6 +782,9 @@ export function PaymentSettingsSection({
         initialRef.current.StripePaymentIntentUnitPrice,
       StripePaymentIntentMinTopUp:
         initialRef.current.StripePaymentIntentMinTopUp,
+      StripePaymentIntentPaymentMethodTypes: normalizePaymentMethodTypes(
+        initialRef.current.StripePaymentIntentPaymentMethodTypes
+      ),
       CreemApiKey: initialRef.current.CreemApiKey.trim(),
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
@@ -919,6 +955,16 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'StripePaymentIntentMinTopUp',
         value: sanitized.StripePaymentIntentMinTopUp,
+      })
+    }
+
+    if (
+      sanitized.StripePaymentIntentPaymentMethodTypes !==
+      initial.StripePaymentIntentPaymentMethodTypes
+    ) {
+      updates.push({
+        key: 'StripePaymentIntentPaymentMethodTypes',
+        value: sanitized.StripePaymentIntentPaymentMethodTypes,
       })
     }
 
@@ -1741,6 +1787,30 @@ export function PaymentSettingsSection({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name='StripePaymentIntentPaymentMethodTypes'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Payment method types')}</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      rows={2}
+                      placeholder='card,alipay,wechat_pay'
+                      {...field}
+                      onChange={(event) => field.onChange(event.target.value)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Leave blank to let Stripe automatically display compatible payment methods. Use comma-separated values to fix allowed methods, for example card,alipay,wechat_pay.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <div className='grid gap-6 md:grid-cols-2'>
               <FormField

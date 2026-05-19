@@ -669,9 +669,14 @@ func genStripePaymentIntent(referenceId string, email string, amount int64, curr
 			"trade_no": referenceId,
 			"provider": model.PaymentProviderStripeIntent,
 		},
-		AutomaticPaymentMethods: &stripe.PaymentIntentAutomaticPaymentMethodsParams{
+	}
+	paymentMethodTypes := setting.StripePaymentIntentPaymentMethodTypeList()
+	if len(paymentMethodTypes) > 0 {
+		params.PaymentMethodTypes = stripe.StringSlice(paymentMethodTypes)
+	} else {
+		params.AutomaticPaymentMethods = &stripe.PaymentIntentAutomaticPaymentMethodsParams{
 			Enabled: stripe.Bool(true),
-		},
+		}
 	}
 	if email != "" {
 		params.ReceiptEmail = stripe.String(email)

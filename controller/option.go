@@ -184,6 +184,16 @@ func UpdateOption(c *gin.Context) {
 		}
 	}
 	switch option.Key {
+	case "StripePaymentIntentPaymentMethodTypes":
+		normalizedValue, normalizeErr := setting.NormalizeStripePaymentIntentPaymentMethodTypes(option.Value.(string))
+		if normalizeErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": normalizeErr.Error(),
+			})
+			return
+		}
+		option.Value = normalizedValue
 	case "GitHubOAuthEnabled":
 		if option.Value == "true" && common.GitHubClientId == "" {
 			c.JSON(http.StatusOK, gin.H{

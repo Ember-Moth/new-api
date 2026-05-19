@@ -168,6 +168,8 @@ const BILLING_SECTIONS = [
             settings.StripePaymentIntentUnitPrice ?? 1,
           StripePaymentIntentMinTopUp:
             settings.StripePaymentIntentMinTopUp ?? 1,
+          StripePaymentIntentPaymentMethodTypes:
+            settings.StripePaymentIntentPaymentMethodTypes ?? '',
           CreemApiKey: settings.CreemApiKey,
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,

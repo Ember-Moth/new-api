@@ -93,6 +93,7 @@ func InitOptionMap() {
 	common.OptionMap["StripePaymentIntentCurrency"] = setting.StripePaymentIntentCurrency
 	common.OptionMap["StripePaymentIntentUnitPrice"] = strconv.FormatFloat(setting.StripePaymentIntentUnitPrice, 'f', -1, 64)
 	common.OptionMap["StripePaymentIntentMinTopUp"] = strconv.Itoa(setting.StripePaymentIntentMinTopUp)
+	common.OptionMap["StripePaymentIntentPaymentMethodTypes"] = setting.StripePaymentIntentPaymentMethodTypes
 	common.OptionMap["CreemApiKey"] = setting.CreemApiKey
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
@@ -402,6 +403,13 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StripePaymentIntentUnitPrice, _ = strconv.ParseFloat(value, 64)
 	case "StripePaymentIntentMinTopUp":
 		setting.StripePaymentIntentMinTopUp, _ = strconv.Atoi(value)
+	case "StripePaymentIntentPaymentMethodTypes":
+		normalizedValue, normalizeErr := setting.NormalizeStripePaymentIntentPaymentMethodTypes(value)
+		if normalizeErr != nil {
+			return normalizeErr
+		}
+		setting.StripePaymentIntentPaymentMethodTypes = normalizedValue
+		common.OptionMap[key] = normalizedValue
 	case "CreemApiKey":
 		setting.CreemApiKey = value
 	case "CreemProducts":

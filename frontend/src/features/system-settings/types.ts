@@ -256,6 +256,7 @@ export type BillingSettings = {
   StripePaymentIntentCurrency: string
   StripePaymentIntentUnitPrice: number
   StripePaymentIntentMinTopUp: number
+  StripePaymentIntentPaymentMethodTypes: string
   CreemApiKey: string
   CreemApiKey_configured: boolean
   CreemWebhookSecret: string
