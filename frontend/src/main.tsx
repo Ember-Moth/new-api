@@ -29,8 +29,13 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { getStatus } from '@/lib/api'
+import {
+  applyBrandToDom,
+  getBrandFromStatus,
+  getBuildBrandBootstrap,
+  getCachedStatusBrand,
+} from '@/lib/brand-bootstrap'
 import '@/lib/dayjs'
-import { applyFaviconToDom } from '@/lib/dom-utils'
 import { handleServerError } from '@/lib/handle-server-error'
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
@@ -109,40 +114,25 @@ declare module '@tanstack/react-router' {
 
 // Render the app
 const rootElement = document.getElementById('root')!
-// Set document.title and favicon from cached status, then refresh from network
+// Set document.title and favicon from build snapshot, cache, then network.
 ;(function initSystemBranding() {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
-    const apply = (name: string) => {
-      document.title = name
-      const metaTitle = document.querySelector(
-        'meta[name="title"]'
-      ) as HTMLMetaElement | null
-      if (metaTitle) metaTitle.setAttribute('content', name)
-    }
-    // Cache-first
-    try {
-      const saved = localStorage.getItem('status')
-      if (saved) {
-        const s = JSON.parse(saved)
-        if (s?.system_name) apply(s.system_name)
-        if (s?.logo) applyFaviconToDom(s.logo)
-      }
-    } catch {
-      /* empty */
-    }
+
+    applyBrandToDom(getBuildBrandBootstrap())
+    applyBrandToDom(getCachedStatusBrand())
+
     // Background refresh
     getStatus()
       .then((s) => {
-        if (s?.system_name) {
-          apply(s.system_name as string)
+        applyBrandToDom(getBrandFromStatus(s))
+        if (s) {
           try {
             localStorage.setItem('status', JSON.stringify(s))
           } catch {
             /* empty */
           }
         }
-        if (s?.logo) applyFaviconToDom(s.logo as string)
       })
       .catch(() => {
         /* empty */

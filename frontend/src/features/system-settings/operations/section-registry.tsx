@@ -80,6 +80,9 @@ const OPERATIONS_SECTIONS = [
           SMTPSSLEnabled: settings.SMTPSSLEnabled,
           SMTPForceAuthLogin: settings.SMTPForceAuthLogin,
         }}
+        configured={{
+          SMTPToken: settings.SMTPToken_configured,
+        }}
       />
     ),
   },
@@ -94,6 +97,9 @@ const OPERATIONS_SECTIONS = [
           WorkerValidKey: settings.WorkerValidKey,
           WorkerAllowHttpImageRequestEnabled:
             settings.WorkerAllowHttpImageRequestEnabled,
+        }}
+        configured={{
+          WorkerValidKey: settings.WorkerValidKey_configured,
         }}
       />
     ),

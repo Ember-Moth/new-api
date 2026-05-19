@@ -81,30 +81,37 @@ export type AuthSettings = {
   GitHubOAuthEnabled: boolean
   GitHubClientId: string
   GitHubClientSecret: string
+  GitHubClientSecret_configured: boolean
   'discord.enabled': boolean
   'discord.client_id': string
   'discord.client_secret': string
+  'discord.client_secret_configured': boolean
   'oidc.enabled': boolean
   'oidc.client_id': string
   'oidc.client_secret': string
+  'oidc.client_secret_configured': boolean
   'oidc.well_known': string
   'oidc.authorization_endpoint': string
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
   TelegramBotToken: string
+  TelegramBotToken_configured: boolean
   TelegramBotName: string
   LinuxDOOAuthEnabled: boolean
   LinuxDOClientId: string
   LinuxDOClientSecret: string
+  LinuxDOClientSecret_configured: boolean
   LinuxDOMinimumTrustLevel: string
   WeChatAuthEnabled: boolean
   WeChatServerAddress: string
   WeChatServerToken: string
+  WeChatServerToken_configured: boolean
   WeChatAccountQRCodeImageURL: string
   TurnstileCheckEnabled: boolean
   TurnstileSiteKey: string
   TurnstileSecretKey: string
+  TurnstileSecretKey_configured: boolean
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string
@@ -179,6 +186,7 @@ export type ModelSettings = {
   'channel_affinity_setting.default_ttl_seconds': number
   'channel_affinity_setting.rules': string
   'model_deployment.ionet.api_key': string
+  'model_deployment.ionet.api_key_configured': boolean
   'model_deployment.ionet.enabled': boolean
 }
 
@@ -219,6 +227,7 @@ export type BillingSettings = {
   PayAddress: string
   EpayId: string
   EpayKey: string
+  EpayKey_configured: boolean
   Price: number
   MinTopUp: number
   CustomCallbackAddress: string
@@ -231,22 +240,30 @@ export type BillingSettings = {
   'payment_setting.compliance_confirmed_by': number
   'payment_setting.compliance_confirmed_ip': string
   StripeApiSecret: string
+  StripeApiSecret_configured: boolean
   StripeWebhookSecret: string
+  StripeWebhookSecret_configured: boolean
   StripePriceId: string
   StripeUnitPrice: number
   StripeMinTopUp: number
   StripePromotionCodesEnabled: boolean
   CreemApiKey: string
+  CreemApiKey_configured: boolean
   CreemWebhookSecret: string
+  CreemWebhookSecret_configured: boolean
   CreemTestMode: boolean
   CreemProducts: string
   WaffoEnabled: boolean
   WaffoApiKey: string
+  WaffoApiKey_configured: boolean
   WaffoPrivateKey: string
+  WaffoPrivateKey_configured: boolean
   WaffoPublicCert: string
   WaffoSandboxPublicCert: string
   WaffoSandboxApiKey: string
+  WaffoSandboxApiKey_configured: boolean
   WaffoSandboxPrivateKey: string
+  WaffoSandboxPrivateKey_configured: boolean
   WaffoSandbox: boolean
   WaffoMerchantId: string
   WaffoCurrency: string
@@ -259,6 +276,7 @@ export type BillingSettings = {
   WaffoPancakeSandbox: boolean
   WaffoPancakeMerchantID: string
   WaffoPancakePrivateKey: string
+  WaffoPancakePrivateKey_configured: boolean
   WaffoPancakeWebhookPublicKey: string
   WaffoPancakeWebhookTestKey: string
   WaffoPancakeStoreID: string
@@ -291,10 +309,12 @@ export type OperationsSettings = {
   SMTPAccount: string
   SMTPFrom: string
   SMTPToken: string
+  SMTPToken_configured: boolean
   SMTPSSLEnabled: boolean
   SMTPForceAuthLogin: boolean
   WorkerUrl: string
   WorkerValidKey: string
+  WorkerValidKey_configured: boolean
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
   'performance_setting.disk_cache_enabled': boolean

@@ -43,6 +43,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { SecretInput, SecretTextarea } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -71,8 +72,16 @@ interface PayMethod {
   payMethodName: string
 }
 
+export type WaffoSecretConfigured = {
+  WaffoApiKey?: boolean
+  WaffoPrivateKey?: boolean
+  WaffoSandboxApiKey?: boolean
+  WaffoSandboxPrivateKey?: boolean
+}
+
 interface Props {
   defaultValues: WaffoSettingsValues
+  configured?: WaffoSecretConfigured
 }
 
 export function WaffoSettingsSection(props: Props) {
@@ -147,6 +156,18 @@ export function WaffoSettingsSection(props: Props) {
 
       for (const opt of options) {
         await updateOption.mutateAsync(opt)
+      }
+      if (values.WaffoApiKey) {
+        form.setValue('WaffoApiKey', '', { shouldDirty: false })
+      }
+      if (values.WaffoPrivateKey) {
+        form.setValue('WaffoPrivateKey', '', { shouldDirty: false })
+      }
+      if (values.WaffoSandboxApiKey) {
+        form.setValue('WaffoSandboxApiKey', '', { shouldDirty: false })
+      }
+      if (values.WaffoSandboxPrivateKey) {
+        form.setValue('WaffoSandboxPrivateKey', '', { shouldDirty: false })
       }
       toast.success(t('Updated successfully'))
     } catch {
@@ -246,11 +267,17 @@ export function WaffoSettingsSection(props: Props) {
         <div className='grid grid-cols-2 gap-4'>
           <div className='grid gap-1.5'>
             <Label>{t('API Key (Production)')}</Label>
-            <Input type='password' {...form.register('WaffoApiKey')} />
+            <SecretInput
+              configured={props.configured?.WaffoApiKey}
+              {...form.register('WaffoApiKey')}
+            />
           </div>
           <div className='grid gap-1.5'>
             <Label>{t('API Key (Sandbox)')}</Label>
-            <Input type='password' {...form.register('WaffoSandboxApiKey')} />
+            <SecretInput
+              configured={props.configured?.WaffoSandboxApiKey}
+              {...form.register('WaffoSandboxApiKey')}
+            />
           </div>
         </div>
 
@@ -262,7 +289,8 @@ export function WaffoSettingsSection(props: Props) {
         <div className='grid grid-cols-2 gap-4'>
           <div className='grid gap-1.5'>
             <Label>{t('RSA Private Key (Production)')}</Label>
-            <Textarea
+            <SecretTextarea
+              configured={props.configured?.WaffoPrivateKey}
               rows={3}
               {...form.register('WaffoPrivateKey')}
               className='font-mono text-xs'
@@ -270,7 +298,8 @@ export function WaffoSettingsSection(props: Props) {
           </div>
           <div className='grid gap-1.5'>
             <Label>{t('RSA Private Key (Sandbox)')}</Label>
-            <Textarea
+            <SecretTextarea
+              configured={props.configured?.WaffoSandboxPrivateKey}
               rows={3}
               {...form.register('WaffoSandboxPrivateKey')}
               className='font-mono text-xs'

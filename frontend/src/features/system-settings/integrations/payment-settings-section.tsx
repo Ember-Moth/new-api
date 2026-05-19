@@ -47,6 +47,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog'
 import { confirmPaymentCompliance } from '../api'
+import { SecretInput } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
@@ -61,10 +62,12 @@ import {
 } from './utils'
 import {
   WaffoPancakeSettingsSection,
+  type WaffoPancakeSecretConfigured,
   type WaffoPancakeSettingsValues,
 } from './waffo-pancake-settings-section'
 import {
   WaffoSettingsSection,
+  type WaffoSecretConfigured,
   type WaffoSettingsValues,
 } from './waffo-settings-section'
 
@@ -145,17 +148,31 @@ type PaymentComplianceDefaults = {
   confirmedBy: number
 }
 
+type PaymentSecretConfigured = {
+  EpayKey?: boolean
+  StripeApiSecret?: boolean
+  StripeWebhookSecret?: boolean
+  CreemApiKey?: boolean
+  CreemWebhookSecret?: boolean
+}
+
 type PaymentSettingsSectionProps = {
   defaultValues: PaymentFormValues
+  secretConfigured?: PaymentSecretConfigured
   waffoDefaultValues: WaffoSettingsValues
+  waffoSecretConfigured?: WaffoSecretConfigured
   waffoPancakeDefaultValues: WaffoPancakeSettingsValues
+  waffoPancakeSecretConfigured?: WaffoPancakeSecretConfigured
   complianceDefaults: PaymentComplianceDefaults
 }
 
 export function PaymentSettingsSection({
   defaultValues,
+  secretConfigured = {},
   waffoDefaultValues,
+  waffoSecretConfigured,
   waffoPancakeDefaultValues,
+  waffoPancakeSecretConfigured,
   complianceDefaults,
 }: PaymentSettingsSectionProps) {
   const { t } = useTranslation()
@@ -384,6 +401,10 @@ export function PaymentSettingsSection({
     for (const update of updates) {
       await updateOption.mutateAsync(update)
     }
+
+    if (sanitized.EpayKey) {
+      form.setValue('EpayKey', '', { shouldDirty: false })
+    }
   }
 
   const saveStripeSettings = async () => {
@@ -456,6 +477,13 @@ export function PaymentSettingsSection({
     for (const update of updates) {
       await updateOption.mutateAsync(update)
     }
+
+    if (sanitized.StripeApiSecret) {
+      form.setValue('StripeApiSecret', '', { shouldDirty: false })
+    }
+    if (sanitized.StripeWebhookSecret) {
+      form.setValue('StripeWebhookSecret', '', { shouldDirty: false })
+    }
   }
 
   const saveCreemSettings = async () => {
@@ -511,6 +539,13 @@ export function PaymentSettingsSection({
     for (const update of updates) {
       await updateOption.mutateAsync(update)
     }
+
+    if (sanitized.CreemApiKey) {
+      form.setValue('CreemApiKey', '', { shouldDirty: false })
+    }
+    if (sanitized.CreemWebhookSecret) {
+      form.setValue('CreemWebhookSecret', '', { shouldDirty: false })
+    }
   }
 
   const onSubmit = async (values: PaymentFormValues) => {
@@ -530,6 +565,10 @@ export function PaymentSettingsSection({
       StripeUnitPrice: values.StripeUnitPrice,
       StripeMinTopUp: values.StripeMinTopUp,
       StripePromotionCodesEnabled: values.StripePromotionCodesEnabled,
+      CreemApiKey: values.CreemApiKey.trim(),
+      CreemWebhookSecret: values.CreemWebhookSecret.trim(),
+      CreemTestMode: values.CreemTestMode,
+      CreemProducts: values.CreemProducts.trim(),
     }
 
     const initial = {
@@ -551,6 +590,10 @@ export function PaymentSettingsSection({
       StripeMinTopUp: initialRef.current.StripeMinTopUp,
       StripePromotionCodesEnabled:
         initialRef.current.StripePromotionCodesEnabled,
+      CreemApiKey: initialRef.current.CreemApiKey.trim(),
+      CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
+      CreemTestMode: initialRef.current.CreemTestMode,
+      CreemProducts: initialRef.current.CreemProducts.trim(),
     }
 
     const updates: Array<{ key: string; value: string | number | boolean }> = []
@@ -648,8 +691,52 @@ export function PaymentSettingsSection({
       })
     }
 
+    if (
+      sanitized.CreemApiKey &&
+      sanitized.CreemApiKey !== initial.CreemApiKey
+    ) {
+      updates.push({ key: 'CreemApiKey', value: sanitized.CreemApiKey })
+    }
+
+    if (
+      sanitized.CreemWebhookSecret &&
+      sanitized.CreemWebhookSecret !== initial.CreemWebhookSecret
+    ) {
+      updates.push({
+        key: 'CreemWebhookSecret',
+        value: sanitized.CreemWebhookSecret,
+      })
+    }
+
+    if (sanitized.CreemTestMode !== initial.CreemTestMode) {
+      updates.push({ key: 'CreemTestMode', value: sanitized.CreemTestMode })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.CreemProducts) !==
+      normalizeJsonForComparison(initial.CreemProducts)
+    ) {
+      updates.push({ key: 'CreemProducts', value: sanitized.CreemProducts })
+    }
+
     for (const update of updates) {
       await updateOption.mutateAsync(update)
+    }
+
+    if (sanitized.EpayKey) {
+      form.setValue('EpayKey', '', { shouldDirty: false })
+    }
+    if (sanitized.StripeApiSecret) {
+      form.setValue('StripeApiSecret', '', { shouldDirty: false })
+    }
+    if (sanitized.StripeWebhookSecret) {
+      form.setValue('StripeWebhookSecret', '', { shouldDirty: false })
+    }
+    if (sanitized.CreemApiKey) {
+      form.setValue('CreemApiKey', '', { shouldDirty: false })
+    }
+    if (sanitized.CreemWebhookSecret) {
+      form.setValue('CreemWebhookSecret', '', { shouldDirty: false })
     }
   }
 
@@ -1059,8 +1146,8 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Epay secret key')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='password'
+                      <SecretInput
+                        configured={secretConfigured.EpayKey}
                         placeholder={t('Enter new key to update')}
                         autoComplete='new-password'
                         {...field}
@@ -1142,8 +1229,8 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('API secret')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='password'
+                      <SecretInput
+                        configured={secretConfigured.StripeApiSecret}
                         placeholder={t('sk_xxx or rk_xxx')}
                         autoComplete='new-password'
                         {...field}
@@ -1165,8 +1252,8 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Webhook secret')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='password'
+                      <SecretInput
+                        configured={secretConfigured.StripeWebhookSecret}
                         placeholder={t('whsec_xxx')}
                         autoComplete='new-password'
                         {...field}
@@ -1328,8 +1415,8 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('API Key')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='password'
+                      <SecretInput
+                        configured={secretConfigured.CreemApiKey}
                         placeholder={t('Enter Creem API key')}
                         autoComplete='new-password'
                         {...field}
@@ -1351,8 +1438,8 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Webhook Secret')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='password'
+                      <SecretInput
+                        configured={secretConfigured.CreemWebhookSecret}
                         placeholder={t('Enter webhook secret')}
                         autoComplete='new-password'
                         {...field}
@@ -1468,11 +1555,17 @@ export function PaymentSettingsSection({
 
       <Separator />
 
-      <WaffoSettingsSection defaultValues={waffoDefaultValues} />
+      <WaffoSettingsSection
+        defaultValues={waffoDefaultValues}
+        configured={waffoSecretConfigured}
+      />
 
       <Separator />
 
-      <WaffoPancakeSettingsSection defaultValues={waffoPancakeDefaultValues} />
+      <WaffoPancakeSettingsSection
+        defaultValues={waffoPancakeDefaultValues}
+        configured={waffoPancakeSecretConfigured}
+      />
       {/* eslint-enable react-hooks/refs */}
     </SettingsSection>
   )

@@ -76,6 +76,15 @@ const AUTH_SECTIONS = [
           WeChatServerToken: settings.WeChatServerToken,
           WeChatAccountQRCodeImageURL: settings.WeChatAccountQRCodeImageURL,
         }}
+        configured={{
+          GitHubClientSecret: settings.GitHubClientSecret_configured,
+          DiscordClientSecret:
+            settings['discord.client_secret_configured'],
+          OIDCClientSecret: settings['oidc.client_secret_configured'],
+          TelegramBotToken: settings.TelegramBotToken_configured,
+          LinuxDOClientSecret: settings.LinuxDOClientSecret_configured,
+          WeChatServerToken: settings.WeChatServerToken_configured,
+        }}
       />
     ),
   },
@@ -118,6 +127,9 @@ const AUTH_SECTIONS = [
           TurnstileCheckEnabled: settings.TurnstileCheckEnabled,
           TurnstileSiteKey: settings.TurnstileSiteKey,
           TurnstileSecretKey: settings.TurnstileSecretKey,
+        }}
+        configured={{
+          TurnstileSecretKey: settings.TurnstileSecretKey_configured,
         }}
       />
     ),

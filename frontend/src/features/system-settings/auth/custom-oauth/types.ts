@@ -30,6 +30,7 @@ export interface CustomOAuthProvider {
   enabled: boolean
   client_id: string
   client_secret: string
+  client_secret_configured?: boolean
   authorization_endpoint: string
   token_endpoint: string
   user_info_endpoint: string

@@ -34,9 +34,9 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { testDeploymentConnectionWithKey } from '@/features/models/api'
+import { SecretInput } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -50,10 +50,14 @@ type Values = z.input<typeof schema>
 
 export function IoNetDeploymentSettingsSection({
   defaultValues,
+  configured = {},
 }: {
   defaultValues: {
     enabled: boolean
     apiKey: string
+  }
+  configured?: {
+    apiKey?: boolean
   }
 }) {
   const { t } = useTranslation()
@@ -102,7 +106,7 @@ export function IoNetDeploymentSettingsSection({
       await updateOption.mutateAsync(update)
     }
 
-    form.reset(values)
+    form.reset({ ...values, apiKey: '' })
   }
 
   const handleTestConnection = async () => {
@@ -173,8 +177,8 @@ export function IoNetDeploymentSettingsSection({
                     <FormLabel>{t('io.net API Key')}</FormLabel>
                     <div className='flex gap-2'>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.apiKey}
                           placeholder={t('Enter API Key')}
                           autoComplete='off'
                           {...field}

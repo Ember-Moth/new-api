@@ -50,6 +50,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { SecretInput } from '../../../components/secret-input'
 import {
   useCreateProvider,
   useUpdateProvider,
@@ -301,8 +302,8 @@ export function ProviderFormDialog(props: ProviderFormDialogProps) {
                     <FormItem>
                       <FormLabel>{t('Client Secret')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={props.provider?.client_secret_configured}
                           placeholder={t('OAuth Client Secret')}
                           autoComplete='new-password'
                           {...field}

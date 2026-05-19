@@ -155,6 +155,9 @@ const MODELS_SECTIONS = [
           enabled: settings['model_deployment.ionet.enabled'],
           apiKey: settings['model_deployment.ionet.api_key'],
         }}
+        configured={{
+          apiKey: settings['model_deployment.ionet.api_key_configured'],
+        }}
       />
     ),
   },

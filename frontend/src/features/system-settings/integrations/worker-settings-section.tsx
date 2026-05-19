@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { SecretInput } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -52,10 +53,14 @@ type WorkerFormValues = z.infer<ReturnType<typeof createWorkerSchema>>
 
 type WorkerSettingsSectionProps = {
   defaultValues: WorkerFormValues
+  configured?: {
+    WorkerValidKey?: boolean
+  }
 }
 
 export function WorkerSettingsSection({
   defaultValues,
+  configured = {},
 }: WorkerSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -96,6 +101,10 @@ export function WorkerSettingsSection({
 
     for (const update of updates) {
       await updateOption.mutateAsync(update)
+    }
+
+    if (sanitizedKey) {
+      form.setValue('WorkerValidKey', '', { shouldDirty: false })
     }
   }
 
@@ -145,8 +154,8 @@ export function WorkerSettingsSection({
               <FormItem>
                 <FormLabel>{t('Worker Access Key')}</FormLabel>
                 <FormControl>
-                  <Input
-                    type='password'
+                  <SecretInput
+                    configured={configured.WorkerValidKey}
                     placeholder={t('Enter new key to update')}
                     autoComplete='new-password'
                     {...field}

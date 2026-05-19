@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { SecretInput } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -59,10 +60,14 @@ type EmailFormValues = z.infer<ReturnType<typeof createEmailSchema>>
 
 type EmailSettingsSectionProps = {
   defaultValues: EmailFormValues
+  configured?: {
+    SMTPToken?: boolean
+  }
 }
 
 export function EmailSettingsSection({
   defaultValues,
+  configured = {},
 }: EmailSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -134,6 +139,10 @@ export function EmailSettingsSection({
 
     for (const update of updates) {
       await updateOption.mutateAsync(update)
+    }
+
+    if (sanitized.SMTPToken) {
+      form.setValue('SMTPToken', '', { shouldDirty: false })
     }
   }
 
@@ -292,9 +301,9 @@ export function EmailSettingsSection({
               <FormItem>
                 <FormLabel>{t('Password / Access Token')}</FormLabel>
                 <FormControl>
-                  <Input
-                    autoComplete='off'
-                    type='password'
+                  <SecretInput
+                    configured={configured.SMTPToken}
+                    autoComplete='new-password'
                     placeholder={t('Enter new token to update')}
                     {...field}
                     onChange={(event) => field.onChange(event.target.value)}

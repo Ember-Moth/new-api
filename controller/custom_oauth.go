@@ -18,24 +18,25 @@ import (
 // CustomOAuthProviderResponse is the response structure for custom OAuth providers
 // It excludes sensitive fields like client_secret
 type CustomOAuthProviderResponse struct {
-	Id                    int    `json:"id"`
-	Name                  string `json:"name"`
-	Slug                  string `json:"slug"`
-	Icon                  string `json:"icon"`
-	Enabled               bool   `json:"enabled"`
-	ClientId              string `json:"client_id"`
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	UserInfoEndpoint      string `json:"user_info_endpoint"`
-	Scopes                string `json:"scopes"`
-	UserIdField           string `json:"user_id_field"`
-	UsernameField         string `json:"username_field"`
-	DisplayNameField      string `json:"display_name_field"`
-	EmailField            string `json:"email_field"`
-	WellKnown             string `json:"well_known"`
-	AuthStyle             int    `json:"auth_style"`
-	AccessPolicy          string `json:"access_policy"`
-	AccessDeniedMessage   string `json:"access_denied_message"`
+	Id                     int    `json:"id"`
+	Name                   string `json:"name"`
+	Slug                   string `json:"slug"`
+	Icon                   string `json:"icon"`
+	Enabled                bool   `json:"enabled"`
+	ClientId               string `json:"client_id"`
+	ClientSecretConfigured bool   `json:"client_secret_configured"`
+	AuthorizationEndpoint  string `json:"authorization_endpoint"`
+	TokenEndpoint          string `json:"token_endpoint"`
+	UserInfoEndpoint       string `json:"user_info_endpoint"`
+	Scopes                 string `json:"scopes"`
+	UserIdField            string `json:"user_id_field"`
+	UsernameField          string `json:"username_field"`
+	DisplayNameField       string `json:"display_name_field"`
+	EmailField             string `json:"email_field"`
+	WellKnown              string `json:"well_known"`
+	AuthStyle              int    `json:"auth_style"`
+	AccessPolicy           string `json:"access_policy"`
+	AccessDeniedMessage    string `json:"access_denied_message"`
 }
 
 type UserOAuthBindingResponse struct {
@@ -48,24 +49,25 @@ type UserOAuthBindingResponse struct {
 
 func toCustomOAuthProviderResponse(p *model.CustomOAuthProvider) *CustomOAuthProviderResponse {
 	return &CustomOAuthProviderResponse{
-		Id:                    p.Id,
-		Name:                  p.Name,
-		Slug:                  p.Slug,
-		Icon:                  p.Icon,
-		Enabled:               p.Enabled,
-		ClientId:              p.ClientId,
-		AuthorizationEndpoint: p.AuthorizationEndpoint,
-		TokenEndpoint:         p.TokenEndpoint,
-		UserInfoEndpoint:      p.UserInfoEndpoint,
-		Scopes:                p.Scopes,
-		UserIdField:           p.UserIdField,
-		UsernameField:         p.UsernameField,
-		DisplayNameField:      p.DisplayNameField,
-		EmailField:            p.EmailField,
-		WellKnown:             p.WellKnown,
-		AuthStyle:             p.AuthStyle,
-		AccessPolicy:          p.AccessPolicy,
-		AccessDeniedMessage:   p.AccessDeniedMessage,
+		Id:                     p.Id,
+		Name:                   p.Name,
+		Slug:                   p.Slug,
+		Icon:                   p.Icon,
+		Enabled:                p.Enabled,
+		ClientId:               p.ClientId,
+		ClientSecretConfigured: strings.TrimSpace(p.ClientSecret) != "",
+		AuthorizationEndpoint:  p.AuthorizationEndpoint,
+		TokenEndpoint:          p.TokenEndpoint,
+		UserInfoEndpoint:       p.UserInfoEndpoint,
+		Scopes:                 p.Scopes,
+		UserIdField:            p.UserIdField,
+		UsernameField:          p.UsernameField,
+		DisplayNameField:       p.DisplayNameField,
+		EmailField:             p.EmailField,
+		WellKnown:              p.WellKnown,
+		AuthStyle:              p.AuthStyle,
+		AccessPolicy:           p.AccessPolicy,
+		AccessDeniedMessage:    p.AccessDeniedMessage,
 	}
 }
 

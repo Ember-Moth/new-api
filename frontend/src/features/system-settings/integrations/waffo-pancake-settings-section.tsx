@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { SecretTextarea } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { removeTrailingSlash } from './utils'
@@ -45,8 +46,13 @@ export interface WaffoPancakeSettingsValues {
   WaffoPancakeMinTopUp: number
 }
 
+export type WaffoPancakeSecretConfigured = {
+  WaffoPancakePrivateKey?: boolean
+}
+
 interface Props {
   defaultValues: WaffoPancakeSettingsValues
+  configured?: WaffoPancakeSecretConfigured
 }
 
 export function WaffoPancakeSettingsSection(props: Props) {
@@ -162,6 +168,9 @@ export function WaffoPancakeSettingsSection(props: Props) {
       for (const option of options) {
         await updateOption.mutateAsync(option)
       }
+      if ((values.WaffoPancakePrivateKey || '').trim()) {
+        form.setValue('WaffoPancakePrivateKey', '', { shouldDirty: false })
+      }
       toast.success(t('Updated successfully'))
     } catch {
       toast.error(t('Update failed'))
@@ -237,7 +246,8 @@ export function WaffoPancakeSettingsSection(props: Props) {
       <div className='grid grid-cols-2 gap-4'>
         <div className='grid gap-1.5'>
           <Label>{t('API Private Key')}</Label>
-          <Textarea
+          <SecretTextarea
+            configured={props.configured?.WaffoPancakePrivateKey}
             rows={3}
             placeholder={t('Leave blank to keep the existing key')}
             {...form.register('WaffoPancakePrivateKey')}

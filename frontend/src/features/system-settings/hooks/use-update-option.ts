@@ -19,11 +19,18 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
+import { useSystemConfigStore } from '@/stores/system-config-store'
+import { applyBrandToDom, patchCachedStatus } from '@/lib/brand-bootstrap'
+import { DEFAULT_LOGO, DEFAULT_SYSTEM_NAME } from '@/lib/constants'
 import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import type { SystemOptionsResponse, UpdateOptionRequest } from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = [
+  'SystemName',
+  'Logo',
+  'Footer',
+  'ServerAddress',
   'HeaderNavModules',
   'SidebarModulesAdmin',
   'Notice',
@@ -37,6 +44,98 @@ const STATUS_RELATED_KEYS = [
   'general_setting.custom_currency_exchange_rate',
 ]
 
+const SENSITIVE_OPTION_KEYS = new Set([
+  'GitHubClientSecret',
+  'discord.client_secret',
+  'oidc.client_secret',
+  'TelegramBotToken',
+  'LinuxDOClientSecret',
+  'WeChatServerToken',
+  'TurnstileSecretKey',
+  'SMTPToken',
+  'WorkerValidKey',
+  'EpayKey',
+  'StripeApiSecret',
+  'StripeWebhookSecret',
+  'CreemApiKey',
+  'CreemWebhookSecret',
+  'WaffoApiKey',
+  'WaffoPrivateKey',
+  'WaffoSandboxApiKey',
+  'WaffoSandboxPrivateKey',
+  'WaffoPancakePrivateKey',
+  'model_deployment.ionet.api_key',
+])
+
+function syncBrandOptionToLocalState(
+  key: string,
+  value: string | boolean | number
+) {
+  const { setConfig } = useSystemConfigStore.getState()
+
+  if (key === 'SystemName') {
+    const systemName = String(value).trim() || DEFAULT_SYSTEM_NAME
+    setConfig({ systemName })
+    applyBrandToDom({ systemName })
+    patchCachedStatus({ system_name: systemName })
+    return
+  }
+
+  if (key === 'Logo') {
+    const logo = String(value).trim() || DEFAULT_LOGO
+    setConfig({ logo })
+    applyBrandToDom({ logo })
+    patchCachedStatus({ logo })
+    return
+  }
+
+  if (key === 'Footer') {
+    setConfig({ footerHtml: String(value) })
+    patchCachedStatus({ footer_html: String(value) })
+    return
+  }
+
+  if (key === 'ServerAddress') {
+    patchCachedStatus({ server_address: String(value).trim() })
+  }
+}
+
+function patchSensitiveOptionConfiguredState(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: string,
+  value: string | boolean | number
+) {
+  if (!SENSITIVE_OPTION_KEYS.has(key)) return
+
+  const configuredKey = `${key}_configured`
+  const configuredValue = String(
+    typeof value === 'string' ? value.trim() !== '' : Boolean(value)
+  )
+
+  queryClient.setQueryData<SystemOptionsResponse>(
+    ['system-options'],
+    (current) => {
+      if (!current?.data) return current
+
+      let hasConfiguredKey = false
+      const data = current.data.flatMap((option) => {
+        if (option.key === key) return []
+        if (option.key === configuredKey) {
+          hasConfiguredKey = true
+          return [{ ...option, value: configuredValue }]
+        }
+        return [option]
+      })
+
+      if (!hasConfiguredKey) {
+        data.push({ key: configuredKey, value: configuredValue })
+      }
+
+      return { ...current, data }
+    }
+  )
+}
+
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
@@ -44,6 +143,13 @@ export function useUpdateOption() {
     mutationFn: (request: UpdateOptionRequest) => updateSystemOption(request),
     onSuccess: (data, variables) => {
       if (data.success) {
+        syncBrandOptionToLocalState(variables.key, variables.value)
+        patchSensitiveOptionConfiguredState(
+          queryClient,
+          variables.key,
+          variables.value
+        )
+
         // Always refresh system-options
         queryClient.invalidateQueries({ queryKey: ['system-options'] })
 

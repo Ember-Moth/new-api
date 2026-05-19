@@ -39,6 +39,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
+import { SecretInput } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -71,11 +72,40 @@ const oauthSchema = z.object({
 
 type OAuthFormValues = z.infer<typeof oauthSchema>
 
-type OAuthSectionProps = {
-  defaultValues: OAuthFormValues
+type OAuthSecretConfigured = {
+  GitHubClientSecret?: boolean
+  DiscordClientSecret?: boolean
+  OIDCClientSecret?: boolean
+  TelegramBotToken?: boolean
+  LinuxDOClientSecret?: boolean
+  WeChatServerToken?: boolean
 }
 
-export function OAuthSection({ defaultValues }: OAuthSectionProps) {
+const OAUTH_SECRET_KEYS = [
+  'GitHubClientSecret',
+  'discord.client_secret',
+  'oidc.client_secret',
+  'TelegramBotToken',
+  'LinuxDOClientSecret',
+  'WeChatServerToken',
+] as const
+
+type OAuthSectionProps = {
+  defaultValues: OAuthFormValues
+  configured?: OAuthSecretConfigured
+}
+
+function clearOAuthSecrets(values: OAuthFormValues): OAuthFormValues {
+  return OAUTH_SECRET_KEYS.reduce(
+    (result, key) => ({ ...result, [key]: '' }),
+    values
+  )
+}
+
+export function OAuthSection({
+  defaultValues,
+  configured = {},
+}: OAuthSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const [activeTab, setActiveTab] = useState('github')
@@ -193,7 +223,7 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
     }
 
     // Reset form dirty state after successful save
-    form.reset(finalData)
+    form.reset(clearOAuthSecrets(finalData))
   }
 
   const handleReset = () => {
@@ -317,8 +347,8 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
                     <FormItem>
                       <FormLabel>{t('Client Secret')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.GitHubClientSecret}
                           placeholder={t('Your GitHub OAuth Client Secret')}
                           autoComplete='new-password'
                           {...field}
@@ -380,8 +410,8 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
                     <FormItem>
                       <FormLabel>{t('Client Secret')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.DiscordClientSecret}
                           placeholder={t('Your Discord OAuth Client Secret')}
                           autoComplete='new-password'
                           {...field}
@@ -443,8 +473,8 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
                     <FormItem>
                       <FormLabel>{t('Client Secret')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.OIDCClientSecret}
                           placeholder={t('OIDC Client Secret')}
                           autoComplete='new-password'
                           {...field}
@@ -568,8 +598,8 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
                     <FormItem>
                       <FormLabel>{t('Bot Token')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.TelegramBotToken}
                           placeholder={t('Your Telegram Bot Token')}
                           autoComplete='new-password'
                           {...field}
@@ -648,8 +678,8 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
                     <FormItem>
                       <FormLabel>{t('Client Secret')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.LinuxDOClientSecret}
                           placeholder={t('LinuxDO Client Secret')}
                           autoComplete='new-password'
                           {...field}
@@ -727,8 +757,8 @@ export function OAuthSection({ defaultValues }: OAuthSectionProps) {
                     <FormItem>
                       <FormLabel>{t('Server Token')}</FormLabel>
                       <FormControl>
-                        <Input
-                          type='password'
+                        <SecretInput
+                          configured={configured.WeChatServerToken}
                           placeholder={t('Server Token')}
                           autoComplete='new-password'
                           {...field}

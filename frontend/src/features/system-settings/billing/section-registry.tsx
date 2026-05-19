@@ -159,6 +159,13 @@ const BILLING_SECTIONS = [
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
         }}
+        secretConfigured={{
+          EpayKey: settings.EpayKey_configured,
+          StripeApiSecret: settings.StripeApiSecret_configured,
+          StripeWebhookSecret: settings.StripeWebhookSecret_configured,
+          CreemApiKey: settings.CreemApiKey_configured,
+          CreemWebhookSecret: settings.CreemWebhookSecret_configured,
+        }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,
           WaffoApiKey: settings.WaffoApiKey ?? '',
@@ -176,6 +183,13 @@ const BILLING_SECTIONS = [
           WaffoReturnUrl: settings.WaffoReturnUrl ?? '',
           WaffoPayMethods: settings.WaffoPayMethods ?? '[]',
         }}
+        waffoSecretConfigured={{
+          WaffoApiKey: settings.WaffoApiKey_configured,
+          WaffoPrivateKey: settings.WaffoPrivateKey_configured,
+          WaffoSandboxApiKey: settings.WaffoSandboxApiKey_configured,
+          WaffoSandboxPrivateKey:
+            settings.WaffoSandboxPrivateKey_configured,
+        }}
         waffoPancakeDefaultValues={{
           WaffoPancakeEnabled: settings.WaffoPancakeEnabled ?? false,
           WaffoPancakeSandbox: settings.WaffoPancakeSandbox ?? false,
@@ -190,6 +204,10 @@ const BILLING_SECTIONS = [
           WaffoPancakeCurrency: settings.WaffoPancakeCurrency ?? 'USD',
           WaffoPancakeUnitPrice: settings.WaffoPancakeUnitPrice ?? 1,
           WaffoPancakeMinTopUp: settings.WaffoPancakeMinTopUp ?? 1,
+        }}
+        waffoPancakeSecretConfigured={{
+          WaffoPancakePrivateKey:
+            settings.WaffoPancakePrivateKey_configured,
         }}
         complianceDefaults={{
           confirmed: settings['payment_setting.compliance_confirmed'] ?? false,

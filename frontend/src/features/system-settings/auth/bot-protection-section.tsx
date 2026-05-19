@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { SecretInput } from '../components/secret-input'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -46,10 +47,14 @@ type BotProtectionFormValues = z.infer<typeof botProtectionSchema>
 
 type BotProtectionSectionProps = {
   defaultValues: BotProtectionFormValues
+  configured?: {
+    TurnstileSecretKey?: boolean
+  }
 }
 
 export function BotProtectionSection({
   defaultValues,
+  configured = {},
 }: BotProtectionSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -71,6 +76,10 @@ export function BotProtectionSection({
 
     for (const [key, value] of updates) {
       await updateOption.mutateAsync({ key, value: value ?? '' })
+    }
+
+    if (data.TurnstileSecretKey?.trim()) {
+      form.setValue('TurnstileSecretKey', '', { shouldDirty: false })
     }
   }
 
@@ -137,8 +146,8 @@ export function BotProtectionSection({
               <FormItem>
                 <FormLabel>{t('Secret Key')}</FormLabel>
                 <FormControl>
-                  <Input
-                    type='password'
+                  <SecretInput
+                    configured={configured.TurnstileSecretKey}
                     placeholder={t('Your Turnstile secret key')}
                     autoComplete='new-password'
                     {...field}

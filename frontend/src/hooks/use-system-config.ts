@@ -25,8 +25,8 @@ import {
   DEFAULT_CURRENCY_CONFIG,
 } from '@/stores/system-config-store'
 import { withApiBaseUrl } from '@/lib/api'
+import { applyBrandToDom } from '@/lib/brand-bootstrap'
 import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
-import { applyFaviconToDom } from '@/lib/dom-utils'
 
 interface UseSystemConfigOptions {
   /** Automatically fetch config from backend (use only in root component) */
@@ -170,6 +170,10 @@ export function useSystemConfig(options: UseSystemConfigOptions = {}) {
     if (autoLoad) loadConfig()
   }, [autoLoad, loadConfig])
 
+  useEffect(() => {
+    applyBrandToDom({ systemName: config.systemName })
+  }, [config.systemName])
+
   // Preload logo image when URL changes
   useEffect(() => {
     const { logo } = config
@@ -182,7 +186,7 @@ export function useSystemConfig(options: UseSystemConfigOptions = {}) {
       logo,
       () => {
         setLoadedLogoUrl(logo)
-        applyFaviconToDom(logo)
+        applyBrandToDom({ logo })
       },
       () => {
         if (logo !== DEFAULT_LOGO) {

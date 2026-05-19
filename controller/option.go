@@ -42,13 +42,36 @@ func isPositiveOptionValue(value string) bool {
 	return err == nil && floatValue > 0
 }
 
-func isVisiblePublicKeyOption(key string) bool {
-	switch key {
-	case "WaffoPancakeWebhookPublicKey", "WaffoPancakeWebhookTestKey":
-		return true
-	default:
-		return false
-	}
+var sensitiveOptionKeys = map[string]struct{}{
+	"GitHubClientSecret":             {},
+	"discord.client_secret":          {},
+	"oidc.client_secret":             {},
+	"TelegramBotToken":               {},
+	"LinuxDOClientSecret":            {},
+	"WeChatServerToken":              {},
+	"TurnstileSecretKey":             {},
+	"SMTPToken":                      {},
+	"WorkerValidKey":                 {},
+	"EpayKey":                        {},
+	"StripeApiSecret":                {},
+	"StripeWebhookSecret":            {},
+	"CreemApiKey":                    {},
+	"CreemWebhookSecret":             {},
+	"WaffoApiKey":                    {},
+	"WaffoPrivateKey":                {},
+	"WaffoSandboxApiKey":             {},
+	"WaffoSandboxPrivateKey":         {},
+	"WaffoPancakePrivateKey":         {},
+	"model_deployment.ionet.api_key": {},
+}
+
+func isSensitiveOptionKey(key string) bool {
+	_, ok := sensitiveOptionKeys[key]
+	return ok
+}
+
+func sensitiveOptionConfiguredKey(key string) string {
+	return key + "_configured"
 }
 
 func collectModelNamesFromOptionValue(raw string, modelNames map[string]struct{}) {
@@ -90,12 +113,12 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
-		isSensitiveKey := strings.HasSuffix(k, "Token") ||
-			strings.HasSuffix(k, "Secret") ||
-			strings.HasSuffix(k, "Key") ||
-			strings.HasSuffix(k, "secret") ||
-			strings.HasSuffix(k, "api_key")
-		if isSensitiveKey && !isVisiblePublicKeyOption(k) {
+		isSensitiveKey := isSensitiveOptionKey(k)
+		if isSensitiveKey {
+			options = append(options, &model.Option{
+				Key:   sensitiveOptionConfiguredKey(k),
+				Value: strconv.FormatBool(strings.TrimSpace(value) != ""),
+			})
 			continue
 		}
 		options = append(options, &model.Option{
