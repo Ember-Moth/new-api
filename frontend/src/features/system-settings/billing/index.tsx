@@ -80,6 +80,7 @@ const defaultBillingSettings: BillingSettings = {
   StripeUnitPrice: 8.0,
   StripeMinTopUp: 1,
   StripePromotionCodesEnabled: false,
+  StripeCheckoutTopUpVisible: true,
   StripePaymentIntentEnabled: false,
   StripePaymentIntentPublishableKey: '',
   StripePaymentIntentApiSecret: '',

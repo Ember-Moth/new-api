@@ -124,6 +124,7 @@ const paymentSchema = z.object({
   StripeUnitPrice: z.coerce.number().min(0),
   StripeMinTopUp: z.coerce.number().min(0),
   StripePromotionCodesEnabled: z.boolean(),
+  StripeCheckoutTopUpVisible: z.boolean(),
   StripePaymentIntentEnabled: z.boolean(),
   StripePaymentIntentPublishableKey: z.string(),
   StripePaymentIntentApiSecret: z.string(),
@@ -441,6 +442,7 @@ export function PaymentSettingsSection({
       StripeMinTopUp: values.StripeMinTopUp as number,
       StripePromotionCodesEnabled:
         values.StripePromotionCodesEnabled as boolean,
+      StripeCheckoutTopUpVisible: values.StripeCheckoutTopUpVisible as boolean,
     }
 
     const initial = {
@@ -451,6 +453,7 @@ export function PaymentSettingsSection({
       StripeMinTopUp: initialRef.current.StripeMinTopUp,
       StripePromotionCodesEnabled:
         initialRef.current.StripePromotionCodesEnabled,
+      StripeCheckoutTopUpVisible: initialRef.current.StripeCheckoutTopUpVisible,
     }
 
     const updates: Array<{ key: string; value: string | number | boolean }> = []
@@ -491,6 +494,16 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'StripePromotionCodesEnabled',
         value: sanitized.StripePromotionCodesEnabled,
+      })
+    }
+
+    if (
+      sanitized.StripeCheckoutTopUpVisible !==
+      initial.StripeCheckoutTopUpVisible
+    ) {
+      updates.push({
+        key: 'StripeCheckoutTopUpVisible',
+        value: sanitized.StripeCheckoutTopUpVisible,
       })
     }
 
@@ -731,6 +744,7 @@ export function PaymentSettingsSection({
       StripeUnitPrice: values.StripeUnitPrice,
       StripeMinTopUp: values.StripeMinTopUp,
       StripePromotionCodesEnabled: values.StripePromotionCodesEnabled,
+      StripeCheckoutTopUpVisible: values.StripeCheckoutTopUpVisible,
       StripePaymentIntentEnabled: values.StripePaymentIntentEnabled,
       StripePaymentIntentPublishableKey:
         values.StripePaymentIntentPublishableKey.trim(),
@@ -769,6 +783,7 @@ export function PaymentSettingsSection({
       StripeMinTopUp: initialRef.current.StripeMinTopUp,
       StripePromotionCodesEnabled:
         initialRef.current.StripePromotionCodesEnabled,
+      StripeCheckoutTopUpVisible: initialRef.current.StripeCheckoutTopUpVisible,
       StripePaymentIntentEnabled: initialRef.current.StripePaymentIntentEnabled,
       StripePaymentIntentPublishableKey:
         initialRef.current.StripePaymentIntentPublishableKey.trim(),
@@ -883,6 +898,16 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'StripePromotionCodesEnabled',
         value: sanitized.StripePromotionCodesEnabled,
+      })
+    }
+
+    if (
+      sanitized.StripeCheckoutTopUpVisible !==
+      initial.StripeCheckoutTopUpVisible
+    ) {
+      updates.push({
+        key: 'StripeCheckoutTopUpVisible',
+        value: sanitized.StripeCheckoutTopUpVisible,
       })
     }
 
@@ -1507,6 +1532,31 @@ export function PaymentSettingsSection({
                 </li>
               </ul>
             </div>
+
+            <FormField
+              control={form.control}
+              name='StripeCheckoutTopUpVisible'
+              render={({ field }) => (
+                <FormItem className='flex flex-row items-center justify-between rounded-lg border p-4'>
+                  <div className='space-y-0.5'>
+                    <FormLabel className='text-base'>
+                      {t('Show Stripe Checkout in user wallet')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Only hides the Stripe Checkout top-up button from the user wallet. API, webhook, and existing orders remain available.'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
 
             <div className='grid gap-6 md:grid-cols-3'>
               <FormField

@@ -86,6 +86,7 @@ func InitOptionMap() {
 	common.OptionMap["StripePriceId"] = setting.StripePriceId
 	common.OptionMap["StripeUnitPrice"] = strconv.FormatFloat(setting.StripeUnitPrice, 'f', -1, 64)
 	common.OptionMap["StripePromotionCodesEnabled"] = strconv.FormatBool(setting.StripePromotionCodesEnabled)
+	common.OptionMap["StripeCheckoutTopUpVisible"] = strconv.FormatBool(setting.StripeCheckoutTopUpVisible)
 	common.OptionMap["StripePaymentIntentEnabled"] = strconv.FormatBool(setting.StripePaymentIntentEnabled)
 	common.OptionMap["StripePaymentIntentPublishableKey"] = setting.StripePaymentIntentPublishableKey
 	common.OptionMap["StripePaymentIntentApiSecret"] = setting.StripePaymentIntentApiSecret
@@ -389,6 +390,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StripeMinTopUp, _ = strconv.Atoi(value)
 	case "StripePromotionCodesEnabled":
 		setting.StripePromotionCodesEnabled = value == "true"
+	case "StripeCheckoutTopUpVisible":
+		setting.StripeCheckoutTopUpVisible = value == "true"
 	case "StripePaymentIntentEnabled":
 		setting.StripePaymentIntentEnabled = value == "true"
 	case "StripePaymentIntentPublishableKey":

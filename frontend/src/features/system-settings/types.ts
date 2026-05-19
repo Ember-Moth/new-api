@@ -247,6 +247,7 @@ export type BillingSettings = {
   StripeUnitPrice: number
   StripeMinTopUp: number
   StripePromotionCodesEnabled: boolean
+  StripeCheckoutTopUpVisible: boolean
   StripePaymentIntentEnabled: boolean
   StripePaymentIntentPublishableKey: string
   StripePaymentIntentApiSecret: string

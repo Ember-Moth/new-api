@@ -1,10 +1,15 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,12 +31,15 @@ func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	originalAPISecret := setting.StripeApiSecret
 	originalWebhookSecret := setting.StripeWebhookSecret
 	originalPriceID := setting.StripePriceId
+	originalVisible := setting.StripeCheckoutTopUpVisible
 	t.Cleanup(func() {
 		setting.StripeApiSecret = originalAPISecret
 		setting.StripeWebhookSecret = originalWebhookSecret
 		setting.StripePriceId = originalPriceID
+		setting.StripeCheckoutTopUpVisible = originalVisible
 	})
 
+	setting.StripeCheckoutTopUpVisible = true
 	setting.StripeWebhookSecret = ""
 	setting.StripeApiSecret = "sk_test_123"
 	setting.StripePriceId = "price_123"
@@ -42,6 +50,104 @@ func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 
 	setting.StripePriceId = ""
 	require.False(t, isStripeWebhookEnabled())
+}
+
+func TestStripeCheckoutVisibilityOnlyControlsTopUpInfoDisplay(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalAPISecret := setting.StripeApiSecret
+	originalWebhookSecret := setting.StripeWebhookSecret
+	originalPriceID := setting.StripePriceId
+	originalVisible := setting.StripeCheckoutTopUpVisible
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalAPISecret
+		setting.StripeWebhookSecret = originalWebhookSecret
+		setting.StripePriceId = originalPriceID
+		setting.StripeCheckoutTopUpVisible = originalVisible
+	})
+
+	setting.StripeApiSecret = "sk_test_123"
+	setting.StripeWebhookSecret = "whsec_test"
+	setting.StripePriceId = "price_123"
+
+	setting.StripeCheckoutTopUpVisible = true
+	require.True(t, isStripeTopUpEnabled())
+	require.True(t, isStripeTopUpVisible())
+
+	setting.StripeCheckoutTopUpVisible = false
+	require.True(t, isStripeTopUpEnabled())
+	require.False(t, isStripeTopUpVisible())
+}
+
+func TestGetTopUpInfoHidesStripeCheckoutOnlyFromUserDisplay(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalAPISecret := setting.StripeApiSecret
+	originalWebhookSecret := setting.StripeWebhookSecret
+	originalPriceID := setting.StripePriceId
+	originalVisible := setting.StripeCheckoutTopUpVisible
+	originalIntentEnabled := setting.StripePaymentIntentEnabled
+	originalIntentPublishableKey := setting.StripePaymentIntentPublishableKey
+	originalIntentAPISecret := setting.StripePaymentIntentApiSecret
+	originalIntentWebhookSecret := setting.StripePaymentIntentWebhookSecret
+	originalIntentCurrency := setting.StripePaymentIntentCurrency
+	originalIntentMinTopUp := setting.StripePaymentIntentMinTopUp
+	originalPayMethods := operation_setting.PayMethods
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalAPISecret
+		setting.StripeWebhookSecret = originalWebhookSecret
+		setting.StripePriceId = originalPriceID
+		setting.StripeCheckoutTopUpVisible = originalVisible
+		setting.StripePaymentIntentEnabled = originalIntentEnabled
+		setting.StripePaymentIntentPublishableKey = originalIntentPublishableKey
+		setting.StripePaymentIntentApiSecret = originalIntentAPISecret
+		setting.StripePaymentIntentWebhookSecret = originalIntentWebhookSecret
+		setting.StripePaymentIntentCurrency = originalIntentCurrency
+		setting.StripePaymentIntentMinTopUp = originalIntentMinTopUp
+		operation_setting.PayMethods = originalPayMethods
+	})
+
+	setting.StripeApiSecret = "sk_test_123"
+	setting.StripeWebhookSecret = "whsec_test"
+	setting.StripePriceId = "price_123"
+	setting.StripeCheckoutTopUpVisible = false
+	setting.StripePaymentIntentEnabled = true
+	setting.StripePaymentIntentPublishableKey = "pk_test_123"
+	setting.StripePaymentIntentApiSecret = "sk_test_pi"
+	setting.StripePaymentIntentWebhookSecret = "whsec_pi"
+	setting.StripePaymentIntentCurrency = "cny"
+	setting.StripePaymentIntentMinTopUp = 1
+	operation_setting.PayMethods = []map[string]string{
+		{"name": "Stripe", "type": model.PaymentMethodStripe},
+		{"name": "Stripe Payment Element", "type": model.PaymentMethodStripeIntent},
+	}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	GetTopUpInfo(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			EnableStripeTopUp              bool                `json:"enable_stripe_topup"`
+			EnableStripePaymentIntentTopUp bool                `json:"enable_stripe_payment_intent_topup"`
+			PayMethods                     []map[string]string `json:"pay_methods"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.False(t, response.Data.EnableStripeTopUp)
+	require.True(t, response.Data.EnableStripePaymentIntentTopUp)
+
+	methodTypes := make([]string, 0, len(response.Data.PayMethods))
+	for _, method := range response.Data.PayMethods {
+		methodTypes = append(methodTypes, method["type"])
+	}
+	require.NotContains(t, methodTypes, model.PaymentMethodStripe)
+	require.Contains(t, methodTypes, model.PaymentMethodStripeIntent)
+	require.True(t, isStripeTopUpEnabled())
 }
 
 func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {

@@ -28,6 +28,10 @@ func isStripeWebhookEnabled() bool {
 	return isStripeTopUpEnabled()
 }
 
+func isStripeTopUpVisible() bool {
+	return isStripeTopUpEnabled() && setting.StripeCheckoutTopUpVisible
+}
+
 func isStripePaymentIntentTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false

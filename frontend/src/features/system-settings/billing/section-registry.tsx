@@ -154,6 +154,8 @@ const BILLING_SECTIONS = [
           StripeUnitPrice: settings.StripeUnitPrice,
           StripeMinTopUp: settings.StripeMinTopUp,
           StripePromotionCodesEnabled: settings.StripePromotionCodesEnabled,
+          StripeCheckoutTopUpVisible:
+            settings.StripeCheckoutTopUpVisible ?? true,
           StripePaymentIntentEnabled:
             settings.StripePaymentIntentEnabled ?? false,
           StripePaymentIntentPublishableKey:
