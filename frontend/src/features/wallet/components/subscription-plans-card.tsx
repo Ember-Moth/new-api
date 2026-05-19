@@ -16,16 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
-import { Check, Crown, RefreshCw, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Check, Crown, RefreshCw, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import {
-  dotColorMap,
-  StatusBadge,
-  textColorMap,
-} from '@/components/status-badge'
+import { formatQuota } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -46,6 +42,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
+  dotColorMap,
+  StatusBadge,
+  textColorMap,
+} from '@/components/status-badge'
+import {
   getPublicPlans,
   getSelfSubscriptionFull,
   updateBillingPreference,
@@ -56,8 +57,6 @@ import type {
   PlanRecord,
   UserSubscriptionRecord,
 } from '@/features/subscriptions/types'
-import { formatQuota } from '@/lib/format'
-import { cn } from '@/lib/utils'
 import type { PaymentMethod, TopupInfo } from '../types'
 
 interface SubscriptionPlansCardProps {
@@ -66,9 +65,15 @@ interface SubscriptionPlansCardProps {
 }
 
 function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
-  return payMethods.filter(
-    (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem'
-  )
+  const nonEpayTypes = new Set([
+    'stripe',
+    'stripe_payment_intent',
+    'creem',
+    'wallet',
+    'waffo',
+    'waffo_pancake',
+  ])
+  return payMethods.filter((m) => m?.type && !nonEpayTypes.has(m.type))
 }
 
 function getBillingPreferenceLabel(
@@ -111,6 +116,8 @@ export function SubscriptionPlansCard({
   const [selectedPlan, setSelectedPlan] = useState<PlanRecord | null>(null)
 
   const enableStripe = !!topupInfo?.enable_stripe_topup
+  const enableStripePaymentIntent =
+    !!topupInfo?.enable_stripe_payment_intent_topup
   const enableCreem = !!topupInfo?.enable_creem_topup
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
   const epayMethods = useMemo(
@@ -629,6 +636,7 @@ export function SubscriptionPlansCard({
         }}
         plan={selectedPlan}
         enableStripe={enableStripe}
+        enableStripePaymentIntent={enableStripePaymentIntent}
         enableCreem={enableCreem}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}

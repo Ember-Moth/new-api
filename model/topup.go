@@ -33,6 +33,7 @@ const (
 	PaymentMethodStripe       = "stripe"
 	PaymentMethodStripeIntent = "stripe_payment_intent"
 	PaymentMethodCreem        = "creem"
+	PaymentMethodWallet       = "wallet"
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 )
@@ -42,6 +43,7 @@ const (
 	PaymentProviderStripe       = "stripe"
 	PaymentProviderStripeIntent = "stripe_payment_intent"
 	PaymentProviderCreem        = "creem"
+	PaymentProviderWallet       = "wallet"
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
 )

@@ -115,6 +115,23 @@ export async function paySubscriptionStripe(
   return res.data
 }
 
+export async function paySubscriptionStripePaymentIntent(
+  data: SubscriptionPayRequest
+): Promise<SubscriptionPayResponse> {
+  const res = await api.post(
+    '/api/subscription/stripe-payment-intent/pay',
+    data
+  )
+  return res.data
+}
+
+export async function paySubscriptionWallet(
+  data: SubscriptionPayRequest
+): Promise<SubscriptionPayResponse> {
+  const res = await api.post('/api/subscription/wallet/pay', data)
+  return res.data
+}
+
 export async function paySubscriptionCreem(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/samber/hot"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -199,6 +201,9 @@ type SubscriptionOrder struct {
 	Money  float64 `json:"money"`
 
 	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	GatewayTradeNo  string `json:"gateway_trade_no" gorm:"type:varchar(255);index"`
+	GatewayAmount   int64  `json:"gateway_amount"`
+	GatewayCurrency string `json:"gateway_currency" gorm:"type:varchar(16)"`
 	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
 	Status          string `json:"status"`
@@ -386,6 +391,103 @@ func CountUserSubscriptionsByPlan(userId int, planId int) (int64, error) {
 	return count, nil
 }
 
+type WalletSubscriptionPurchaseResult struct {
+	Subscription *UserSubscription  `json:"subscription"`
+	Order        *SubscriptionOrder `json:"order"`
+	Plan         *SubscriptionPlan  `json:"plan"`
+	QuotaCost    int                `json:"quota_cost"`
+}
+
+func subscriptionWalletQuotaCost(plan *SubscriptionPlan) (int, error) {
+	if plan == nil {
+		return 0, errors.New("invalid plan")
+	}
+	quotaCost := decimal.NewFromFloat(plan.PriceAmount).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Round(0).
+		IntPart()
+	if quotaCost <= 0 {
+		return 0, errors.New("套餐金额过低")
+	}
+	if quotaCost > int64(^uint(0)>>1) {
+		return 0, errors.New("套餐金额过高")
+	}
+	return int(quotaCost), nil
+}
+
+func PurchaseSubscriptionWithWallet(userId int, planId int) (*WalletSubscriptionPurchaseResult, error) {
+	if userId <= 0 || planId <= 0 {
+		return nil, errors.New("invalid purchase args")
+	}
+
+	result := &WalletSubscriptionPurchaseResult{}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		plan, err := getSubscriptionPlanByIdTx(tx, planId)
+		if err != nil {
+			return err
+		}
+		if !plan.Enabled {
+			return errors.New("套餐未启用")
+		}
+		quotaCost, err := subscriptionWalletQuotaCost(plan)
+		if err != nil {
+			return err
+		}
+
+		update := tx.Model(&User{}).
+			Where("id = ? AND quota >= ?", userId, quotaCost).
+			Update("quota", gorm.Expr("quota - ?", quotaCost))
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected == 0 {
+			return errors.New("余额不足")
+		}
+
+		sub, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "wallet")
+		if err != nil {
+			return err
+		}
+
+		now := common.GetTimestamp()
+		tradeNo := fmt.Sprintf("SUBWALLET%dNO%d%s", userId, now, common.GetRandomString(6))
+		order := &SubscriptionOrder{
+			UserId:          userId,
+			PlanId:          plan.Id,
+			Money:           plan.PriceAmount,
+			TradeNo:         tradeNo,
+			PaymentMethod:   PaymentMethodWallet,
+			PaymentProvider: PaymentProviderWallet,
+			Status:          common.TopUpStatusSuccess,
+			CreateTime:      now,
+			CompleteTime:    now,
+			ProviderPayload: fmt.Sprintf(`{"quota_cost":%d}`, quotaCost),
+		}
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		if err := upsertSubscriptionTopUpTx(tx, order); err != nil {
+			return err
+		}
+
+		result.Subscription = sub
+		result.Order = order
+		result.Plan = plan
+		result.QuotaCost = quotaCost
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_ = invalidateUserCache(userId)
+	if result.Plan != nil {
+		msg := fmt.Sprintf("使用余额购买订阅成功，套餐: %s，扣除余额: %s，支付金额: %.2f", result.Plan.Title, logger.FormatQuota(result.QuotaCost), result.Plan.PriceAmount)
+		RecordLog(userId, LogTypeTopup, msg)
+	}
+	return result, nil
+}
+
 func getUserGroupByIdTx(tx *gorm.DB, userId int) (string, error) {
 	if userId <= 0 {
 		return "", errors.New("invalid userId")
@@ -456,7 +558,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 			return nil, errors.New("已达到该套餐购买上限")
 		}
 	}
-	nowUnix := GetDBTimestamp()
+	nowUnix := getDBTimestampTx(tx)
 	now := time.Unix(nowUnix, 0)
 	endUnix, err := calcPlanEndTime(now, plan)
 	if err != nil {
@@ -509,6 +611,23 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 // expectedPaymentProvider guards against cross-gateway callback attacks (empty skips the check).
 // actualPaymentMethod updates the order's PaymentMethod to reflect the real payment type used (empty skips update).
 func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string) error {
+	return completeSubscriptionOrder(tradeNo, providerPayload, expectedPaymentProvider, actualPaymentMethod, "", 0, "")
+}
+
+func CompleteSubscriptionOrderWithGatewayTradeNo(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, gatewayTradeNo string, gatewayAmount int64, gatewayCurrency string) error {
+	if gatewayTradeNo == "" {
+		return errors.New("gatewayTradeNo is empty")
+	}
+	if gatewayAmount <= 0 {
+		return errors.New("gatewayAmount is invalid")
+	}
+	if strings.TrimSpace(gatewayCurrency) == "" {
+		return errors.New("gatewayCurrency is empty")
+	}
+	return completeSubscriptionOrder(tradeNo, providerPayload, expectedPaymentProvider, actualPaymentMethod, gatewayTradeNo, gatewayAmount, gatewayCurrency)
+}
+
+func completeSubscriptionOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, gatewayTradeNo string, gatewayAmount int64, gatewayCurrency string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
@@ -529,13 +648,22 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
 			return ErrPaymentMethodMismatch
 		}
+		if gatewayTradeNo != "" && order.GatewayTradeNo != gatewayTradeNo {
+			return ErrGatewayTradeNoMismatch
+		}
+		if gatewayAmount > 0 && order.GatewayAmount != gatewayAmount {
+			return ErrTopUpAmountMismatch
+		}
+		if gatewayCurrency != "" && strings.ToLower(strings.TrimSpace(order.GatewayCurrency)) != strings.ToLower(strings.TrimSpace(gatewayCurrency)) {
+			return ErrTopUpCurrencyMismatch
+		}
 		if order.Status == common.TopUpStatusSuccess {
 			return nil
 		}
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
 		}
-		plan, err := GetSubscriptionPlanById(order.PlanId)
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 		if err != nil {
 			return err
 		}
@@ -580,6 +708,36 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	return nil
 }
 
+func UpdatePendingSubscriptionOrderStatusWithGatewayTradeNo(tradeNo string, expectedPaymentProvider string, gatewayTradeNo string, targetStatus string) error {
+	if tradeNo == "" {
+		return errors.New("tradeNo is empty")
+	}
+	if gatewayTradeNo == "" {
+		return errors.New("gatewayTradeNo is empty")
+	}
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var order SubscriptionOrder
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+			return ErrSubscriptionOrderNotFound
+		}
+		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
+			return ErrPaymentMethodMismatch
+		}
+		if order.GatewayTradeNo != gatewayTradeNo {
+			return ErrGatewayTradeNoMismatch
+		}
+		if order.Status != common.TopUpStatusPending {
+			return ErrSubscriptionOrderStatusInvalid
+		}
+		order.Status = targetStatus
+		return tx.Save(&order).Error
+	})
+}
+
 func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if tx == nil || order == nil {
 		return errors.New("invalid subscription order")
@@ -589,14 +747,18 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if err := tx.Where("trade_no = ?", order.TradeNo).First(&topup).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			topup = TopUp{
-				UserId:        order.UserId,
-				Amount:        0,
-				Money:         order.Money,
-				TradeNo:       order.TradeNo,
-				PaymentMethod: order.PaymentMethod,
-				CreateTime:    order.CreateTime,
-				CompleteTime:  now,
-				Status:        common.TopUpStatusSuccess,
+				UserId:          order.UserId,
+				Amount:          0,
+				Money:           order.Money,
+				TradeNo:         order.TradeNo,
+				PaymentMethod:   order.PaymentMethod,
+				PaymentProvider: order.PaymentProvider,
+				GatewayTradeNo:  order.GatewayTradeNo,
+				GatewayAmount:   order.GatewayAmount,
+				GatewayCurrency: order.GatewayCurrency,
+				CreateTime:      order.CreateTime,
+				CompleteTime:    now,
+				Status:          common.TopUpStatusSuccess,
 			}
 			return tx.Create(&topup).Error
 		}
@@ -607,6 +769,26 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
 		return ErrPaymentMethodMismatch
+	}
+	if topup.PaymentProvider == "" {
+		topup.PaymentProvider = order.PaymentProvider
+	} else if order.PaymentProvider != "" && topup.PaymentProvider != order.PaymentProvider {
+		return ErrPaymentMethodMismatch
+	}
+	if topup.GatewayTradeNo == "" {
+		topup.GatewayTradeNo = order.GatewayTradeNo
+	} else if order.GatewayTradeNo != "" && topup.GatewayTradeNo != order.GatewayTradeNo {
+		return ErrGatewayTradeNoMismatch
+	}
+	if topup.GatewayAmount == 0 {
+		topup.GatewayAmount = order.GatewayAmount
+	} else if order.GatewayAmount > 0 && topup.GatewayAmount != order.GatewayAmount {
+		return ErrTopUpAmountMismatch
+	}
+	if topup.GatewayCurrency == "" {
+		topup.GatewayCurrency = order.GatewayCurrency
+	} else if order.GatewayCurrency != "" && strings.ToLower(strings.TrimSpace(topup.GatewayCurrency)) != strings.ToLower(strings.TrimSpace(order.GatewayCurrency)) {
+		return ErrTopUpCurrencyMismatch
 	}
 	if topup.CreateTime == 0 {
 		topup.CreateTime = order.CreateTime

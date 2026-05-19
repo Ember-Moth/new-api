@@ -96,6 +96,13 @@ export interface SubscriptionPayResponse {
   data?: {
     pay_link?: string
     checkout_url?: string
+    client_secret?: string
+    publishable_key?: string
+    trade_no?: string
+    payment_intent_id?: string
+    amount?: number
+    currency?: string
+    quota_cost?: number
   }
   url?: string
 }

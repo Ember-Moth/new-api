@@ -51,6 +51,24 @@ func insertSubscriptionOrderForPaymentGuardTest(t *testing.T, tradeNo string, us
 	require.NoError(t, order.Insert())
 }
 
+func insertStripePaymentIntentSubscriptionOrderForPaymentGuardTest(t *testing.T, tradeNo string, userID int, planID int, gatewayTradeNo string, gatewayAmount int64, gatewayCurrency string) {
+	t.Helper()
+	order := &SubscriptionOrder{
+		UserId:          userID,
+		PlanId:          planID,
+		Money:           9.99,
+		TradeNo:         tradeNo,
+		GatewayTradeNo:  gatewayTradeNo,
+		GatewayAmount:   gatewayAmount,
+		GatewayCurrency: gatewayCurrency,
+		PaymentMethod:   PaymentMethodStripeIntent,
+		PaymentProvider: PaymentProviderStripeIntent,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, order.Insert())
+}
+
 func insertTopUpForPaymentGuardTest(t *testing.T, tradeNo string, userID int, paymentProvider string) {
 	t.Helper()
 	topUp := &TopUp{
@@ -241,6 +259,138 @@ func TestCompleteSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T
 
 	topUp := GetTopUpByTradeNo("sub-guard-order")
 	assert.Nil(t, topUp)
+}
+
+func TestCompleteSubscriptionOrderWithGatewayTradeNo_RequiresGatewayAmountAndCurrencyMatch(t *testing.T) {
+	testCases := []struct {
+		name            string
+		gatewayTradeNo  string
+		gatewayAmount   int64
+		gatewayCurrency string
+		expectedError   error
+	}{
+		{
+			name:            "gateway trade number mismatch",
+			gatewayTradeNo:  "pi_other",
+			gatewayAmount:   100,
+			gatewayCurrency: "cny",
+			expectedError:   ErrGatewayTradeNoMismatch,
+		},
+		{
+			name:            "amount mismatch",
+			gatewayTradeNo:  "pi_expected",
+			gatewayAmount:   101,
+			gatewayCurrency: "cny",
+			expectedError:   ErrTopUpAmountMismatch,
+		},
+		{
+			name:            "currency mismatch",
+			gatewayTradeNo:  "pi_expected",
+			gatewayAmount:   100,
+			gatewayCurrency: "usd",
+			expectedError:   ErrTopUpCurrencyMismatch,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			truncateTables(t)
+			insertUserForPaymentGuardTest(t, 404, 0)
+			plan := insertSubscriptionPlanForPaymentGuardTest(t, 504)
+			insertStripePaymentIntentSubscriptionOrderForPaymentGuardTest(t, "sub-pi-guard", 404, plan.Id, "pi_expected", 100, "cny")
+
+			err := CompleteSubscriptionOrderWithGatewayTradeNo("sub-pi-guard", `{"provider":"stripe_payment_intent"}`, PaymentProviderStripeIntent, PaymentMethodStripeIntent, tc.gatewayTradeNo, tc.gatewayAmount, tc.gatewayCurrency)
+			require.ErrorIs(t, err, tc.expectedError)
+
+			order := GetSubscriptionOrderByTradeNo("sub-pi-guard")
+			require.NotNil(t, order)
+			assert.Equal(t, common.TopUpStatusPending, order.Status)
+			assert.Zero(t, countUserSubscriptionsForPaymentGuardTest(t, 404))
+		})
+	}
+}
+
+func TestCompleteSubscriptionOrderWithGatewayTradeNo_CompletesMatchingOrder(t *testing.T) {
+	truncateTables(t)
+	insertUserForPaymentGuardTest(t, 405, 0)
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 505)
+	insertStripePaymentIntentSubscriptionOrderForPaymentGuardTest(t, "sub-pi-success", 405, plan.Id, "pi_success", 100, "cny")
+
+	err := CompleteSubscriptionOrderWithGatewayTradeNo("sub-pi-success", `{"provider":"stripe_payment_intent"}`, PaymentProviderStripeIntent, PaymentMethodStripeIntent, "pi_success", 100, "CNY")
+	require.NoError(t, err)
+
+	order := GetSubscriptionOrderByTradeNo("sub-pi-success")
+	require.NotNil(t, order)
+	assert.Equal(t, common.TopUpStatusSuccess, order.Status)
+	assert.Equal(t, int64(1), countUserSubscriptionsForPaymentGuardTest(t, 405))
+
+	topUp := GetTopUpByTradeNo("sub-pi-success")
+	require.NotNil(t, topUp)
+	assert.Equal(t, PaymentProviderStripeIntent, topUp.PaymentProvider)
+	assert.Equal(t, "pi_success", topUp.GatewayTradeNo)
+	assert.Equal(t, int64(100), topUp.GatewayAmount)
+	assert.Equal(t, "cny", topUp.GatewayCurrency)
+}
+
+func TestPurchaseSubscriptionWithWallet_DeductsQuotaAndCreatesSubscription(t *testing.T) {
+	truncateTables(t)
+	userID := 407
+	initialQuota := int(10 * common.QuotaPerUnit)
+	insertUserForPaymentGuardTest(t, userID, initialQuota)
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 507)
+	plan.PriceAmount = 2
+	require.NoError(t, DB.Save(plan).Error)
+	InvalidateSubscriptionPlanCache(plan.Id)
+
+	result, err := PurchaseSubscriptionWithWallet(userID, plan.Id)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	quotaCost := int(2 * common.QuotaPerUnit)
+	assert.Equal(t, quotaCost, result.QuotaCost)
+	assert.Equal(t, initialQuota-quotaCost, getUserQuotaForPaymentGuardTest(t, userID))
+	assert.Equal(t, int64(1), countUserSubscriptionsForPaymentGuardTest(t, userID))
+
+	order := GetSubscriptionOrderByTradeNo(result.Order.TradeNo)
+	require.NotNil(t, order)
+	assert.Equal(t, PaymentProviderWallet, order.PaymentProvider)
+	assert.Equal(t, PaymentMethodWallet, order.PaymentMethod)
+	assert.Equal(t, common.TopUpStatusSuccess, order.Status)
+
+	topUp := GetTopUpByTradeNo(result.Order.TradeNo)
+	require.NotNil(t, topUp)
+	assert.Equal(t, PaymentProviderWallet, topUp.PaymentProvider)
+	assert.Equal(t, PaymentMethodWallet, topUp.PaymentMethod)
+}
+
+func TestPurchaseSubscriptionWithWallet_RejectsInsufficientQuota(t *testing.T) {
+	truncateTables(t)
+	userID := 408
+	insertUserForPaymentGuardTest(t, userID, int(common.QuotaPerUnit))
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 508)
+	plan.PriceAmount = 2
+	require.NoError(t, DB.Save(plan).Error)
+	InvalidateSubscriptionPlanCache(plan.Id)
+
+	result, err := PurchaseSubscriptionWithWallet(userID, plan.Id)
+	require.Error(t, err)
+	require.Nil(t, result)
+	assert.Equal(t, int(common.QuotaPerUnit), getUserQuotaForPaymentGuardTest(t, userID))
+	assert.Zero(t, countUserSubscriptionsForPaymentGuardTest(t, userID))
+}
+
+func TestUpdatePendingSubscriptionOrderStatusWithGatewayTradeNo_RejectsMismatchedGatewayTradeNo(t *testing.T) {
+	truncateTables(t)
+	insertUserForPaymentGuardTest(t, 406, 0)
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 506)
+	insertStripePaymentIntentSubscriptionOrderForPaymentGuardTest(t, "sub-pi-failed", 406, plan.Id, "pi_expected", 100, "cny")
+
+	err := UpdatePendingSubscriptionOrderStatusWithGatewayTradeNo("sub-pi-failed", PaymentProviderStripeIntent, "pi_other", common.TopUpStatusFailed)
+	require.ErrorIs(t, err, ErrGatewayTradeNoMismatch)
+
+	order := GetSubscriptionOrderByTradeNo("sub-pi-failed")
+	require.NotNil(t, order)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
 }
 
 func TestExpireSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T) {

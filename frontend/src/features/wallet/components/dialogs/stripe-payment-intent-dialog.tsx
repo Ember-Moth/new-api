@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
+import * as React from 'react'
 import {
   Elements,
   PaymentElement,
@@ -25,7 +25,6 @@ import {
 } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
 import { CreditCard, Loader2 } from 'lucide-react'
-import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -37,13 +36,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import type { StripePaymentIntentData } from '../../hooks'
+
+export type StripePaymentIntentData = {
+  client_secret: string
+  publishable_key: string
+  trade_no: string
+  payment_intent_id: string
+  amount: number
+  currency: string
+}
 
 type StripePaymentIntentDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   paymentIntent: StripePaymentIntentData | null
   onPaymentSettled?: () => Promise<void> | void
+  returnUrl?: string
+  successMessage?: string
 }
 
 const ZERO_DECIMAL_CURRENCIES = new Set([
@@ -85,10 +94,14 @@ function StripePaymentIntentForm({
   paymentIntent,
   onOpenChange,
   onPaymentSettled,
+  returnUrl,
+  successMessage,
 }: {
   paymentIntent: StripePaymentIntentData
   onOpenChange: (open: boolean) => void
   onPaymentSettled?: () => Promise<void> | void
+  returnUrl?: string
+  successMessage?: string
 }) {
   const { t } = useTranslation()
   const stripe = useStripe()
@@ -110,7 +123,8 @@ function StripePaymentIntentForm({
     const result = await stripe.confirmPayment({
       elements,
       confirmParams: {
-        return_url: `${window.location.origin}/wallet?show_history=true`,
+        return_url:
+          returnUrl || `${window.location.origin}/wallet?show_history=true`,
       },
       redirect: 'if_required',
     })
@@ -122,7 +136,8 @@ function StripePaymentIntentForm({
     }
 
     toast.success(
-      t('Payment submitted. Balance will update after confirmation.')
+      successMessage ||
+        t('Payment submitted. Balance will update after confirmation.')
     )
     onOpenChange(false)
     await onPaymentSettled?.()
@@ -162,6 +177,8 @@ export function StripePaymentIntentDialog({
   onOpenChange,
   paymentIntent,
   onPaymentSettled,
+  returnUrl,
+  successMessage,
 }: StripePaymentIntentDialogProps) {
   const { t } = useTranslation()
   const publishableKey = paymentIntent?.publishable_key
@@ -198,6 +215,8 @@ export function StripePaymentIntentDialog({
               paymentIntent={paymentIntent}
               onOpenChange={onOpenChange}
               onPaymentSettled={onPaymentSettled}
+              returnUrl={returnUrl}
+              successMessage={successMessage}
             />
           </Elements>
         ) : (

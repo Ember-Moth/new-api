@@ -430,6 +430,8 @@ func sessionAsyncPaymentFailed(ctx context.Context, event stripe.Event, callerIp
 func isNonRetryableStripePaymentIntentError(err error) bool {
 	return errors.Is(err, model.ErrTopUpStatusInvalid) ||
 		errors.Is(err, model.ErrTopUpNotFound) ||
+		errors.Is(err, model.ErrSubscriptionOrderNotFound) ||
+		errors.Is(err, model.ErrSubscriptionOrderStatusInvalid) ||
 		errors.Is(err, model.ErrPaymentMethodMismatch) ||
 		errors.Is(err, model.ErrGatewayTradeNoMismatch) ||
 		errors.Is(err, model.ErrTopUpAmountMismatch) ||
@@ -465,6 +467,23 @@ func paymentIntentSucceeded(ctx context.Context, event stripe.Event, callerIp st
 
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
+
+	payload := map[string]any{
+		"payment_intent":  gatewayTradeNo,
+		"amount_received": amountReceived,
+		"currency":        strings.ToUpper(currency),
+		"event_type":      string(event.Type),
+	}
+	if err := model.CompleteSubscriptionOrderWithGatewayTradeNo(referenceId, common.GetJsonString(payload), model.PaymentProviderStripeIntent, model.PaymentMethodStripeIntent, gatewayTradeNo, amountReceived, currency); err == nil {
+		logger.LogInfo(ctx, fmt.Sprintf("Stripe PaymentIntent 订阅订单处理成功 trade_no=%s payment_intent=%s event_type=%s client_ip=%s", referenceId, gatewayTradeNo, string(event.Type), callerIp))
+		return nil
+	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
+		logger.LogError(ctx, fmt.Sprintf("Stripe PaymentIntent 订阅订单处理失败 trade_no=%s payment_intent=%s event_type=%s client_ip=%s error=%q", referenceId, gatewayTradeNo, string(event.Type), callerIp, err.Error()))
+		if isNonRetryableStripePaymentIntentError(err) {
+			return nil
+		}
+		return err
+	}
 
 	err = model.RechargeStripePaymentIntent(referenceId, gatewayTradeNo, amountReceived, currency, callerIp)
 	if err != nil {
@@ -503,6 +522,17 @@ func paymentIntentFailed(ctx context.Context, event stripe.Event, callerIp strin
 
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
+
+	if err := model.UpdatePendingSubscriptionOrderStatusWithGatewayTradeNo(referenceId, model.PaymentProviderStripeIntent, gatewayTradeNo, targetStatus); err == nil {
+		logger.LogInfo(ctx, fmt.Sprintf("Stripe PaymentIntent 订阅订单已标记为%s trade_no=%s payment_intent=%s client_ip=%s", targetStatus, referenceId, gatewayTradeNo, callerIp))
+		return nil
+	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
+		logger.LogError(ctx, fmt.Sprintf("Stripe PaymentIntent 更新订阅订单状态失败 trade_no=%s payment_intent=%s target_status=%s client_ip=%s error=%q", referenceId, gatewayTradeNo, targetStatus, callerIp, err.Error()))
+		if isNonRetryableStripePaymentIntentError(err) {
+			return nil
+		}
+		return err
+	}
 
 	if err := model.UpdatePendingTopUpStatusWithGatewayTradeNo(referenceId, model.PaymentProviderStripeIntent, gatewayTradeNo, targetStatus); err != nil {
 		if errors.Is(err, model.ErrTopUpNotFound) || errors.Is(err, model.ErrTopUpStatusInvalid) {
@@ -652,6 +682,10 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 }
 
 func genStripePaymentIntent(referenceId string, email string, amount int64, currency string) (*stripePaymentIntentResult, error) {
+	return genStripePaymentIntentWithMetadata(referenceId, email, amount, currency, fmt.Sprintf("Top up %s", referenceId), nil)
+}
+
+func genStripePaymentIntentWithMetadata(referenceId string, email string, amount int64, currency string, description string, metadata map[string]string) (*stripePaymentIntentResult, error) {
 	if !strings.HasPrefix(setting.StripePaymentIntentApiSecret, "sk_") && !strings.HasPrefix(setting.StripePaymentIntentApiSecret, "rk_") {
 		return nil, fmt.Errorf("无效的Stripe PaymentIntent API密钥")
 	}
@@ -660,15 +694,19 @@ func genStripePaymentIntent(referenceId string, email string, amount int64, curr
 	}
 
 	currency = strings.ToLower(strings.TrimSpace(currency))
+	intentMetadata := map[string]string{
+		"trade_no": referenceId,
+		"provider": model.PaymentProviderStripeIntent,
+	}
+	for key, value := range metadata {
+		intentMetadata[key] = value
+	}
 
 	params := &stripe.PaymentIntentParams{
 		Amount:      stripe.Int64(amount),
 		Currency:    stripe.String(currency),
-		Description: stripe.String(fmt.Sprintf("Top up %s", referenceId)),
-		Metadata: map[string]string{
-			"trade_no": referenceId,
-			"provider": model.PaymentProviderStripeIntent,
-		},
+		Description: stripe.String(description),
+		Metadata:    intentMetadata,
 	}
 	paymentMethodTypes := setting.StripePaymentIntentPaymentMethodTypeList()
 	if len(paymentMethodTypes) > 0 {

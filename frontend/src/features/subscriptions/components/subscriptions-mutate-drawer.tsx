@@ -16,11 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
-import { zodResolver } from '@hookform/resolvers/zod'
-import { CalendarClock, CreditCard, RefreshCw, Settings2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { type Resolver, useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { CalendarClock, CreditCard, RefreshCw, Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -519,6 +518,11 @@ export function SubscriptionsMutateDrawer({
                 <CreditCard className='h-4 w-4' />
                 {t('Third-party Payment Config')}
               </h3>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Stripe PaymentIntent uses Actual Amount and global PaymentIntent settings; no per-plan Price ID is required.'
+                )}
+              </p>
 
               <FormField
                 control={form.control}
