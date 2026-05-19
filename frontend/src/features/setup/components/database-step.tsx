@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Database, HardDrive, Server } from 'lucide-react'
+import { Database, Server } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -34,18 +34,6 @@ const DATABASE_META: Record<
     variant: 'info' | 'success' | 'warning'
   }
 > = {
-  sqlite: {
-    label: 'SQLite',
-    descriptionKey:
-      'SQLite stores all data in a single file. Make sure that file is persisted when running in containers.',
-    variant: 'warning',
-  },
-  mysql: {
-    label: 'MySQL',
-    descriptionKey:
-      'MySQL is a production-ready relational database. Keep your credentials secure.',
-    variant: 'success',
-  },
   postgres: {
     label: 'PostgreSQL',
     descriptionKey:
@@ -95,36 +83,6 @@ export function DatabaseStep({ status }: DatabaseStepProps) {
           icon={Database}
         />
       </div>
-
-      {status?.database_type === 'sqlite' && (
-        <Alert className='border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/40'>
-          <AlertTitle className='flex items-center gap-2'>
-            <HardDrive className='size-4 text-amber-500' />
-            {t('Persist your data file')}
-          </AlertTitle>
-          <AlertDescription>
-            <p>
-              {t(
-                'When running in containers or ephemeral environments, ensure the SQLite file is mapped to persistent storage to avoid data loss on restart.'
-              )}
-            </p>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {status?.database_type === 'mysql' && (
-        <Alert className='border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/40'>
-          <AlertTitle className='flex items-center gap-2'>
-            <Server className='size-4 text-emerald-500' />
-            {t('MySQL detected')}
-          </AlertTitle>
-          <AlertDescription>
-            {t(
-              'MySQL is production ready. Ensure automated backups and a dedicated user with the minimal required privileges are configured.'
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
 
       {status?.database_type === 'postgres' && (
         <Alert className='border-sky-200 bg-sky-50 dark:border-sky-900/60 dark:bg-sky-950/40'>

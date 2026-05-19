@@ -2,7 +2,7 @@
 
 本文档说明如何使用 k3s 部署 new-api。当前部署方式保持前后端分离：后端是 API 服务，前端是独立静态站点容器，Ingress 负责路径转发。
 
-数据库和 Redis 不部署在 k3s 集群内。生产环境请对接集群外部 PostgreSQL/MySQL、云数据库以及外部 Redis。
+数据库和 Redis 不部署在 k3s 集群内。生产环境请对接集群外部 PostgreSQL、云 PostgreSQL 以及外部 Redis。
 
 ## 镜像
 
@@ -101,7 +101,7 @@ curl https://new-api.example.com/api/status
 
 ## 生产建议
 
-- 生产环境必须使用 k3s 外部 PostgreSQL/MySQL 或云数据库，不在集群内创建数据库 Pod。
+- 生产环境必须使用 k3s 外部 PostgreSQL 或云 PostgreSQL，不在集群内创建数据库 Pod。
 - 多副本部署必须设置固定 `SESSION_SECRET`、`CRYPTO_SECRET`，并配置外部 Redis。
 - HTTPS 生产环境建议保持 `SESSION_COOKIE_SECURE=true`、`SESSION_COOKIE_SAMESITE=lax`；Cloudflare Pages Functions 同源反代时不要设置 `SESSION_COOKIE_DOMAIN`。
 - 默认清单不挂载数据库 PVC，后端 Pod 可无状态重建；持久化数据由外部数据库承担。

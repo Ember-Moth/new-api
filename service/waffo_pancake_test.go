@@ -1,15 +1,13 @@
 package service
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/testutil"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -17,26 +15,12 @@ import (
 func setupWaffoPancakeTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
-	common.RedisEnabled = false
-
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	require.NoError(t, err)
+	db := testutil.OpenPostgresTestDB(t, t.Name())
 
 	model.DB = db
 	model.LOG_DB = db
 
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}))
-
-	t.Cleanup(func() {
-		sqlDB, err := db.DB()
-		if err == nil {
-			_ = sqlDB.Close()
-		}
-	})
 
 	return db
 }

@@ -281,8 +281,8 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 |------|------|
 | **后端运行环境** | Linux、macOS 或 Windows，Go 1.22+ 构建 |
 | **前端运行环境** | 静态站点服务，发布 `frontend/dist` |
-| **本地数据库** | SQLite |
-| **生产数据库** | k3s 外部 MySQL ≥ 5.7.8、PostgreSQL ≥ 9.6 或云数据库 |
+| **本地数据库** | PostgreSQL |
+| **生产数据库** | k3s 外部 PostgreSQL 或云 PostgreSQL |
 | **缓存** | 外部 Redis（可选，多节点或缓存场景建议使用） |
 
 ### ⚙️ 环境变量配置
@@ -298,7 +298,7 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 | `SESSION_COOKIE_DOMAIN` | Session Cookie 的 `Domain`，Cloudflare Pages Functions 同源反代时保持未设置 | - |
 | `SESSION_COOKIE_MAX_AGE` | Session Cookie 有效期，单位秒 | `2592000` |
 | `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
-| `SQL_DSN` | 数据库连接字符串                                                     | - |
+| `SQL_DSN` | PostgreSQL 数据库连接字符串，必须以 `postgres://` 或 `postgresql://` 开头 | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |

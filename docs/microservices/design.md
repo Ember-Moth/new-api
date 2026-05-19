@@ -22,7 +22,7 @@ Ingress
         └─ relay-worker       Go/Rust, gRPC streaming
 
 External dependencies
-  ├─ PostgreSQL/MySQL or cloud database
+  ├─ PostgreSQL or cloud PostgreSQL
   └─ Redis-compatible cache, Redis or DragonflyDB
 ```
 

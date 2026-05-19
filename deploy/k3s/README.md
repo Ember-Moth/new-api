@@ -15,11 +15,11 @@ kubectl create namespace new-api --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f /tmp/new-api-secret.yaml
 ```
 
-本部署不在 k3s 集群内创建数据库。请对接 k3s 外部的 PostgreSQL/MySQL 或云数据库，并按需对接外部 Redis：
+本部署不在 k3s 集群内创建数据库。请对接 k3s 外部的 PostgreSQL 或云 PostgreSQL，并按需对接外部 Redis：
 
 - `SESSION_SECRET`：必须固定，避免重启后登录态失效。
 - `CRYPTO_SECRET`：必须固定，避免 Redis 缓存或多副本场景下数据不可解密。
-- `SQL_DSN`：必须填写外部 PostgreSQL/MySQL 连接串。
+- `SQL_DSN`：必须填写外部 PostgreSQL 连接串，且必须以 `postgres://` 或 `postgresql://` 开头。
 - `REDIS_CONN_STRING`：建议填写外部 Redis 连接串；多副本、缓存、限流场景必须设置。
 
 ## 修改镜像和域名

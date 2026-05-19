@@ -8,7 +8,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 - **Backend**: Go 1.22+, Gin web framework, GORM v2 ORM
 - **Frontend**: React 19, TypeScript, Rsbuild, Base UI, Tailwind CSS
-- **Databases**: SQLite, MySQL, PostgreSQL (all three must be supported)
+- **Databases**: PostgreSQL only
 - **Cache**: Redis (go-redis) + in-memory cache
 - **Auth**: JWT, WebAuthn/Passkeys, OAuth (GitHub, Discord, OIDC, etc.)
 - **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
@@ -43,7 +43,7 @@ frontend/       — Frontend application (React 19, Rsbuild, Base UI, Tailwind)
 - The frontend is deployed as an independent static application. Build it from `frontend/` and publish `frontend/dist`; treat the Go backend as an API service and use `FRONTEND_BASE_URL` plus proxy/CORS configuration for separation.
 - Cloudflare Pages is supported through `frontend/functions/`, which proxies backend paths to `BACKEND_ORIGIN`. For this mode, do not set `VITE_REACT_APP_SERVER_URL`; keep frontend requests same-origin and configure backend cookies with `SESSION_COOKIE_SECURE=true`, `SESSION_COOKIE_SAMESITE=lax`, and no `SESSION_COOKIE_DOMAIN`.
 - k3s is the preferred deployment target for this branch. OCI build definitions live at `Containerfile.backend` and `Containerfile.frontend`; k3s/Kustomize manifests live under `deploy/k3s/`. Keep backend and frontend images separate.
-- k3s manifests must assume external databases and external/cloud Redis. Do not add in-cluster database or Redis workloads to the default k3s deployment unless explicitly requested.
+- k3s manifests must assume external PostgreSQL and external/cloud Redis. Do not add in-cluster database or Redis workloads to the default k3s deployment unless explicitly requested.
 - Container image publishing is handled by `.github/workflows/container-images.yml`, which publishes separate backend and frontend images to GHCR. Do not reintroduce compose-based deployment unless explicitly requested.
 - The classic frontend and Electron desktop packaging have been removed. Do not add classic theme switching, classic sync tooling, or Electron build workflows unless the project explicitly restores those products.
 - Keep a single root `README.md` in Chinese. Do not recreate localized README variants such as `README.en.md`, `README.fr.md`, `README.ja.md`, `README.zh_CN.md`, or `README.zh_TW.md`.
@@ -78,29 +78,27 @@ Do NOT directly import or call `encoding/json` in business code. These wrappers 
 
 Note: `json.RawMessage`, `json.Number`, and other type definitions from `encoding/json` may still be referenced as types, but actual marshal/unmarshal calls must go through `common.*`.
 
-### Rule 2: Database Compatibility — SQLite, MySQL >= 5.7.8, PostgreSQL >= 9.6
+### Rule 2: Database — PostgreSQL Only
 
-All database code MUST be fully compatible with all three databases simultaneously.
+This branch supports PostgreSQL only. Do not add SQLite or MySQL runtime paths, drivers, tests, docs, or deployment examples unless the project explicitly restores those products.
 
 **Use GORM abstractions:**
 - Prefer GORM methods (`Create`, `Find`, `Where`, `Updates`, etc.) over raw SQL.
 - Let GORM handle primary key generation — do not use `AUTO_INCREMENT` or `SERIAL` directly.
 
 **When raw SQL is unavoidable:**
-- Column quoting differs: PostgreSQL uses `"column"`, MySQL/SQLite uses `` `column` ``.
-- Use `commonGroupCol`, `commonKeyCol` variables from `model/main.go` for reserved-word columns like `group` and `key`.
-- Boolean values differ: PostgreSQL uses `true`/`false`, MySQL/SQLite uses `1`/`0`. Use `commonTrueVal`/`commonFalseVal`.
-- Use `common.UsingPostgreSQL`, `common.UsingSQLite`, `common.UsingMySQL` flags to branch DB-specific logic.
+- Use PostgreSQL quoting for reserved-word columns, e.g. `"group"`, `"key"`, `"trade_no"`.
+- Use PostgreSQL boolean values (`true`/`false`) in raw SQL.
+- Prefer PostgreSQL transaction and row-locking primitives such as `FOR UPDATE` / GORM locking clauses for concurrent settlement paths.
 
 **Forbidden without cross-DB fallback:**
-- MySQL-only functions (e.g., `GROUP_CONCAT` without PostgreSQL `STRING_AGG` equivalent)
-- PostgreSQL-only operators (e.g., `@>`, `?`, `JSONB` operators)
-- `ALTER COLUMN` in SQLite (unsupported — use column-add workaround)
-- Database-specific column types without fallback — use `TEXT` instead of `JSONB` for JSON storage
+- SQLite or MySQL driver imports.
+- SQLite/MySQL-specific SQL syntax, migrations, environment variables, or deployment instructions.
 
 **Migrations:**
-- Ensure all migrations work on all three databases.
-- For SQLite, use `ALTER TABLE ... ADD COLUMN` instead of `ALTER COLUMN` (see `model/main.go` for patterns).
+- `SQL_DSN` is required and must start with `postgres://` or `postgresql://`.
+- `LOG_SQL_DSN`, when set, must also point to PostgreSQL.
+- Database tests should use `TEST_POSTGRES_DSN` and isolated schemas rather than SQLite in-memory databases.
 
 ### Rule 3: Frontend — Prefer Bun
 

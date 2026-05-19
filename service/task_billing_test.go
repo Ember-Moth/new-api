@@ -3,36 +3,35 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/testutil"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 func TestMain(m *testing.M) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, cleanup, err := testutil.OpenPostgresTestDBFromEnv("service_task_billing")
+	if errors.Is(err, testutil.ErrMissingPostgresDSN) {
+		fmt.Fprintln(os.Stderr, "skipping service task billing tests: set TEST_POSTGRES_DSN to run PostgreSQL database tests")
+		os.Exit(0)
+	}
 	if err != nil {
 		panic("failed to open test db: " + err.Error())
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		panic("failed to get sql.DB: " + err.Error())
-	}
-	sqlDB.SetMaxOpenConns(1)
 
 	model.DB = db
 	model.LOG_DB = db
 
-	common.UsingSQLite = true
-	common.RedisEnabled = false
+	testutil.ConfigurePostgresTestGlobals()
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
 
@@ -48,7 +47,9 @@ func TestMain(m *testing.M) {
 		panic("failed to migrate: " + err.Error())
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 // ---------------------------------------------------------------------------
@@ -58,13 +59,15 @@ func TestMain(m *testing.M) {
 func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		model.DB.Exec("DELETE FROM tasks")
-		model.DB.Exec("DELETE FROM users")
-		model.DB.Exec("DELETE FROM tokens")
-		model.DB.Exec("DELETE FROM logs")
-		model.DB.Exec("DELETE FROM channels")
-		model.DB.Exec("DELETE FROM top_ups")
-		model.DB.Exec("DELETE FROM user_subscriptions")
+		testutil.TruncateTables(t, model.DB,
+			"tasks",
+			"users",
+			"tokens",
+			"logs",
+			"channels",
+			"top_ups",
+			"user_subscriptions",
+		)
 	})
 }
 
@@ -104,8 +107,14 @@ func seedSubscription(t *testing.T, id int, userId int, amountTotal int64, amoun
 
 func seedChannel(t *testing.T, id int) {
 	t.Helper()
-	ch := &model.Channel{Id: id, Name: "test_channel", Key: "sk-test", Status: common.ChannelStatusEnabled}
-	require.NoError(t, model.DB.Create(ch).Error)
+	require.NoError(t, model.DB.Exec(
+		`INSERT INTO channels (id, name, key, status, "group") VALUES (?, ?, ?, ?, ?)`,
+		id,
+		"test_channel",
+		"sk-test",
+		common.ChannelStatusEnabled,
+		"default",
+	).Error)
 }
 
 func makeTask(userId, channelId, quota, tokenId int, billingSource string, subscriptionId int) *model.Task {
@@ -133,6 +142,37 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 			},
 		},
 	}
+}
+
+func createTask(t *testing.T, task *model.Task) {
+	t.Helper()
+
+	properties, err := common.Marshal(task.Properties)
+	require.NoError(t, err)
+	privateData, err := common.Marshal(task.PrivateData)
+	require.NoError(t, err)
+	data := task.Data
+	if len(data) == 0 {
+		data = json.RawMessage(`{}`)
+	}
+
+	require.NoError(t, model.DB.Raw(
+		`INSERT INTO tasks (created_at, updated_at, task_id, user_id, "group", channel_id, quota, status, progress, properties, private_data, data)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::json, ?::json, ?::json)
+		 RETURNING id`,
+		task.CreatedAt,
+		task.UpdatedAt,
+		task.TaskID,
+		task.UserId,
+		task.Group,
+		task.ChannelId,
+		task.Quota,
+		task.Status,
+		task.Progress,
+		string(properties),
+		string(privateData),
+		string(data),
+	).Row().Scan(&task.ID))
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +537,7 @@ func TestCASGuardedRefund_Win(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	require.NoError(t, model.DB.Create(task).Error)
+	createTask(t, task)
 
 	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusFailure), 0)
 
@@ -530,7 +570,7 @@ func TestCASGuardedRefund_Lose(t *testing.T) {
 	// Create task with IN_PROGRESS in DB
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	require.NoError(t, model.DB.Create(task).Error)
+	createTask(t, task)
 
 	// Simulate another process already transitioning to FAILURE
 	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("status", model.TaskStatusFailure)
@@ -562,7 +602,7 @@ func TestCASGuardedSettle_Win(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	require.NoError(t, model.DB.Create(task).Error)
+	createTask(t, task)
 
 	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusSuccess), actualQuota)
 
@@ -592,7 +632,7 @@ func TestNonTerminalUpdate_NoBilling(t *testing.T) {
 	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
 	task.Status = model.TaskStatus(model.TaskStatusInProgress)
 	task.Progress = "20%"
-	require.NoError(t, model.DB.Create(task).Error)
+	createTask(t, task)
 
 	// Simulate a non-terminal poll update (still IN_PROGRESS, progress changed)
 	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusInProgress), 0)

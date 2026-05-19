@@ -2,36 +2,34 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/glebarez/sqlite"
+	"github.com/QuantumNous/new-api/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 func TestMain(m *testing.M) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, cleanup, err := testutil.OpenPostgresTestDBFromEnv("model_task_cas")
+	if errors.Is(err, testutil.ErrMissingPostgresDSN) {
+		fmt.Fprintln(os.Stderr, "skipping model task CAS tests: set TEST_POSTGRES_DSN to run PostgreSQL database tests")
+		os.Exit(0)
+	}
 	if err != nil {
 		panic("failed to open test db: " + err.Error())
 	}
 	DB = db
 	LOG_DB = db
 
-	common.UsingSQLite = true
-	common.RedisEnabled = false
+	testutil.ConfigurePostgresTestGlobals()
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		panic("failed to get sql.DB: " + err.Error())
-	}
-	sqlDB.SetMaxOpenConns(1)
 
 	if err := db.AutoMigrate(
 		&Task{},
@@ -47,21 +45,25 @@ func TestMain(m *testing.M) {
 		panic("failed to migrate: " + err.Error())
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
 }
 
 func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		DB.Exec("DELETE FROM tasks")
-		DB.Exec("DELETE FROM users")
-		DB.Exec("DELETE FROM tokens")
-		DB.Exec("DELETE FROM logs")
-		DB.Exec("DELETE FROM channels")
-		DB.Exec("DELETE FROM top_ups")
-		DB.Exec("DELETE FROM subscription_orders")
-		DB.Exec("DELETE FROM subscription_plans")
-		DB.Exec("DELETE FROM user_subscriptions")
+		testutil.TruncateTables(t, DB,
+			"tasks",
+			"users",
+			"tokens",
+			"logs",
+			"channels",
+			"top_ups",
+			"subscription_orders",
+			"subscription_plans",
+			"user_subscriptions",
+		)
 	})
 }
 

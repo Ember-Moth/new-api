@@ -43,7 +43,7 @@
 | `SESSION_COOKIE_SAMESITE` | `lax` | Session Cookie 的 `SameSite` 策略，可选 `strict`、`lax`、`none`、`default` |
 | `SESSION_COOKIE_DOMAIN` | 留空 | Session Cookie 的 `Domain`；Cloudflare Pages Functions 同源反代时应留空 |
 | `SESSION_COOKIE_MAX_AGE` | `2592000` | Session Cookie 有效期，单位秒 |
-| `SQL_DSN` | 按数据库类型填写 | 可选；不设置时默认使用 SQLite |
+| `SQL_DSN` | PostgreSQL 连接串，必须以 `postgres://` 或 `postgresql://` 开头 | 必填 |
 | `REDIS_CONN_STRING` | `redis://...` | 可选；多节点或缓存场景建议使用 |
 
 前端使用：

@@ -58,16 +58,10 @@ var (
 )
 
 func topUpTradeNoColumn() string {
-	if common.UsingPostgreSQL {
-		return `"trade_no"`
-	}
-	return "`trade_no`"
+	return `"trade_no"`
 }
 
 func topUpQueryForUpdate(tx *gorm.DB) *gorm.DB {
-	if common.UsingSQLite {
-		return tx
-	}
 	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 }
 
@@ -453,10 +447,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		return errors.New("未提供订单号")
 	}
 
-	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
-		refCol = `"trade_no"`
-	}
+	refCol := `"trade_no"`
 
 	var userId int
 	var quotaToAdd int
@@ -528,10 +519,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	var quota int64
 	topUp := &TopUp{}
 
-	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
-		refCol = `"trade_no"`
-	}
+	refCol := `"trade_no"`
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
@@ -603,10 +591,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	var quotaToAdd int
 	topUp := &TopUp{}
 
-	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
-		refCol = `"trade_no"`
-	}
+	refCol := `"trade_no"`
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error
@@ -666,10 +651,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	var quotaToAdd int
 	topUp := &TopUp{}
 
-	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
-		refCol = `"trade_no"`
-	}
+	refCol := `"trade_no"`
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error

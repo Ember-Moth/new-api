@@ -52,8 +52,7 @@ COPY --from=build /out/new-api /app/new-api
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
 
 ENV GIN_MODE=release \
-    PORT=3000 \
-    SQLITE_PATH=/app/data/new-api.db?_busy_timeout=30000
+    PORT=3000
 
 EXPOSE 3000
 
