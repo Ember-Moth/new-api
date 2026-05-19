@@ -16,12 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as z from 'zod'
-import type { Resolver } from 'react-hook-form'
+
 import { zodResolver } from '@hookform/resolvers/zod'
 import { RotateCcw } from 'lucide-react'
+import type { Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
-import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
+import * as z from 'zod'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsSection } from '../components/settings-section'

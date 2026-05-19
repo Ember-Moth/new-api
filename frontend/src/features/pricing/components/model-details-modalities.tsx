@@ -24,12 +24,12 @@ import {
   Video,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 import type { Modality } from '../types'
 
 type IconComponent = React.ComponentType<{ className?: string }>

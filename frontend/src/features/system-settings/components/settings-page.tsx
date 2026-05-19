@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useSystemOptions, getOptionValue } from '../hooks/use-system-options'
+import { getOptionValue, useSystemOptions } from '../hooks/use-system-options'
 
 type SettingsPageProps<
   TSettings extends Record<string, string | number | boolean | unknown[]>,

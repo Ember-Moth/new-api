@@ -21,12 +21,12 @@ For commercial licensing, please contact support@quantumnous.com
  * Centralized mapper instances for consistent usage across components
  */
 import {
-  MJ_TASK_TYPE_MAPPINGS,
   MJ_STATUS_MAPPINGS,
   MJ_SUBMIT_RESULT_MAPPINGS,
+  MJ_TASK_TYPE_MAPPINGS,
   TASK_ACTION_MAPPINGS,
-  TASK_STATUS_MAPPINGS,
   TASK_PLATFORM_MAPPINGS,
+  TASK_STATUS_MAPPINGS,
 } from '../constants'
 import { createStatusMapper } from './status'
 

@@ -17,11 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
-import * as React from 'react'
-import { type LucideIcon } from 'lucide-react'
+
+import type { LucideIcon } from 'lucide-react'
+import type * as React from 'react'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { stringToColor } from '@/lib/colors'
 import { cn } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 
 export const dotColorMap = {
   success: 'bg-success',
@@ -79,10 +80,8 @@ const sizeMap = {
   lg: 'text-sm gap-2',
 } as const
 
-export interface StatusBadgeProps extends Omit<
-  React.HTMLAttributes<HTMLSpanElement>,
-  'children'
-> {
+export interface StatusBadgeProps
+  extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> {
   label?: string
   children?: React.ReactNode
   icon?: LucideIcon

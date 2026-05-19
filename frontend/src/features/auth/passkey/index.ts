@@ -17,5 +17,5 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 export * from './api'
-export * from './types'
 export * from './hooks/use-passkey-management'
+export * from './types'

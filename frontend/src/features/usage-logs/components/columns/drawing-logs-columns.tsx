@@ -16,13 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+
 import type { ColumnDef } from '@tanstack/react-table'
 import {
   Blend,
   FileText,
   HelpCircle,
   ImageIcon,
+  type LucideIcon,
   Maximize2,
   Move,
   Paintbrush,
@@ -34,26 +35,26 @@ import {
   Video,
   WandSparkles,
   ZoomIn,
-  type LucideIcon,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { formatTimestampToDate } from '@/lib/format'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
+import { formatTimestampToDate } from '@/lib/format'
 import { MJ_TASK_TYPES } from '../../constants'
 import {
-  mjTaskTypeMapper,
   mjStatusMapper,
   mjSubmitResultMapper,
+  mjTaskTypeMapper,
 } from '../../lib/mappers'
 import type { MidjourneyLog } from '../../types'
 import { ImageDialog } from '../dialogs/image-dialog'
 import { PromptDialog } from '../dialogs/prompt-dialog'
 import {
-  createDurationColumn,
   createChannelColumn,
-  createProgressColumn,
+  createDurationColumn,
   createFailReasonColumn,
+  createProgressColumn,
 } from './column-helpers'
 
 const drawingTypeIconMap: Record<string, LucideIcon> = {

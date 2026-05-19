@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import type {
   ChatCompletionRequest,
   Message,
-  PlaygroundConfig,
   ParameterEnabled,
+  PlaygroundConfig,
 } from '../types'
 import { formatMessageForAPI, isValidMessage } from './message-utils'
 

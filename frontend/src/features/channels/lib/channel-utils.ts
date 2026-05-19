@@ -27,7 +27,7 @@ import {
   RESPONSE_TIME_THRESHOLDS,
   TYPE_TO_KEY_PROMPT,
 } from '../constants'
-import type { Channel, ChannelSettings, ChannelOtherSettings } from '../types'
+import type { Channel, ChannelOtherSettings, ChannelSettings } from '../types'
 
 // ============================================================================
 // Channel Type Utilities

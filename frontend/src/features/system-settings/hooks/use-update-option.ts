@@ -19,9 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 import { applyBrandToDom, patchCachedStatus } from '@/lib/brand-bootstrap'
 import { DEFAULT_LOGO, DEFAULT_SYSTEM_NAME } from '@/lib/constants'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 import { updateSystemOption } from '../api'
 import type { SystemOptionsResponse, UpdateOptionRequest } from '../types'
 

@@ -17,10 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  PAYMENT_TYPES,
-  DEFAULT_PRESET_MULTIPLIERS,
-  DEFAULT_PAYMENT_TYPE,
   DEFAULT_MIN_TOPUP,
+  DEFAULT_PAYMENT_TYPE,
+  DEFAULT_PRESET_MULTIPLIERS,
+  PAYMENT_TYPES,
 } from '../constants'
 import type { PresetAmount, TopupInfo } from '../types'
 

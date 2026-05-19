@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode } from 'react'
+
 import { CreditCard, Landmark } from 'lucide-react'
-import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si'
-import { PAYMENT_TYPES, PAYMENT_ICON_COLORS } from '../constants'
+import type { ReactNode } from 'react'
+import { SiAlipay, SiStripe, SiWechat } from 'react-icons/si'
+import { PAYMENT_ICON_COLORS, PAYMENT_TYPES } from '../constants'
 
 // ============================================================================
 // UI Helper Functions

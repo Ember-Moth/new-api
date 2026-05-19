@@ -16,41 +16,42 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+
 import {
-  PaperclipIcon,
-  FileIcon,
-  ImageIcon,
-  ScreenShareIcon,
-  CameraIcon,
-  GlobeIcon,
-  SendIcon,
-  SquareIcon,
   BarChartIcon,
   BoxIcon,
-  NotepadTextIcon,
+  CameraIcon,
   CodeSquareIcon,
+  FileIcon,
+  GlobeIcon,
   GraduationCapIcon,
+  ImageIcon,
+  NotepadTextIcon,
+  PaperclipIcon,
+  ScreenShareIcon,
+  SendIcon,
+  SquareIcon,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import {
+  PromptInput,
+  PromptInputButton,
+  PromptInputFooter,
+  type PromptInputMessage,
+  PromptInputTextarea,
+  PromptInputTools,
+} from '@/components/ai-elements/prompt-input'
+import { Suggestion, Suggestions } from '@/components/ai-elements/suggestion'
+import { ModelGroupSelector } from '@/components/model-group-selector'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  PromptInput,
-  PromptInputButton,
-  PromptInputFooter,
-  PromptInputTextarea,
-  PromptInputTools,
-  type PromptInputMessage,
-} from '@/components/ai-elements/prompt-input'
-import { Suggestion, Suggestions } from '@/components/ai-elements/suggestion'
-import { ModelGroupSelector } from '@/components/model-group-selector'
-import type { ModelOption, GroupOption } from '../types'
+import type { GroupOption, ModelOption } from '../types'
 
 interface PlaygroundInputProps {
   onSubmit: (text: string) => void

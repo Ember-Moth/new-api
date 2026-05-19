@@ -16,46 +16,45 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  type ReactNode,
-  useEffect,
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-} from 'react'
-import { useForm } from 'react-hook-form'
+
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowRight,
-  HelpCircle,
-  Loader2,
-  Sparkles,
-  Trash2,
-  Copy,
-  FileText,
-  Eraser,
-  Plus,
-  Eye,
-  Link2,
-  RefreshCw,
+  Boxes,
   ChevronDown,
   Code,
-  Boxes,
+  Copy,
+  Eraser,
+  Eye,
+  FileText,
+  HelpCircle,
   KeyRound,
+  Link2,
+  Loader2,
+  Plus,
+  RefreshCw,
   Route,
   Server,
   Settings,
   SlidersHorizontal,
+  Sparkles,
+  Trash2,
   Wand2,
 } from 'lucide-react'
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getLobeIcon } from '@/lib/lobe-icon'
-import { cn } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
+import { JsonEditor } from '@/components/json-editor'
+import { MultiSelect } from '@/components/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -99,12 +98,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { JsonEditor } from '@/components/json-editor'
-import { MultiSelect } from '@/components/multi-select'
 import {
   SecureVerificationDialog,
   useSecureVerification,
 } from '@/features/auth/secure-verification'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
+import { getLobeIcon } from '@/lib/lobe-icon'
+import { cn } from '@/lib/utils'
 import {
   createChannel,
   fetchModels,
@@ -128,21 +129,21 @@ import {
 } from '../../constants'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
+  type ChannelFormValues,
   channelFormSchema,
   channelsQueryKeys,
+  deduplicateKeys,
+  extractMappingSourceModels,
+  extractRedirectModels,
+  findMissingModelsInMapping,
+  formatModelsArray,
+  getChannelTypeIcon,
+  getKeyPromptForType,
+  hasModelConfigChanged,
+  parseModelsString,
   transformChannelToFormDefaults,
   transformFormDataToCreatePayload,
   transformFormDataToUpdatePayload,
-  type ChannelFormValues,
-  deduplicateKeys,
-  getChannelTypeIcon,
-  getKeyPromptForType,
-  parseModelsString,
-  formatModelsArray,
-  extractRedirectModels,
-  extractMappingSourceModels,
-  hasModelConfigChanged,
-  findMissingModelsInMapping,
   validateModelMappingJson,
 } from '../../lib'
 import {
@@ -154,8 +155,8 @@ import { useChannels } from '../channels-provider'
 import { CodexOAuthDialog } from '../dialogs/codex-oauth-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
 import {
-  MissingModelsConfirmationDialog,
   type MissingModelsAction,
+  MissingModelsConfirmationDialog,
 } from '../dialogs/missing-models-confirmation-dialog'
 import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
@@ -226,23 +227,23 @@ function readAdvancedSettingsPreference(): boolean {
 function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
   return Boolean(
     values.model_mapping?.trim() ||
-    values.param_override?.trim() ||
-    values.header_override?.trim() ||
-    values.status_code_mapping?.trim() ||
-    values.tag?.trim() ||
-    values.remark?.trim() ||
-    values.priority ||
-    values.weight ||
-    values.proxy?.trim() ||
-    values.system_prompt?.trim() ||
-    values.force_format ||
-    values.thinking_to_content ||
-    values.pass_through_body_enabled ||
-    values.system_prompt_override ||
-    values.claude_beta_query ||
-    values.upstream_model_update_check_enabled ||
-    values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim()
+      values.param_override?.trim() ||
+      values.header_override?.trim() ||
+      values.status_code_mapping?.trim() ||
+      values.tag?.trim() ||
+      values.remark?.trim() ||
+      values.priority ||
+      values.weight ||
+      values.proxy?.trim() ||
+      values.system_prompt?.trim() ||
+      values.force_format ||
+      values.thinking_to_content ||
+      values.pass_through_body_enabled ||
+      values.system_prompt_override ||
+      values.claude_beta_query ||
+      values.upstream_model_update_check_enabled ||
+      values.upstream_model_update_auto_sync_enabled ||
+      values.upstream_model_update_ignored_models?.trim()
   )
 }
 
@@ -3381,7 +3382,9 @@ export function ChannelMutateDrawer({
         redirectSourceModels={redirectModelKeyList}
         customFetcher={!isEditing ? createModeFetcher : undefined}
         existingModelsOverride={
-          !isEditing ? parseModelsString(form.getValues('models') || '') : undefined
+          !isEditing
+            ? parseModelsString(form.getValues('models') || '')
+            : undefined
         }
       />
 

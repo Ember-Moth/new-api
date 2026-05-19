@@ -20,7 +20,7 @@ import { useCallback, useRef } from 'react'
 import { SSE } from 'sse.js'
 import { getCommonHeaders, withApiBaseUrl } from '@/lib/api'
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
-import type { ChatCompletionRequest, ChatCompletionChunk } from '../types'
+import type { ChatCompletionChunk, ChatCompletionRequest } from '../types'
 
 /**
  * Hook for handling streaming chat completion requests

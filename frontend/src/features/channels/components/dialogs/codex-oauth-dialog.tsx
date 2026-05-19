@@ -16,12 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+
+import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink, Copy, Check, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { tryPrettyJson } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -33,6 +32,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { tryPrettyJson } from '@/lib/utils'
 import { completeCodexOAuth, startCodexOAuth } from '../../api'
 
 type CodexOAuthDialogProps = {

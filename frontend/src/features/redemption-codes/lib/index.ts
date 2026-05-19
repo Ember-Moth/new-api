@@ -19,15 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 // Utility Functions
 // ============================================================================
-export { isRedemptionExpired, isTimestampExpired } from './utils'
 
 // ============================================================================
 // Form Utilities
 // ============================================================================
 export {
   getRedemptionFormSchema,
-  type RedemptionFormValues,
   REDEMPTION_FORM_DEFAULT_VALUES,
+  type RedemptionFormValues,
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from './redemption-form'
+export { isRedemptionExpired, isTimestampExpired } from './utils'

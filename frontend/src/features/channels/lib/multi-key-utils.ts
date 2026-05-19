@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  MULTI_KEY_STATUS_CONFIG,
   MULTI_KEY_CONFIRM_MESSAGES,
+  MULTI_KEY_STATUS_CONFIG,
 } from '../constants'
 import type { MultiKeyConfirmAction } from '../types'
 

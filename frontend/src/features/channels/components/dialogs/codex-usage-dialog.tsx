@@ -16,20 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
+
 import {
-  Copy,
   Check,
-  RefreshCw,
   ChevronDown,
   ChevronUp,
-  User,
-  Mail,
+  Copy,
   Hash,
+  Mail,
+  RefreshCw,
+  User,
 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import dayjs from '@/lib/dayjs'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -41,7 +41,8 @@ import {
 } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import dayjs from '@/lib/dayjs'
 
 type CodexRateLimitWindow = {
   used_percent?: number

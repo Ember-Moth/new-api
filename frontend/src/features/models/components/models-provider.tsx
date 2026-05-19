@@ -17,14 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState } from 'react'
+import {
+  createContext,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  useContext,
+  useState,
+} from 'react'
 import type {
   Model,
   ModelTabCategory,
-  Vendor,
   SyncDiffData,
   SyncLocale,
   SyncSource,
+  Vendor,
 } from '../types'
 
 // ============================================================================
@@ -59,8 +66,8 @@ type ModelsContextType = {
   upstreamConflicts: SyncDiffData['conflicts']
   setUpstreamConflicts: (conflicts: SyncDiffData['conflicts']) => void
   syncWizardOptions: { locale: SyncLocale; source: SyncSource }
-  setSyncWizardOptions: React.Dispatch<
-    React.SetStateAction<{ locale: SyncLocale; source: SyncSource }>
+  setSyncWizardOptions: Dispatch<
+    SetStateAction<{ locale: SyncLocale; source: SyncSource }>
   >
   tabCategory: ModelTabCategory
   setTabCategory: (category: ModelTabCategory) => void
@@ -76,7 +83,7 @@ const ModelsContext = createContext<ModelsContextType | undefined>(undefined)
 // Provider
 // ============================================================================
 
-export function ModelsProvider({ children }: { children: React.ReactNode }) {
+export function ModelsProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState<DialogType>(null)
   const [currentRow, setCurrentRow] = useState<Model | null>(null)
   const [currentVendor, setCurrentVendor] = useState<Vendor | null>(null)

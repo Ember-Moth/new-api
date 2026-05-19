@@ -16,15 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as React from 'react'
+
 import {
-  flexRender,
   type ColumnDef,
+  flexRender,
   type Row,
   type Table as TanstackTable,
 } from '@tanstack/react-table'
-import { useMediaQuery } from '@/hooks'
-import { cn } from '@/lib/utils'
+import type * as React from 'react'
+import { PageFooterPortal } from '@/components/layout'
 import {
   Table,
   TableBody,
@@ -33,7 +33,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { PageFooterPortal } from '@/components/layout'
+import { useMediaQuery } from '@/hooks'
+import { cn } from '@/lib/utils'
 import { MobileCardList } from './mobile-card-list'
 import { DataTablePagination } from './pagination'
 import { TableEmpty } from './table-empty'

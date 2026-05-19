@@ -21,14 +21,14 @@ import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { PageTransition } from '@/components/page-transition'
 import {
-  LoadingSkeleton,
   EmptyState,
-  SearchBar,
-  PricingTable,
-  PricingSidebar,
-  PricingToolbar,
+  LoadingSkeleton,
   ModelCardGrid,
   ModelDetailsDrawer,
+  PricingSidebar,
+  PricingTable,
+  PricingToolbar,
+  SearchBar,
 } from './components'
 import { EXCLUDED_GROUPS, VIEW_MODES } from './constants'
 import { useFilters } from './hooks/use-filters'

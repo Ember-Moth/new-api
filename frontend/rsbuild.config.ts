@@ -1,9 +1,9 @@
-import path from 'path'
 import fs from 'node:fs'
-import { fileURLToPath } from 'url'
 import { defineConfig, loadEnv, type RsbuildPlugin } from '@rsbuild/core'
 import { pluginReact } from '@rsbuild/plugin-react'
 import { tanstackRouter } from '@tanstack/router-plugin/rspack'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const brandBootstrapPath = path.resolve(
@@ -73,10 +73,7 @@ function replaceMetaContent(
   content: string
 ): string {
   const escaped = escapeHtml(content)
-  const pattern = new RegExp(
-    `<meta\\s+name=["']${name}["'][^>]*>`,
-    'i'
-  )
+  const pattern = new RegExp(`<meta\\s+name=["']${name}["'][^>]*>`, 'i')
   if (!pattern.test(html)) {
     return upsertHeadTag(
       html,

@@ -17,26 +17,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  LayoutDashboard,
   Activity,
-  Key,
-  FileText,
-  Wallet,
   Box,
-  Users,
+  Command,
+  CreditCard,
+  FileText,
+  FlaskConical,
+  Key,
+  LayoutDashboard,
+  ListTodo,
+  MessageSquare,
+  Radio,
+  Settings,
   Ticket,
   User,
-  Command,
-  Radio,
-  FlaskConical,
-  MessageSquare,
-  CreditCard,
-  ListTodo,
-  Settings,
+  Users,
+  Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { WORKSPACE_IDS } from '@/components/layout/lib/workspace-registry'
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
 
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()

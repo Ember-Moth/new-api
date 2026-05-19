@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-@import 'tailwindcss';
-@import 'tw-animate-css';
-@import 'shadcn/tailwind.css';
-@import '@fontsource-variable/public-sans';
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/public-sans";
 
-@import './theme.css';
-@import './theme-presets.css';
+@import "./theme.css";
+@import "./theme-presets.css";
 
 /* Shiki dual themes: token colors follow dark theme (pre background stays `bg-background` on the block) */
 @layer components {
@@ -54,7 +54,7 @@ For commercial licensing, please contact support@quantumnous.com
 
   /* Cursor pointer for buttons */
   button:not(:disabled),
-  [role='button']:not(:disabled) {
+  [role="button"]:not(:disabled) {
     cursor: pointer;
   }
 
@@ -92,7 +92,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* Override auto-skeleton-react inline styles with Vercel shimmer */
-.auto-skeleton-fade [class^='skeleton-'] {
+.auto-skeleton-fade [class^="skeleton-"] {
   background: linear-gradient(
     90deg,
     var(--skeleton-base) 0%,
@@ -107,7 +107,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
-  .auto-skeleton-fade [class^='skeleton-'] {
+  .auto-skeleton-fade [class^="skeleton-"] {
     animation: none !important;
     background: var(--skeleton-base) !important;
   }
@@ -368,7 +368,7 @@ For commercial licensing, please contact support@quantumnous.com
   .animate-appear-zoom,
   .animate-scroll-up,
   .animate-scroll-down,
-  [data-slot='table'] tbody tr {
+  [data-slot="table"] tbody tr {
     animation: none !important;
     opacity: 1;
     transform: none;
@@ -455,64 +455,64 @@ For commercial licensing, please contact support@quantumnous.com
 
 /* Micro-interactions — Vercel-style subtle hover/active feedback */
 @media (prefers-reduced-motion: no-preference) {
-  [data-slot='card'] {
+  [data-slot="card"] {
     transition:
       transform 150ms ease,
       box-shadow 150ms ease;
   }
 
   @media (min-width: 641px) {
-    [data-slot='card']:hover {
+    [data-slot="card"]:hover {
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgb(0 0 0 / 0.06);
     }
 
-    .dark [data-slot='card']:hover {
+    .dark [data-slot="card"]:hover {
       box-shadow: 0 4px 12px rgb(0 0 0 / 0.3);
     }
   }
 
   button:not(:disabled):active,
-  [role='button']:not(:disabled):active {
+  [role="button"]:not(:disabled):active {
     transform: scale(0.98);
   }
 
-  [data-slot='table'] tr {
+  [data-slot="table"] tr {
     transition: background-color 120ms ease;
   }
 
   /* Table row stagger-in animation */
-  [data-slot='table'] tbody tr {
+  [data-slot="table"] tbody tr {
     animation: tableRowEnter 0.2s cubic-bezier(0.33, 1, 0.68, 1) both;
   }
-  [data-slot='table'] tbody tr:nth-child(2) {
+  [data-slot="table"] tbody tr:nth-child(2) {
     animation-delay: 25ms;
   }
-  [data-slot='table'] tbody tr:nth-child(3) {
+  [data-slot="table"] tbody tr:nth-child(3) {
     animation-delay: 50ms;
   }
-  [data-slot='table'] tbody tr:nth-child(4) {
+  [data-slot="table"] tbody tr:nth-child(4) {
     animation-delay: 75ms;
   }
-  [data-slot='table'] tbody tr:nth-child(5) {
+  [data-slot="table"] tbody tr:nth-child(5) {
     animation-delay: 100ms;
   }
-  [data-slot='table'] tbody tr:nth-child(6) {
+  [data-slot="table"] tbody tr:nth-child(6) {
     animation-delay: 125ms;
   }
-  [data-slot='table'] tbody tr:nth-child(7) {
+  [data-slot="table"] tbody tr:nth-child(7) {
     animation-delay: 150ms;
   }
-  [data-slot='table'] tbody tr:nth-child(8) {
+  [data-slot="table"] tbody tr:nth-child(8) {
     animation-delay: 175ms;
   }
-  [data-slot='table'] tbody tr:nth-child(9) {
+  [data-slot="table"] tbody tr:nth-child(9) {
     animation-delay: 200ms;
   }
-  [data-slot='table'] tbody tr:nth-child(10) {
+  [data-slot="table"] tbody tr:nth-child(10) {
     animation-delay: 225ms;
   }
-  [data-slot='table'] tbody tr:nth-child(n + 11) {
+  [data-slot="table"] tbody tr:nth-child(n + 11) {
     animation-delay: 250ms;
   }
 }
@@ -529,7 +529,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* Tabular numbers for data-heavy contexts */
-[data-slot='table'] td,
+[data-slot="table"] td,
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }

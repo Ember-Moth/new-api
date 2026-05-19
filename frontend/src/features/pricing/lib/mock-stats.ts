@@ -445,7 +445,7 @@ export function buildAppRankings(
   const baseTokens = randomInRange(rand, 90_000_000, 320_000_000)
 
   return top.map((app, idx) => {
-    const decay = Math.pow(0.78, idx)
+    const decay = 0.78 ** idx
     const monthlyTokens = Math.round(baseTokens * decay * (0.85 + rand() * 0.3))
     const growthPctRaw = randomInRange(rand, -28, 84)
     const growthPct = Math.round(growthPctRaw * 10) / 10

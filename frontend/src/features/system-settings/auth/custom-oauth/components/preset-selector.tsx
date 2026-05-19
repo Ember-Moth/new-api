@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { OAUTH_PRESETS, type CustomOAuthFormValues } from '../types'
+import { type CustomOAuthFormValues, OAUTH_PRESETS } from '../types'
 
 type PresetSelectorProps = {
   form: UseFormReturn<CustomOAuthFormValues>

@@ -16,12 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getSelf } from '@/lib/api'
+import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
-import { SectionPageLayout } from '@/components/layout'
+import { getSelf } from '@/lib/api'
 import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
@@ -32,13 +32,13 @@ import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE } from './constants'
 import {
-  useTopupInfo,
-  usePayment,
   useAffiliate,
-  useRedemption,
   useCreemPayment,
-  useWaffoPayment,
+  usePayment,
+  useRedemption,
+  useTopupInfo,
   useWaffoPancakePayment,
+  useWaffoPayment,
 } from './hooks'
 import {
   getDefaultPaymentType,
@@ -46,10 +46,10 @@ import {
   isWaffoPancakePayment,
 } from './lib'
 import type {
-  UserWalletData,
+  CreemProduct,
   PaymentMethod,
   PresetAmount,
-  CreemProduct,
+  UserWalletData,
 } from './types'
 
 interface WalletProps {

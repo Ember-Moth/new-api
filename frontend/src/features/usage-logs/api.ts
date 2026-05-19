@@ -19,10 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import { buildQueryParams } from './lib/utils'
 import type {
-  GetLogsParams,
-  GetLogsResponse,
   GetLogStatsParams,
   GetLogStatsResponse,
+  GetLogsParams,
+  GetLogsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
   UserInfo,

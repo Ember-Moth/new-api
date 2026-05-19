@@ -16,26 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+
 import { useQueryClient } from '@tanstack/react-query'
-import { type Row } from '@tanstack/react-table'
+import type { Row } from '@tanstack/react-table'
 import {
-  MoreHorizontal,
   Boxes,
-  Pencil,
-  TestTube,
-  Gauge,
+  Copy,
   DollarSign,
   Download,
-  Copy,
+  Gauge,
+  Key,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
   Power,
   PowerOff,
-  Key,
-  Trash2,
   RefreshCw,
-  Loader2,
+  TestTube,
+  Trash2,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -50,7 +52,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,

@@ -19,12 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ApiResponse,
-  UserProfile,
+  CheckinResponse,
+  CheckinStatusResponse,
+  DeleteAccountRequest,
   UpdateUserRequest,
   UpdateUserSettingsRequest,
-  DeleteAccountRequest,
-  CheckinStatusResponse,
-  CheckinResponse,
+  UserProfile,
 } from './types'
 
 // ============================================================================

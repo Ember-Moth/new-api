@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { api, get2FAStatus } from '@/lib/api'
 import {
   buildAssertionResult,
-  prepareCredentialRequestOptions,
   isPasskeySupported as detectPasskeySupport,
+  prepareCredentialRequestOptions,
 } from '@/lib/passkey'
 import {
   beginPasskeyVerification,

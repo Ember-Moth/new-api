@@ -67,10 +67,7 @@ function ensureStatusUrl(value, explicit) {
 }
 
 function resolveStatusUrl() {
-  const explicit = ensureStatusUrl(
-    process.env.BRAND_BOOTSTRAP_STATUS_URL,
-    true
-  )
+  const explicit = ensureStatusUrl(process.env.BRAND_BOOTSTRAP_STATUS_URL, true)
   if (explicit) return explicit
 
   return ensureStatusUrl(

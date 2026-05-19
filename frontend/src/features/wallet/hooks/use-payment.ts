@@ -16,16 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useCallback } from 'react'
+
 import i18next from 'i18next'
+import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
   calculateAmount,
   calculateStripeAmount,
   calculateWaffoPancakeAmount,
+  isApiSuccess,
   requestPayment,
   requestStripePayment,
-  isApiSuccess,
 } from '../api'
 import {
   isStripePayment,

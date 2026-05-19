@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { PlaygroundConfig, ParameterEnabled } from './types'
+import type { ParameterEnabled, PlaygroundConfig } from './types'
 
 // Message constants
 export const MESSAGE_ROLES = {

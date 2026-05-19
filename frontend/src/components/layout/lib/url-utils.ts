@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { LinkProps } from '@tanstack/react-router'
-import type { NavItem, NavCollapsible } from '../types'
+import type { NavCollapsible, NavItem } from '../types'
 
 /**
  * Convert LinkProps['to'] to string

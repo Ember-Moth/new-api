@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 /* eslint-disable react-refresh/only-export-components */
 'use client'
 
+import type { Element } from 'hast'
+import { CheckIcon, CopyIcon } from 'lucide-react'
 import {
   type ComponentProps,
   createContext,
@@ -27,15 +29,13 @@ import {
   useEffect,
   useState,
 } from 'react'
-import type { Element } from 'hast'
-import { CheckIcon, CopyIcon } from 'lucide-react'
 import {
   type BundledLanguage,
   codeToHtml,
   type ShikiTransformer,
 } from 'shiki/bundle/web'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string
@@ -125,7 +125,6 @@ export const CodeBlock = ({
         <div className='relative'>
           <div
             className='[&>pre]:bg-background! [&>pre]:text-foreground! overflow-hidden [&_code]:font-mono [&_code]:text-sm [&>pre]:m-0 [&>pre]:p-4 [&>pre]:text-sm'
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
             dangerouslySetInnerHTML={{ __html: html }}
           />
           {children && (

@@ -16,18 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { getTopupInfo } from '../api'
 import {
   generatePresetAmounts,
-  mergePresetAmounts,
   getMinTopupAmount,
+  mergePresetAmounts,
 } from '../lib'
 import type {
-  TopupInfo,
-  PresetAmount,
   CreemProduct,
   PaymentMethod,
+  PresetAmount,
+  TopupInfo,
   WaffoPayMethod,
 } from '../types'
 

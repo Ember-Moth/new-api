@@ -187,8 +187,7 @@ const BILLING_SECTIONS = [
           WaffoApiKey: settings.WaffoApiKey_configured,
           WaffoPrivateKey: settings.WaffoPrivateKey_configured,
           WaffoSandboxApiKey: settings.WaffoSandboxApiKey_configured,
-          WaffoSandboxPrivateKey:
-            settings.WaffoSandboxPrivateKey_configured,
+          WaffoSandboxPrivateKey: settings.WaffoSandboxPrivateKey_configured,
         }}
         waffoPancakeDefaultValues={{
           WaffoPancakeEnabled: settings.WaffoPancakeEnabled ?? false,
@@ -206,8 +205,7 @@ const BILLING_SECTIONS = [
           WaffoPancakeMinTopUp: settings.WaffoPancakeMinTopUp ?? 1,
         }}
         waffoPancakeSecretConfigured={{
-          WaffoPancakePrivateKey:
-            settings.WaffoPancakePrivateKey_configured,
+          WaffoPancakePrivateKey: settings.WaffoPancakePrivateKey_configured,
         }}
         complianceDefaults={{
           confirmed: settings['payment_setting.compliance_confirmed'] ?? false,

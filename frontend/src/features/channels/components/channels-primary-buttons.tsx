@@ -16,26 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Plus,
+  ArrowUpFromLine,
+  DollarSign,
   MoreHorizontal,
+  Plus,
+  RefreshCw,
   Settings2,
-  Trash2,
+  SortAsc,
   Tags,
   TestTube,
-  DollarSign,
-  SortAsc,
-  RefreshCw,
-  ArrowUpFromLine,
+  Trash2,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuCheckboxItem,
+  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
@@ -43,7 +45,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   handleDeleteAllDisabled,
   handleFixAbilities,

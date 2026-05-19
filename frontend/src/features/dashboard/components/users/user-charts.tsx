@@ -16,16 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
+
 import { useQuery } from '@tanstack/react-query'
 import { VChart } from '@visactor/react-vchart'
-import { Users, Loader2 } from 'lucide-react'
+import { Loader2, Users } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
-import { VCHART_OPTION } from '@/lib/vchart'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useTheme } from '@/context/theme-provider'
-import { Skeleton } from '@/components/ui/skeleton'
 import { getUserQuotaDataByUsers } from '@/features/dashboard/api'
 import {
   TIME_GRANULARITY_OPTIONS,
@@ -34,13 +33,15 @@ import {
 import {
   getDefaultDays,
   getSavedGranularity,
-  saveGranularity,
   processUserChartData,
+  saveGranularity,
 } from '@/features/dashboard/lib'
 import type { ProcessedUserChartData } from '@/features/dashboard/types'
+import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
+import { VCHART_OPTION } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
-  (typeof import('@visactor/vchart'))['ThemeManager']
+  typeof import('@visactor/vchart')['ThemeManager']
 > | null = null
 
 const USER_CHARTS: {
@@ -68,7 +69,7 @@ export function UserCharts() {
   const { customization } = useThemeCustomization()
   const [themeReady, setThemeReady] = useState(false)
   const themeManagerRef = useRef<
-    (typeof import('@visactor/vchart'))['ThemeManager'] | null
+    typeof import('@visactor/vchart')['ThemeManager'] | null
   >(null)
 
   const [timeGranularity, setTimeGranularity] = useState<TimeGranularity>(() =>

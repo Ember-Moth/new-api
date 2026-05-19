@@ -16,11 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
+
 import { Tag as TagIcon } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useSystemConfigStore } from '@/stores/system-config-store'
-import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -30,6 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 import {
   BILLING_PRICING_VARS,
   MATCH_CONTAINS,
@@ -38,15 +39,15 @@ import {
   MATCH_GTE,
   MATCH_LT,
   MATCH_RANGE,
-  SOURCE_TIME,
   normalizeTierLabel,
-  parseTiersFromExpr,
-  splitBillingExprAndRequestRules,
-  tryParseRequestRuleExpr,
   type ParsedTier,
+  parseTiersFromExpr,
   type RequestCondition,
   type RequestRuleGroup,
+  SOURCE_TIME,
+  splitBillingExprAndRequestRules,
   type TierCondition,
+  tryParseRequestRuleExpr,
 } from '../lib/billing-expr'
 
 type DynamicPricingBreakdownProps = {

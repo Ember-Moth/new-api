@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { AlertCircle, AlertTriangle, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/auth-store'
 import { MESSAGE_STATUS } from '../constants'
 import type { Message } from '../types'
 

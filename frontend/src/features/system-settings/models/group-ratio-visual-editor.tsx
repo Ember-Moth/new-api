@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo, useCallback, memo } from 'react'
-import { Pencil, Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
+
+import { ChevronDown, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -113,7 +114,7 @@ function buildGroupPricingRows(
     _id: createGroupPricingId(),
     name,
     ratio: normalizeRatio(ratioMap[name]),
-    selectable: Object.prototype.hasOwnProperty.call(usableMap, name),
+    selectable: Object.hasOwn(usableMap, name),
     description: String(usableMap[name] ?? ''),
   }))
 }

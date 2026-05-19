@@ -17,6 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 export * from './api'
-export * from './types'
-export * from './hooks/use-secure-verification'
 export * from './components/secure-verification-dialog'
+export * from './hooks/use-secure-verification'
+export * from './types'

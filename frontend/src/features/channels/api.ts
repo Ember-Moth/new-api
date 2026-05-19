@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { AxiosRequestConfig } from 'axios'
-import { api } from '@/lib/api'
 import { getGroups as getUserGroups } from '@/features/users/api'
+import { api } from '@/lib/api'
 import type {
   AddChannelRequest,
   BatchDeleteParams,

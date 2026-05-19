@@ -10,6 +10,8 @@
     "build:check": "node scripts/generate-brand-bootstrap.mjs && tsc -b && rsbuild build",
     "typecheck": "tsc -b",
     "lint": "eslint .",
+    "biome:check": "biome check .",
+    "biome:fix": "biome check --write .",
     "preview": "rsbuild preview",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
@@ -74,6 +76,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@eslint/js": "^10.0.1",
     "@rsbuild/core": "^2.0.1",
     "@rsbuild/plugin-react": "^2.0.0",

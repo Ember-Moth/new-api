@@ -78,8 +78,7 @@ const AUTH_SECTIONS = [
         }}
         configured={{
           GitHubClientSecret: settings.GitHubClientSecret_configured,
-          DiscordClientSecret:
-            settings['discord.client_secret_configured'],
+          DiscordClientSecret: settings['discord.client_secret_configured'],
           OIDCClientSecret: settings['oidc.client_secret_configured'],
           TelegramBotToken: settings.TelegramBotToken_configured,
           LinuxDOClientSecret: settings.LinuxDOClientSecret_configured,

@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type SVGProps } from 'react'
+
 import { Radio as RadioPrimitive } from '@base-ui/react/radio'
 import { RadioGroup as Radio } from '@base-ui/react/radio-group'
 import { CircleCheck, Palette, RotateCcw } from 'lucide-react'
+import type { SVGProps } from 'react'
 import { useTranslation } from 'react-i18next'
 import { IconDir } from '@/assets/custom/icon-dir'
 import { IconLayoutCompact } from '@/assets/custom/icon-layout-compact'
@@ -31,18 +32,6 @@ import { IconSidebarSidebar } from '@/assets/custom/icon-sidebar-sidebar'
 import { IconThemeDark } from '@/assets/custom/icon-theme-dark'
 import { IconThemeLight } from '@/assets/custom/icon-theme-light'
 import { IconThemeSystem } from '@/assets/custom/icon-theme-system'
-import {
-  type ContentLayout,
-  THEME_PRESETS,
-  type ThemePreset,
-  type ThemeRadius,
-  type ThemeScale,
-} from '@/lib/theme-customization'
-import { cn } from '@/lib/utils'
-import { useDirection } from '@/context/direction-provider'
-import { type Collapsible, useLayout } from '@/context/layout-provider'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
-import { useTheme } from '@/context/theme-provider'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -53,6 +42,18 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { useDirection } from '@/context/direction-provider'
+import { type Collapsible, useLayout } from '@/context/layout-provider'
+import { useThemeCustomization } from '@/context/theme-customization-provider'
+import { useTheme } from '@/context/theme-provider'
+import {
+  type ContentLayout,
+  THEME_PRESETS,
+  type ThemePreset,
+  type ThemeRadius,
+  type ThemeScale,
+} from '@/lib/theme-customization'
+import { cn } from '@/lib/utils'
 import { useSidebar } from './ui/sidebar'
 
 const Item = RadioPrimitive.Root

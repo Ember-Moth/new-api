@@ -17,14 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/theme/color-scheme/builtin/default'
-import { getCurrencyDisplay } from '@/lib/currency'
-import { formatChartTime, type TimeGranularity } from '@/lib/time'
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
-  QuotaDataItem,
   ProcessedChartData,
   ProcessedUserChartData,
+  QuotaDataItem,
 } from '@/features/dashboard/types'
+import { getCurrencyDisplay } from '@/lib/currency'
+import { formatChartTime, type TimeGranularity } from '@/lib/time'
 
 type TFunction = (key: string) => string
 type TooltipLineItem = {
@@ -86,7 +86,7 @@ function renderQuotaCompat(rawQuota: number, digits = 4): string {
   const value = usd * rate
   const fixed = value.toFixed(digits)
   if (parseFloat(fixed) === 0 && rawQuota > 0 && value > 0) {
-    return symbol + Math.pow(10, -digits).toFixed(digits)
+    return symbol + (10 ** -digits).toFixed(digits)
   }
   return symbol + fixed
 }

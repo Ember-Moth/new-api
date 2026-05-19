@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useMemo } from 'react'
+
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2, Search, Info, ChevronDown } from 'lucide-react'
+import { ChevronDown, Info, Loader2, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -46,8 +47,8 @@ import {
 } from '@/components/ui/tooltip'
 import { fetchUpstreamModels, updateChannel } from '../../api'
 import {
-  channelsQueryKeys,
   categorizeModelsWithRedirect,
+  channelsQueryKeys,
   normalizeModelName,
   parseModelsString,
 } from '../../lib'
@@ -89,9 +90,7 @@ export function FetchModelsDialog({
 
   // Parse existing models
   const existingModels = useMemo(
-    () =>
-      existingModelsOverride ??
-      parseModelsString(currentRow?.models || ''),
+    () => existingModelsOverride ?? parseModelsString(currentRow?.models || ''),
     [existingModelsOverride, currentRow?.models]
   )
 
@@ -369,12 +368,14 @@ export function FetchModelsDialog({
         <DialogHeader>
           <DialogTitle>{t('Fetch Models')}</DialogTitle>
           <DialogDescription>
-            {currentRow
-              ? <>
-                  {t('Fetch available models for:')}{' '}
-                  <strong>{currentRow.name}</strong>
-                </>
-              : t('Fetch available models from upstream')}
+            {currentRow ? (
+              <>
+                {t('Fetch available models for:')}{' '}
+                <strong>{currentRow.name}</strong>
+              </>
+            ) : (
+              t('Fetch available models from upstream')
+            )}
           </DialogDescription>
         </DialogHeader>
 

@@ -16,15 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
+
 import { useParams } from '@tanstack/react-router'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useStatus } from '@/hooks/use-status'
 import { getOptionValue, useSystemOptions } from '../hooks/use-system-options'
 import type { OperationsSettings } from '../types'
 import {
-  OPERATIONS_DEFAULT_SECTION,
   getOperationsSectionContent,
+  OPERATIONS_DEFAULT_SECTION,
 } from './section-registry.tsx'
 
 const defaultOperationsSettings: OperationsSettings = {

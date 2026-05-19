@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 'use client'
 
 import type { ComponentProps } from 'react'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -27,6 +26,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
 export type ActionsProps = ComponentProps<'div'>
 

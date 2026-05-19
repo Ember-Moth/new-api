@@ -16,17 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useCallback } from 'react'
-import {
-  useSystemConfigStore,
-  type CurrencyConfig,
-  type CurrencyDisplayType,
-  type SystemConfig,
-  DEFAULT_CURRENCY_CONFIG,
-} from '@/stores/system-config-store'
+import { useCallback, useEffect } from 'react'
 import { withApiBaseUrl } from '@/lib/api'
 import { applyBrandToDom } from '@/lib/brand-bootstrap'
-import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
+import { DEFAULT_LOGO, DEFAULT_SYSTEM_NAME } from '@/lib/constants'
+import {
+  type CurrencyConfig,
+  type CurrencyDisplayType,
+  DEFAULT_CURRENCY_CONFIG,
+  type SystemConfig,
+  useSystemConfigStore,
+} from '@/stores/system-config-store'
 
 interface UseSystemConfigOptions {
   /** Automatically fetch config from backend (use only in root component) */

@@ -16,22 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+
+import { ChevronDown, Copy, Plus, Trash2 } from 'lucide-react'
 import {
+  type ChangeEvent,
+  type FocusEvent,
+  type InputHTMLAttributes,
   memo,
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
-  type FocusEvent,
-  type InputHTMLAttributes,
-  type MouseEvent as ReactMouseEvent,
 } from 'react'
-import { ChevronDown, Copy, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -54,7 +54,13 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
   BILLING_EXTRA_VARS,
+  buildRequestRuleExpr,
   COMMON_TIMEZONES,
+  combineBillingExpr,
+  createEmptyCondition,
+  createEmptyRuleGroup,
+  createEmptyTimeCondition,
+  getRequestRuleMatchOptions,
   MATCH_CONTAINS,
   MATCH_EQ,
   MATCH_EXISTS,
@@ -63,41 +69,36 @@ import {
   MATCH_LT,
   MATCH_LTE,
   MATCH_RANGE,
-  SOURCE_HEADER,
-  SOURCE_PARAM,
-  SOURCE_TIME,
-  TIME_FUNCS,
-  buildRequestRuleExpr,
-  combineBillingExpr,
-  createEmptyCondition,
-  createEmptyRuleGroup,
-  createEmptyTimeCondition,
-  getRequestRuleMatchOptions,
-  splitBillingExprAndRequestRules,
-  tryParseRequestRuleExpr,
   type ParamHeaderCondition,
   type RequestCondition,
   type RequestRuleGroup,
+  SOURCE_HEADER,
+  SOURCE_PARAM,
+  SOURCE_TIME,
+  splitBillingExprAndRequestRules,
+  TIME_FUNCS,
   type TimeCondition,
   type TimeFunc,
+  tryParseRequestRuleExpr,
 } from '@/features/pricing/lib/billing-expr'
 import {
   CACHE_MODE_GENERIC,
   CACHE_MODE_TIMED,
   type CacheMode,
-  type ExtraTokenValues,
-  type TierConditionInput,
-  type VisualConfig,
-  type VisualTier,
   createDefaultVisualConfig,
+  type ExtraTokenValues,
   evalExprLocally,
   exprUsesExtraVars,
   generateExprFromVisualConfig,
   getTierCacheMode,
   normalizeVisualConfig,
   normalizeVisualTier,
+  type TierConditionInput,
   tryParseVisualConfig,
+  type VisualConfig,
+  type VisualTier,
 } from '@/features/pricing/lib/tier-expr'
+import { cn } from '@/lib/utils'
 
 const PRICE_SUFFIX = '$/1M tokens'
 const CACHE_PRICE_VARS = BILLING_EXTRA_VARS.filter(

@@ -16,18 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+
 import {
   type ColumnDef,
-  type RowSelectionState,
-  type Table as TanStackTable,
   flexRender,
   getCoreRowModel,
   getPaginationRowModel,
+  type RowSelectionState,
+  type Table as TanStackTable,
   useReactTable,
 } from '@tanstack/react-table'
 import { Loader2, Settings } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
+import { DataTablePagination } from '@/components/data-table/pagination'
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -62,9 +66,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
-import { DataTablePagination } from '@/components/data-table/pagination'
-import { StatusBadge } from '@/components/status-badge'
 import { formatResponseTime, handleTestChannel } from '../../lib'
 import { useChannels } from '../channels-provider'
 

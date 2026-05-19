@@ -16,41 +16,42 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo, useEffect } from 'react'
+
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import {
+  type ExpandedState,
   getCoreRowModel,
-  useReactTable,
   getExpandedRowModel,
   type OnChangeFn,
-  type SortingState,
-  type VisibilityState,
-  type ExpandedState,
   type Row,
+  type SortingState,
+  useReactTable,
+  type VisibilityState,
 } from '@tanstack/react-table'
-import { useDebounce, useMediaQuery } from '@/hooks'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getLobeIcon } from '@/lib/lobe-icon'
-import { useTableUrlState } from '@/hooks/use-table-url-state'
-import { Input } from '@/components/ui/input'
 import {
+  DataTablePage,
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
-  DataTablePage,
 } from '@/components/data-table'
-import { getChannels, searchChannels, getGroups } from '../api'
+import { Input } from '@/components/ui/input'
+import { useDebounce, useMediaQuery } from '@/hooks'
+import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { getLobeIcon } from '@/lib/lobe-icon'
+import { getChannels, getGroups, searchChannels } from '../api'
 import {
-  DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
   CHANNEL_STATUS_OPTIONS,
+  DEFAULT_PAGE_SIZE,
 } from '../constants'
 import {
-  channelsQueryKeys,
   aggregateChannelsByTag,
-  isTagAggregateRow,
+  channelsQueryKeys,
   getChannelTypeIcon,
   getChannelTypeLabel,
+  isTagAggregateRow,
 } from '../lib'
 import type { Channel, ChannelSortBy } from '../types'
 import { useChannelsColumns } from './channels-columns'

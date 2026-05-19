@@ -16,18 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect } from 'react'
 import { type Resolver, useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from '@/components/ui/dialog'
 import {
   Form,
@@ -56,10 +57,10 @@ import {
   useUpdateProvider,
 } from '../hooks/use-custom-oauth-mutations'
 import {
-  customOAuthFormSchema,
   AUTH_STYLE_OPTIONS,
-  type CustomOAuthProvider,
   type CustomOAuthFormValues,
+  type CustomOAuthProvider,
+  customOAuthFormSchema,
 } from '../types'
 import { DiscoveryButton } from './discovery-button'
 import { PresetSelector } from './preset-selector'

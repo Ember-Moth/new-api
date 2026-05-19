@@ -17,15 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  Hash,
-  Coins,
-  Layers,
-  Gauge,
-  Zap,
-  Flame,
-  TrendingUp,
   Activity,
+  Coins,
+  Flame,
+  Gauge,
+  Hash,
+  Layers,
   type LucideIcon,
+  TrendingUp,
+  Zap,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { safeDivide } from '@/features/dashboard/lib'

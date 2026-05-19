@@ -21,11 +21,11 @@ import { TOKEN_UNIT_DIVISORS } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
 import {
   BILLING_PRICING_VARS,
+  type BillingVar,
+  type ParsedTier,
   parseTiersFromExpr,
   splitBillingExprAndRequestRules,
   tryParseRequestRuleExpr,
-  type BillingVar,
-  type ParsedTier,
 } from './billing-expr'
 
 type DynamicPriceOptions = {

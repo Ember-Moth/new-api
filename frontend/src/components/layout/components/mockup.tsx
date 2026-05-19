@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React from 'react'
+
 import { cva, type VariantProps } from 'class-variance-authority'
+import type React from 'react'
 import { cn } from '@/lib/utils'
 
 const mockupVariants = cva(
@@ -36,8 +37,7 @@ const mockupVariants = cva(
 )
 
 export interface MockupProps
-  extends
-    React.HTMLAttributes<HTMLDivElement>,
+  extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof mockupVariants> {}
 
 export function Mockup({ className, type, ...props }: MockupProps) {
@@ -66,8 +66,7 @@ const frameVariants = cva(
 )
 
 export interface MockupFrameProps
-  extends
-    React.HTMLAttributes<HTMLDivElement>,
+  extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof frameVariants> {}
 
 export function MockupFrame({ className, size, ...props }: MockupFrameProps) {

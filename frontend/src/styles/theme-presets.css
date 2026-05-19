@@ -33,7 +33,7 @@ For commercial licensing, please contact support@quantumnous.com
  */
 
 /* ── Underground ──────────────────────────────────────────────────────── */
-[data-theme-preset='underground'] {
+[data-theme-preset="underground"] {
   --primary: oklch(0.5315 0.0694 156.19);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.5748 0.0862 336.52);
@@ -51,7 +51,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.5315 0.0694 156.19);
   --radius: 0.5rem;
 }
-.dark [data-theme-preset='underground'] {
+.dark [data-theme-preset="underground"] {
   --primary: oklch(0.6147 0.0867 154.73);
   --primary-foreground: oklch(0.129 0.0306 264.71);
   --secondary: oklch(0.6624 0.0855 334.26);
@@ -70,7 +70,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Rose Garden ──────────────────────────────────────────────────────── */
-[data-theme-preset='rose-garden'] {
+[data-theme-preset="rose-garden"] {
   --primary: oklch(0.5827 0.2418 12.23);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.8131 0.1129 5.67);
@@ -88,7 +88,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.5827 0.2418 12.23);
   --radius: 1rem;
 }
-.dark [data-theme-preset='rose-garden'] {
+.dark [data-theme-preset="rose-garden"] {
   --primary: oklch(0.6476 0.2348 10.36);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.8131 0.1129 5.67);
@@ -107,7 +107,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Lake View ────────────────────────────────────────────────────────── */
-[data-theme-preset='lake-view'] {
+[data-theme-preset="lake-view"] {
   --primary: oklch(0.765 0.177 163.22);
   --primary-foreground: oklch(0 0 0);
   --secondary: oklch(0.551 0.0899 200.52);
@@ -125,7 +125,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.765 0.177 163.22);
   --radius: 0.75rem;
 }
-.dark [data-theme-preset='lake-view'] {
+.dark [data-theme-preset="lake-view"] {
   --primary: oklch(0.765 0.177 163.22);
   --primary-foreground: oklch(0 0 0);
   --secondary: oklch(0.551 0.0899 200.52);
@@ -144,7 +144,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Sunset Glow ──────────────────────────────────────────────────────── */
-[data-theme-preset='sunset-glow'] {
+[data-theme-preset="sunset-glow"] {
   --primary: oklch(0.5591 0.1882 25.33);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.7938 0.1248 42.42);
@@ -162,7 +162,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.5591 0.1882 25.33);
   --radius: 1rem;
 }
-.dark [data-theme-preset='sunset-glow'] {
+.dark [data-theme-preset="sunset-glow"] {
   --primary: oklch(0.6387 0.1822 23.51);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.7938 0.1248 42.42);
@@ -181,7 +181,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Forest Whisper ───────────────────────────────────────────────────── */
-[data-theme-preset='forest-whisper'] {
+[data-theme-preset="forest-whisper"] {
   --primary: oklch(0.5276 0.1072 182.22);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.5236 0.0505 250.18);
@@ -199,7 +199,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.5276 0.1072 182.22);
   --radius: 0.5rem;
 }
-.dark [data-theme-preset='forest-whisper'] {
+.dark [data-theme-preset="forest-whisper"] {
   --primary: oklch(0.5991 0.1318 180.39);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.6578 0.0485 247.35);
@@ -218,7 +218,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Ocean Breeze ─────────────────────────────────────────────────────── */
-[data-theme-preset='ocean-breeze'] {
+[data-theme-preset="ocean-breeze"] {
   --primary: oklch(0.5461 0.2152 262.88);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.5854 0.2041 277.12);
@@ -236,7 +236,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.5461 0.2152 262.88);
   --radius: 0.3rem;
 }
-.dark [data-theme-preset='ocean-breeze'] {
+.dark [data-theme-preset="ocean-breeze"] {
   --primary: oklch(0.623 0.188 259.81);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.5854 0.2041 277.12);
@@ -255,7 +255,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Lavender Dream ───────────────────────────────────────────────────── */
-[data-theme-preset='lavender-dream'] {
+[data-theme-preset="lavender-dream"] {
   --primary: oklch(0.5709 0.1808 306.89);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.811 0.0589 201.14);
@@ -273,7 +273,7 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-ring: oklch(0.5709 0.1808 306.89);
   --radius: 1rem;
 }
-.dark [data-theme-preset='lavender-dream'] {
+.dark [data-theme-preset="lavender-dream"] {
   --primary: oklch(0.6359 0.1699 307.95);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.811 0.0589 201.14);
@@ -295,7 +295,7 @@ For commercial licensing, please contact support@quantumnous.com
 /* Color presets should tint the surfaces most components actually use, not
  * only primary buttons. These derived tokens keep the app theme-aware without
  * duplicating per-component dark-mode overrides. */
-[data-theme-preset]:not([data-theme-preset='default']) {
+[data-theme-preset]:not([data-theme-preset="default"]) {
   --card: color-mix(in oklch, var(--primary) 3%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 5%, var(--background));
   --muted: color-mix(in oklch, var(--primary) 7%, var(--background));
@@ -317,7 +317,7 @@ For commercial licensing, please contact support@quantumnous.com
   --info: var(--chart-1);
   --neutral: var(--muted-foreground);
 }
-.dark [data-theme-preset]:not([data-theme-preset='default']) {
+.dark [data-theme-preset]:not([data-theme-preset="default"]) {
   --card: color-mix(in oklch, var(--primary) 8%, var(--background));
   --popover: color-mix(in oklch, var(--primary) 12%, var(--background));
   --muted: color-mix(in oklch, var(--primary) 12%, var(--background));
@@ -335,25 +335,25 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* ── Border radius ────────────────────────────────────────────────────── */
-[data-theme-radius='none'] {
+[data-theme-radius="none"] {
   --radius: 0rem;
 }
-[data-theme-radius='sm'] {
+[data-theme-radius="sm"] {
   --radius: 0.3rem;
 }
-[data-theme-radius='md'] {
+[data-theme-radius="md"] {
   --radius: 0.5rem;
 }
-[data-theme-radius='lg'] {
+[data-theme-radius="lg"] {
   --radius: 0.75rem;
 }
-[data-theme-radius='xl'] {
+[data-theme-radius="xl"] {
   --radius: 1rem;
 }
 
 /* ── Density scale ────────────────────────────────────────────────────── */
 /* `sm` = compact UI; `lg` = comfortable. Default (no attribute) keeps Tailwind defaults. */
-[data-theme-scale='sm'] {
+[data-theme-scale="sm"] {
   --text-xs: 0.7rem;
   --text-sm: 0.78rem;
   --text-base: 0.88rem;
@@ -363,7 +363,7 @@ For commercial licensing, please contact support@quantumnous.com
   --text-3xl: 1.7rem;
   --spacing: 0.225rem;
 }
-[data-theme-scale='lg'] {
+[data-theme-scale="lg"] {
   --text-xs: 0.84rem;
   --text-sm: 0.95rem;
   --text-base: 1.075rem;
@@ -380,7 +380,7 @@ For commercial licensing, please contact support@quantumnous.com
  * page content alike are centered. Only kicks in once the viewport exceeds the
  * clamp value. */
 @media (min-width: 1280px) {
-  [data-theme-content-layout='centered'] [data-slot='sidebar-inset'] > * {
+  [data-theme-content-layout="centered"] [data-slot="sidebar-inset"] > * {
     max-width: var(--max-content-width, 1280px);
     margin-inline: auto;
     width: 100%;

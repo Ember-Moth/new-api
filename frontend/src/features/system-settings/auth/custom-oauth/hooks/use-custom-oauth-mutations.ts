@@ -21,9 +21,9 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import {
   createCustomOAuthProvider,
-  updateCustomOAuthProvider,
   deleteCustomOAuthProvider,
   discoverOIDCEndpoints,
+  updateCustomOAuthProvider,
 } from '../api'
 import type { CustomOAuthProvider, DiscoveryResponse } from '../types'
 

@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { z } from 'zod'
+
 import type { TFunction } from 'i18next'
-import type { SubscriptionPlan, PlanPayload } from '../types'
+import { z } from 'zod'
+import type { PlanPayload, SubscriptionPlan } from '../types'
 
 export function getPlanFormSchema(t: TFunction) {
   return z.object({

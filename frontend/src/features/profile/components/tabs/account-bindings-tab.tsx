@@ -16,32 +16,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Mail, Shield, Send, Link2, Unlink } from 'lucide-react'
+
+import { Link2, Mail, Send, Shield, Unlink } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SiGithub, SiWechat, SiLinux } from 'react-icons/si'
+import { SiGithub, SiLinux, SiWechat } from 'react-icons/si'
 import { toast } from 'sonner'
 import { IconDiscord } from '@/assets/brand-icons'
-import { withApiBaseUrl } from '@/lib/api'
-import {
-  handleGitHubOAuth,
-  handleOIDCOAuth,
-  handleDiscordOAuth,
-  handleLinuxDOOAuth,
-} from '@/lib/oauth'
-import { useDialogs } from '@/hooks/use-dialog'
-import { useStatus } from '@/hooks/use-status'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { useDialogs } from '@/hooks/use-dialog'
+import { useStatus } from '@/hooks/use-status'
+import { withApiBaseUrl } from '@/lib/api'
 import {
+  handleDiscordOAuth,
+  handleGitHubOAuth,
+  handleLinuxDOOAuth,
+  handleOIDCOAuth,
+} from '@/lib/oauth'
+import {
+  type CustomOAuthBinding,
   getSelfOAuthBindings,
   unbindCustomOAuth,
-  type CustomOAuthBinding,
 } from '../../api'
-import type { UserProfile, BindingItem } from '../../types'
+import type { BindingItem, UserProfile } from '../../types'
 import { EmailBindDialog } from '../dialogs/email-bind-dialog'
 import { TelegramBindDialog } from '../dialogs/telegram-bind-dialog'
 import { WeChatBindDialog } from '../dialogs/wechat-bind-dialog'

@@ -16,47 +16,48 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
-import type { z } from 'zod'
-import { useForm } from 'react-hook-form'
+
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { useAuthStore } from '@/stores/auth-store'
-import { cn } from '@/lib/utils'
+import type { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
-  FormDescription,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
   InputOTP,
   InputOTPGroup,
-  InputOTPSlot,
   InputOTPSeparator,
+  InputOTPSlot,
 } from '@/components/ui/input-otp'
 import { login2fa } from '@/features/auth/api'
 import {
-  otpFormSchema,
-  OTP_LENGTH,
   BACKUP_CODE_LENGTH,
+  OTP_LENGTH,
+  otpFormSchema,
 } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { saveUserId } from '@/features/auth/lib/storage'
 import {
-  isValidOTP,
-  isValidBackupCode,
-  formatBackupCode,
   cleanBackupCode,
+  formatBackupCode,
+  isValidBackupCode,
+  isValidOTP,
 } from '@/features/auth/lib/validation'
 import type { User } from '@/features/users/types'
+import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 type OtpFormProps = React.HTMLAttributes<HTMLFormElement>
 

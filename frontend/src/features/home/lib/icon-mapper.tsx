@@ -17,15 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  Zap,
-  Shield,
-  Globe,
   Code,
-  Gauge,
   DollarSign,
-  Users,
+  Gauge,
+  Globe,
   HeartHandshake,
   type LucideIcon,
+  Shield,
+  Users,
+  Zap,
 } from 'lucide-react'
 
 /**

@@ -25,14 +25,14 @@ import { useTheme } from '@/context/theme-provider'
  * defer chart rendering until the theme is ready.
  */
 let themeManagerPromise: Promise<
-  (typeof import('@visactor/vchart'))['ThemeManager']
+  typeof import('@visactor/vchart')['ThemeManager']
 > | null = null
 
 export function useChartTheme() {
   const { resolvedTheme } = useTheme()
   const [themeReady, setThemeReady] = useState(false)
   const themeRef = useRef<
-    (typeof import('@visactor/vchart'))['ThemeManager'] | null
+    typeof import('@visactor/vchart')['ThemeManager'] | null
   >(null)
 
   useEffect(() => {

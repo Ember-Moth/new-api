@@ -16,18 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { StrictMode } from 'react'
-import ReactDOM from 'react-dom/client'
-import { AxiosError } from 'axios'
+
 import {
   QueryCache,
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query'
-import { RouterProvider, createRouter } from '@tanstack/react-router'
+import { createRouter, RouterProvider } from '@tanstack/react-router'
+import { AxiosError } from 'axios'
 import i18next from 'i18next'
+import { StrictMode } from 'react'
+import ReactDOM from 'react-dom/client'
 import { toast } from 'sonner'
-import { useAuthStore } from '@/stores/auth-store'
 import { getStatus } from '@/lib/api'
 import {
   applyBrandToDom,
@@ -35,6 +35,7 @@ import {
   getBuildBrandBootstrap,
   getCachedStatusBrand,
 } from '@/lib/brand-bootstrap'
+import { useAuthStore } from '@/stores/auth-store'
 import '@/lib/dayjs'
 import { handleServerError } from '@/lib/handle-server-error'
 import { DirectionProvider } from './context/direction-provider'

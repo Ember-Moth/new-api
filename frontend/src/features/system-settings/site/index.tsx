@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { SettingsPage } from '../components/settings-page'
 import type { SiteSettings } from '../types'
 import {
-  SITE_DEFAULT_SECTION,
   getSiteSectionContent,
+  SITE_DEFAULT_SECTION,
 } from './section-registry.tsx'
 
 const defaultSiteSettings: SiteSettings = {

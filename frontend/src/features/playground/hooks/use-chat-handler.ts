@@ -19,15 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import { sendChatCompletion } from '../api'
-import { MESSAGE_STATUS, ERROR_MESSAGES } from '../constants'
+import { ERROR_MESSAGES, MESSAGE_STATUS } from '../constants'
 import {
   buildChatCompletionPayload,
+  finalizeMessage,
+  processStreamingContent,
   updateAssistantMessageWithError,
   updateLastAssistantMessage,
-  processStreamingContent,
-  finalizeMessage,
 } from '../lib'
-import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
+import type { Message, ParameterEnabled, PlaygroundConfig } from '../types'
 import { useStreamRequest } from './use-stream-request'
 
 interface UseChatHandlerOptions {

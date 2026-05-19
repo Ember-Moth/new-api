@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
-import { useState } from 'react'
+
 import { useQueryClient } from '@tanstack/react-query'
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import {
   AlertTriangle,
   ChevronDown,
@@ -27,15 +27,17 @@ import {
   ListOrdered,
   Shuffle,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getCurrencyLabel } from '@/lib/currency'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { DataTableColumnHeader } from '@/components/data-table/column-header'
+import { GroupBadge } from '@/components/group-badge'
 import {
-  formatTimestampToDate,
-  formatQuota as formatQuotaValue,
-} from '@/lib/format'
-import { getLobeIcon } from '@/lib/lobe-icon'
-import { cn, truncateText } from '@/lib/utils'
+  dotColorMap,
+  StatusBadge,
+  textColorMap,
+} from '@/components/status-badge'
 import { TruncatedText } from '@/components/truncated-text'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -45,14 +47,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ConfirmDialog } from '@/components/confirm-dialog'
-import { DataTableColumnHeader } from '@/components/data-table/column-header'
-import { GroupBadge } from '@/components/group-badge'
+import { getCurrencyLabel } from '@/lib/currency'
 import {
-  StatusBadge,
-  dotColorMap,
-  textColorMap,
-} from '@/components/status-badge'
+  formatQuota as formatQuotaValue,
+  formatTimestampToDate,
+} from '@/lib/format'
+import { getLobeIcon } from '@/lib/lobe-icon'
+import { cn, truncateText } from '@/lib/utils'
 import { getCodexUsage } from '../api'
 import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
@@ -63,14 +64,14 @@ import {
   getChannelTypeIcon,
   getChannelTypeLabel,
   getResponseTimeConfig,
-  isMultiKeyChannel,
-  parseModelsList,
-  parseGroupsList,
-  parseChannelSettings,
+  handleUpdateChannelBalance,
   handleUpdateChannelField,
   handleUpdateTagField,
-  handleUpdateChannelBalance,
+  isMultiKeyChannel,
   isTagAggregateRow,
+  parseChannelSettings,
+  parseGroupsList,
+  parseModelsList,
   type TagRow,
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'

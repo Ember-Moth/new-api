@@ -18,12 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Activity, BarChart3, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { formatCompactNumber, formatQuota } from '@/lib/format'
-import { getRoleLabel } from '@/lib/roles'
+import { StatusBadge } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
-import { StatusBadge } from '@/components/status-badge'
-import { getUserInitials, getDisplayName } from '../lib'
+import { formatCompactNumber, formatQuota } from '@/lib/format'
+import { getRoleLabel } from '@/lib/roles'
+import { getDisplayName, getUserInitials } from '../lib'
 import type { UserProfile } from '../types'
 
 // ============================================================================

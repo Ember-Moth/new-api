@@ -16,23 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
-import { type Row } from '@tanstack/react-table'
+
+import type { Row } from '@tanstack/react-table'
 import {
+  ArrowDown,
+  ArrowUp,
+  CreditCard,
+  KeyRound,
+  Link2,
   MoreHorizontal,
   Pencil,
-  Trash2,
   Power,
   PowerOff,
-  ArrowUp,
-  ArrowDown,
-  KeyRound,
   ShieldAlert,
-  Link2,
-  CreditCard,
+  Trash2,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -42,17 +44,16 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
-  USER_STATUS,
-  USER_ROLE,
   ERROR_MESSAGES,
   isUserDeleted,
+  USER_ROLE,
+  USER_STATUS,
 } from '../constants'
 import { getUserActionMessage } from '../lib'
-import { type User, type ManageUserAction } from '../types'
+import type { ManageUserAction, User } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
 import { useUsers } from './users-provider'
 

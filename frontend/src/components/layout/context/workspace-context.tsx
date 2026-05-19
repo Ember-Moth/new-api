@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
 import * as React from 'react'
-import { type Workspace } from '../types'
+import type { Workspace } from '../types'
 
 type WorkspaceContextType = {
   activeWorkspace: Workspace | null

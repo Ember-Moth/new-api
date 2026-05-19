@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { SystemStatus, OAuthProvider } from '../types'
+import type { OAuthProvider, SystemStatus } from '../types'
 
 export {
-  buildGitHubOAuthUrl,
   buildDiscordOAuthUrl,
-  buildOIDCOAuthUrl,
+  buildGitHubOAuthUrl,
   buildLinuxDOOAuthUrl,
+  buildOIDCOAuthUrl,
 } from '@/lib/oauth'
 
 // ============================================================================

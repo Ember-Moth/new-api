@@ -19,8 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Hook for checking admin privileges
  */
-import { useAuthStore } from '@/stores/auth-store'
+
 import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 /**
  * Check if current user has admin privileges

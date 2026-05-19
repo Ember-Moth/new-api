@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { Dashboard } from '@/features/dashboard'
 import {
-  DASHBOARD_SECTION_IDS,
   DASHBOARD_DEFAULT_SECTION,
+  DASHBOARD_SECTION_IDS,
 } from '@/features/dashboard/section-registry'
 
 export const Route = createFileRoute('/_authenticated/dashboard/$section')({

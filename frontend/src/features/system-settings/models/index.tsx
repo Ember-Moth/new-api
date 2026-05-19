@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { SettingsPage } from '../components/settings-page'
 import type { ModelSettings } from '../types'
 import {
-  MODELS_DEFAULT_SECTION,
   getModelsSectionContent,
+  MODELS_DEFAULT_SECTION,
 } from './section-registry.tsx'
 
 const defaultModelSettings: ModelSettings = {

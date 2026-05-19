@@ -79,10 +79,10 @@ For commercial licensing, please contact support@quantumnous.com
  * 5. **Effective exchange rate**: When quotaDisplayType is 'USD', use rate of 1 regardless of config
  */
 import {
-  useSystemConfigStore,
-  DEFAULT_CURRENCY_CONFIG,
   type CurrencyConfig,
   type CurrencyDisplayType,
+  DEFAULT_CURRENCY_CONFIG,
+  useSystemConfigStore,
 } from '@/stores/system-config-store'
 
 export interface CurrencyFormatOptions {
@@ -250,7 +250,7 @@ function adjustForMinimum(
 ): number {
   if (value === 0) return value
 
-  const threshold = minimumNonZero > 0 ? minimumNonZero : Math.pow(10, -digits)
+  const threshold = minimumNonZero > 0 ? minimumNonZero : 10 ** -digits
   const abs = Math.abs(value)
   if (abs > 0 && abs < threshold) {
     return value > 0 ? threshold : -threshold

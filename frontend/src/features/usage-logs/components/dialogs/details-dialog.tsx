@@ -17,24 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  Copy,
+  AlertTriangle,
   Check,
+  Cloud,
+  Copy,
+  Globe,
+  Headphones,
+  Info,
+  Monitor,
   Route,
   Settings2,
-  AlertTriangle,
-  Headphones,
-  Monitor,
-  Cloud,
-  Globe,
   ShieldCheck,
   UserCog,
-  Info,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
-import { cn } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -45,19 +42,22 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
+import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import type { UsageLog } from '../../data/schema'
 import {
-  parseLogOther,
-  getParamOverrideActionLabel,
-  parseAuditLine,
   decodeBillingExprB64,
+  getFirstResponseTimeColor,
+  getParamOverrideActionLabel,
+  getResponseTimeColor,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   isViolationFeeLog,
-  getFirstResponseTimeColor,
-  getResponseTimeColor,
+  parseAuditLine,
+  parseLogOther,
 } from '../../lib/format'
 import {
   getLogTypeConfig,

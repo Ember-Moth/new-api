@@ -21,8 +21,8 @@ import { API_ENDPOINTS } from './constants'
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
-  ModelOption,
   GroupOption,
+  ModelOption,
 } from './types'
 
 /**

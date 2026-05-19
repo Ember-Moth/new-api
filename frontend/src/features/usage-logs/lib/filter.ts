@@ -21,10 +21,10 @@ For commercial licensing, please contact support@quantumnous.com
  */
 import { LOG_CATEGORY_LABELS } from '../constants'
 import type {
-  LogCategory,
-  LogFilters,
   CommonLogFilters,
   DrawingLogFilters,
+  LogCategory,
+  LogFilters,
   TaskLogFilters,
 } from '../types'
 

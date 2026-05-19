@@ -25,7 +25,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
-import { TableRow, TableCell } from '@/components/ui/table'
+import { TableCell, TableRow } from '@/components/ui/table'
 
 interface TableEmptyProps {
   /**

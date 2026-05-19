@@ -16,33 +16,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useState } from 'react'
-import { type Row } from '@tanstack/react-table'
+
+import type { Row } from '@tanstack/react-table'
 import {
-  Trash2,
-  Edit,
-  Power,
-  PowerOff,
-  ExternalLink,
   ArrowRightLeft,
   Copy,
+  MoreHorizontal as DotsHorizontalIcon,
+  Edit,
+  ExternalLink,
   Link,
   Loader2,
-  MoreHorizontal as DotsHorizontalIcon,
+  Power,
+  PowerOff,
+  Trash2,
 } from 'lucide-react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -51,8 +51,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useChatPresets } from '@/features/chat/hooks/use-chat-presets'
-import { resolveChatUrl, type ChatPreset } from '@/features/chat/lib/chat-links'
+import { type ChatPreset, resolveChatUrl } from '@/features/chat/lib/chat-links'
 import { sendToFluent } from '@/features/chat/lib/send-to-fluent'
+import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { updateApiKeyStatus } from '../api'
 import { API_KEY_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import { apiKeySchema } from '../types'

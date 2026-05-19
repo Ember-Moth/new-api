@@ -18,11 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
 import {
   formatLatency,
   formatThroughput,
 } from '@/features/performance-metrics/lib/format'
+import { cn } from '@/lib/utils'
 
 export type ModelPerfBadgeData = {
   avg_latency_ms: number
@@ -30,7 +30,8 @@ export type ModelPerfBadgeData = {
   avg_tps: number
 }
 
-export interface ModelPerfBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface ModelPerfBadgeProps
+  extends React.HTMLAttributes<HTMLDivElement> {
   perf: ModelPerfBadgeData | undefined
 }
 
