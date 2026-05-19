@@ -18,8 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { zodResolver } from '@hookform/resolvers/zod'
+import { RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import type { Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
@@ -60,29 +61,29 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { api } from '@/lib/api'
 import dayjs from '@/lib/dayjs'
+import { FormDirtyIndicator } from '../components/form-dirty-indicator'
+import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsSection } from '../components/settings-section'
-import { useResetForm } from '../hooks/use-reset-form'
+import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
 const perfSchema = z.object({
-  'performance_setting.disk_cache_enabled': z.boolean(),
-  'performance_setting.disk_cache_threshold_mb': z.coerce.number().min(1),
-  'performance_setting.disk_cache_max_size_mb': z.coerce.number().min(100),
-  'performance_setting.disk_cache_path': z.string().optional(),
-  'performance_setting.monitor_enabled': z.boolean(),
-  'performance_setting.monitor_cpu_threshold': z.coerce.number().min(0),
-  'performance_setting.monitor_memory_threshold': z.coerce
-    .number()
-    .min(0)
-    .max(100),
-  'performance_setting.monitor_disk_threshold': z.coerce
-    .number()
-    .min(0)
-    .max(100),
-  'perf_metrics_setting.enabled': z.boolean(),
-  'perf_metrics_setting.flush_interval': z.coerce.number().min(1),
-  'perf_metrics_setting.bucket_time': z.enum(['minute', '5min', 'hour']),
-  'perf_metrics_setting.retention_days': z.coerce.number().min(0),
+  performance_setting: z.object({
+    disk_cache_enabled: z.boolean(),
+    disk_cache_threshold_mb: z.coerce.number().min(1),
+    disk_cache_max_size_mb: z.coerce.number().min(100),
+    disk_cache_path: z.string().optional(),
+    monitor_enabled: z.boolean(),
+    monitor_cpu_threshold: z.coerce.number().min(0),
+    monitor_memory_threshold: z.coerce.number().min(0).max(100),
+    monitor_disk_threshold: z.coerce.number().min(0).max(100),
+  }),
+  perf_metrics_setting: z.object({
+    enabled: z.boolean(),
+    flush_interval: z.coerce.number().min(1),
+    bucket_time: z.enum(['minute', '5min', 'hour']),
+    retention_days: z.coerce.number().min(0),
+  }),
 })
 
 type PerfFormValues = z.infer<typeof perfSchema>
@@ -153,14 +154,24 @@ export function PerformanceSection(props: Props) {
   const [logCleanupValue, setLogCleanupValue] = useState(10)
   const [logCleanupLoading, setLogCleanupLoading] = useState(false)
 
-  const form = useForm<PerfFormValues>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(perfSchema) as any,
-    defaultValues: props.defaultValues,
-  })
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useResetForm(form as any, props.defaultValues)
+  const { form, handleSubmit, handleReset, isDirty, isSubmitting } =
+    useSettingsForm<PerfFormValues>({
+      resolver: zodResolver(perfSchema) as Resolver<
+        PerfFormValues,
+        unknown,
+        PerfFormValues
+      >,
+      defaultValues: props.defaultValues,
+      onSubmit: async (_data, changedFields) => {
+        for (const [key, value] of Object.entries(changedFields)) {
+          await updateOption.mutateAsync({
+            key,
+            value: value as string | number | boolean,
+          })
+        }
+        fetchStats()
+      },
+    })
 
   const fetchStats = useCallback(async () => {
     try {
@@ -184,26 +195,6 @@ export function PerformanceSection(props: Props) {
     fetchStats()
     fetchLogInfo()
   }, [fetchStats, fetchLogInfo])
-
-  const onSubmit = async (data: PerfFormValues) => {
-    const entries = Object.entries(data) as [string, unknown][]
-    const updates = entries.filter(
-      ([key, value]) =>
-        value !== (props.defaultValues[key as keyof PerfFormValues] as unknown)
-    )
-    if (updates.length === 0) {
-      toast.info(t('No changes to save'))
-      return
-    }
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({
-        key,
-        value: value as string | number | boolean,
-      })
-    }
-    toast.success(t('Saved successfully'))
-    fetchStats()
-  }
 
   const clearDiskCache = async () => {
     try {
@@ -294,6 +285,23 @@ export function PerformanceSection(props: Props) {
         )
       : 0
 
+  const renderFormActions = () => (
+    <div className='flex flex-wrap gap-2'>
+      <Button type='submit' disabled={updateOption.isPending || isSubmitting}>
+        {updateOption.isPending ? t('Saving...') : t('Save Changes')}
+      </Button>
+      <Button
+        type='button'
+        variant='outline'
+        onClick={handleReset}
+        disabled={!isDirty || updateOption.isPending || isSubmitting}
+      >
+        <RotateCcw className='mr-2 h-4 w-4' />
+        {t('Reset')}
+      </Button>
+    </div>
+  )
+
   return (
     <SettingsSection
       title={t('Performance Settings')}
@@ -301,8 +309,12 @@ export function PerformanceSection(props: Props) {
         'Disk cache, system performance monitoring, and operation statistics'
       )}
     >
+      <FormNavigationGuard when={isDirty} />
+
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+        <form onSubmit={handleSubmit} className='space-y-6'>
+          <FormDirtyIndicator isDirty={isDirty} />
+
           {/* Disk Cache Settings */}
           <div>
             <h4 className='font-medium'>{t('Disk Cache Settings')}</h4>
@@ -396,6 +408,8 @@ export function PerformanceSection(props: Props) {
               )}
             />
           )}
+
+          {renderFormActions()}
 
           <Separator />
 
@@ -575,9 +589,7 @@ export function PerformanceSection(props: Props) {
             />
           </div>
 
-          <Button type='submit' disabled={updateOption.isPending}>
-            {updateOption.isPending ? t('Saving...') : t('Save Changes')}
-          </Button>
+          {renderFormActions()}
         </form>
       </Form>
 

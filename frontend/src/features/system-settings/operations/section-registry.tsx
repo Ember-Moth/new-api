@@ -121,30 +121,32 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <PerformanceSection
         defaultValues={{
-          'performance_setting.disk_cache_enabled':
-            settings['performance_setting.disk_cache_enabled'] ?? false,
-          'performance_setting.disk_cache_threshold_mb':
-            settings['performance_setting.disk_cache_threshold_mb'] ?? 10,
-          'performance_setting.disk_cache_max_size_mb':
-            settings['performance_setting.disk_cache_max_size_mb'] ?? 1024,
-          'performance_setting.disk_cache_path':
-            settings['performance_setting.disk_cache_path'] ?? '',
-          'performance_setting.monitor_enabled':
-            settings['performance_setting.monitor_enabled'] ?? false,
-          'performance_setting.monitor_cpu_threshold':
-            settings['performance_setting.monitor_cpu_threshold'] ?? 90,
-          'performance_setting.monitor_memory_threshold':
-            settings['performance_setting.monitor_memory_threshold'] ?? 90,
-          'performance_setting.monitor_disk_threshold':
-            settings['performance_setting.monitor_disk_threshold'] ?? 95,
-          'perf_metrics_setting.enabled':
-            settings['perf_metrics_setting.enabled'] ?? true,
-          'perf_metrics_setting.flush_interval':
-            settings['perf_metrics_setting.flush_interval'] ?? 5,
-          'perf_metrics_setting.bucket_time':
-            settings['perf_metrics_setting.bucket_time'] ?? 'hour',
-          'perf_metrics_setting.retention_days':
-            settings['perf_metrics_setting.retention_days'] ?? 0,
+          performance_setting: {
+            disk_cache_enabled:
+              settings['performance_setting.disk_cache_enabled'] ?? false,
+            disk_cache_threshold_mb:
+              settings['performance_setting.disk_cache_threshold_mb'] ?? 10,
+            disk_cache_max_size_mb:
+              settings['performance_setting.disk_cache_max_size_mb'] ?? 1024,
+            disk_cache_path:
+              settings['performance_setting.disk_cache_path'] ?? '',
+            monitor_enabled:
+              settings['performance_setting.monitor_enabled'] ?? false,
+            monitor_cpu_threshold:
+              settings['performance_setting.monitor_cpu_threshold'] ?? 90,
+            monitor_memory_threshold:
+              settings['performance_setting.monitor_memory_threshold'] ?? 90,
+            monitor_disk_threshold:
+              settings['performance_setting.monitor_disk_threshold'] ?? 95,
+          },
+          perf_metrics_setting: {
+            enabled: settings['perf_metrics_setting.enabled'] ?? true,
+            flush_interval:
+              settings['perf_metrics_setting.flush_interval'] ?? 5,
+            bucket_time: settings['perf_metrics_setting.bucket_time'] ?? 'hour',
+            retention_days:
+              settings['perf_metrics_setting.retention_days'] ?? 0,
+          },
         }}
       />
     ),
