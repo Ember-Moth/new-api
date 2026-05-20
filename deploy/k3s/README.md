@@ -45,3 +45,7 @@ kubectl -n new-api get pods,svc,ingress
 ## 注意
 
 默认清单不包含数据库、Redis 和 PVC。数据库请使用云数据库或其他 k3s 集群外服务；需要多副本时，请确保外部 Redis 可用，并固定 `SESSION_SECRET`、`CRYPTO_SECRET`。
+
+当前分支默认允许后端启动时自动创建 PostgreSQL 性能索引。正式上线且表数据量变大后，请按 `docs/installation/postgresql-performance.md` 关闭启动自动建索引并执行并发索引脚本。
+
+k3s 默认使用 `POSTGRES_LOG_PARTITIONING=auto`。全新数据库会创建月度分区 `logs` 表；已有普通 `logs` 表会保持不变，需要手动执行 `docs/installation/postgresql-log-partitioning.sql` 后再切换到强制分区模式。

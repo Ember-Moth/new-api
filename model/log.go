@@ -409,7 +409,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
-	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
+	err = countLimitedRows(LOG_DB, tx, &Log{}, "logs.id", logSearchCountLimit, &total)
 	if err != nil {
 		common.SysError("failed to count user logs: " + err.Error())
 		return nil, 0, errors.New("查询日志失败")
@@ -449,10 +449,10 @@ func applyLogContainsFilter(tx *gorm.DB, column string, value string) *gorm.DB {
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
+	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
 
 	// 为rpm和tpm创建单独的查询
-	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, sum(prompt_tokens) + sum(completion_tokens) tpm")
+	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
 
 	tx = applyLogContainsFilter(tx, "username", username)
 	rpmTpmQuery = applyLogContainsFilter(rpmTpmQuery, "username", username)
@@ -517,20 +517,43 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 
 func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
 	var total int64 = 0
+	if limit <= 0 {
+		return total, nil
+	}
+	db := LOG_DB.WithContext(ctx)
+
+	dropped, err := dropOldPostgresLogPartitions(ctx, LOG_DB, targetTimestamp)
+	if err != nil {
+		return total, err
+	}
+	total += dropped
 
 	for {
 		if nil != ctx.Err() {
 			return total, ctx.Err()
 		}
 
-		result := LOG_DB.Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
+		ids := make([]int, 0, limit)
+		if err := db.Model(&Log{}).
+			Select("id").
+			Where("created_at < ?", targetTimestamp).
+			Order("created_at ASC, id ASC").
+			Limit(limit).
+			Pluck("id", &ids).Error; err != nil {
+			return total, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		result := db.Where("id IN ?", ids).Delete(&Log{})
 		if nil != result.Error {
 			return total, result.Error
 		}
 
 		total += result.RowsAffected
 
-		if result.RowsAffected < int64(limit) {
+		if len(ids) < limit {
 			break
 		}
 	}

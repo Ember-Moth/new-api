@@ -106,3 +106,5 @@ curl https://new-api.example.com/api/status
 - HTTPS 生产环境建议保持 `SESSION_COOKIE_SECURE=true`、`SESSION_COOKIE_SAMESITE=lax`；Cloudflare Pages Functions 同源反代时不要设置 `SESSION_COOKIE_DOMAIN`。
 - 默认清单不挂载数据库 PVC，后端 Pod 可无状态重建；持久化数据由外部数据库承担。
 - 云数据库安全组需允许 k3s 节点或出口网关访问，并建议启用 TLS、备份和监控。
+- 当前分支默认允许后端启动时自动创建 PostgreSQL 性能索引；正式上线且表数据量变大后，建议按 [PostgreSQL 性能与索引策略](./postgresql-performance.md) 关闭启动自动建索引并执行并发索引脚本。
+- k3s 默认设置 `POSTGRES_LOG_PARTITIONING=auto`。新库会自动创建月度分区日志表；已有普通日志表不会自动重写，请先执行 `docs/installation/postgresql-log-partitioning.sql`。

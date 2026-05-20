@@ -38,11 +38,15 @@ func TestMain(m *testing.M) {
 		&Log{},
 		&Channel{},
 		&TopUp{},
+		&QuotaData{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_quota_data_hour ON quota_data (user_id, username, model_name, created_at)`).Error; err != nil {
+		panic("failed to create quota data unique index: " + err.Error())
 	}
 
 	code := m.Run()
@@ -60,6 +64,7 @@ func truncateTables(t *testing.T) {
 			"logs",
 			"channels",
 			"top_ups",
+			"quota_data",
 			"subscription_orders",
 			"subscription_plans",
 			"user_subscriptions",

@@ -132,7 +132,6 @@ export type ContentSettings = {
   'console_setting.uptime_kuma_enabled': boolean
   DataExportEnabled: boolean
   DataExportDefaultTime: string
-  DataExportInterval: number
   Chats: string
   DrawingEnabled: boolean
   MjNotifyEnabled: boolean

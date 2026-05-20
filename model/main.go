@@ -46,6 +46,8 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
+const postgresAutoCreatePerformanceIndexesEnv = "POSTGRES_AUTO_CREATE_PERFORMANCE_INDEXES"
+
 func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
@@ -181,8 +183,12 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	autoMigrateLog, err := preparePostgresLogTable(DB)
+	if err != nil {
+		return err
+	}
 
-	err := DB.AutoMigrate(
+	models := []interface{}{
 		&Channel{},
 		&Token{},
 		&User{},
@@ -190,7 +196,6 @@ func migrateDB() error {
 		&Option{},
 		&Redemption{},
 		&Ability{},
-		&Log{},
 		&Midjourney{},
 		&TopUp{},
 		&QuotaData{},
@@ -208,17 +213,25 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
-	)
+	}
+	if autoMigrateLog {
+		models = append(models, &Log{})
+	}
+	err = DB.AutoMigrate(models...)
 	if err != nil {
 		return err
 	}
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 		return err
 	}
-	return ensurePostgresPerformanceIndexes(DB)
+	return ensurePostgresPerformanceIndexesIfEnabled(DB)
 }
 
 func migrateDBFast() error {
+	autoMigrateLog, err := preparePostgresLogTable(DB)
+	if err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -233,7 +246,6 @@ func migrateDBFast() error {
 		{&Option{}, "Option"},
 		{&Redemption{}, "Redemption"},
 		{&Ability{}, "Ability"},
-		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
@@ -251,6 +263,12 @@ func migrateDBFast() error {
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
+	}
+	if autoMigrateLog {
+		migrations = append(migrations, struct {
+			model interface{}
+			name  string
+		}{&Log{}, "Log"})
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -278,7 +296,7 @@ func migrateDBFast() error {
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 		return err
 	}
-	if err := ensurePostgresPerformanceIndexes(DB); err != nil {
+	if err := ensurePostgresPerformanceIndexesIfEnabled(DB); err != nil {
 		return err
 	}
 	common.SysLog("database migrated")
@@ -286,11 +304,34 @@ func migrateDBFast() error {
 }
 
 func migrateLOGDB() error {
-	var err error
-	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
+	autoMigrateLog, err := preparePostgresLogTable(LOG_DB)
+	if err != nil {
 		return err
 	}
-	return ensurePostgresLogPerformanceIndexes(LOG_DB)
+	if autoMigrateLog {
+		if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
+			return err
+		}
+	}
+	return ensurePostgresLogPerformanceIndexesIfEnabled(LOG_DB)
+}
+
+func ensurePostgresPerformanceIndexesIfEnabled(db *gorm.DB) error {
+	if !common.GetEnvOrDefaultBool(postgresAutoCreatePerformanceIndexesEnv, true) {
+		common.SysLog("skipping PostgreSQL performance index auto-creation; run docs/installation/postgresql-performance-indexes.sql in production")
+		return nil
+	}
+	common.SysLog("creating PostgreSQL performance indexes with regular CREATE INDEX")
+	return ensurePostgresPerformanceIndexes(db)
+}
+
+func ensurePostgresLogPerformanceIndexesIfEnabled(db *gorm.DB) error {
+	if !common.GetEnvOrDefaultBool(postgresAutoCreatePerformanceIndexesEnv, true) {
+		common.SysLog("skipping PostgreSQL log performance index auto-creation; run docs/installation/postgresql-performance-indexes.sql in production")
+		return nil
+	}
+	common.SysLog("creating PostgreSQL log performance indexes with regular CREATE INDEX")
+	return ensurePostgresLogPerformanceIndexes(db)
 }
 
 func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
@@ -302,7 +343,10 @@ func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id_id ON tasks (user_id, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_submit_time_id ON tasks (submit_time, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_create_id ON top_ups (user_id, create_time DESC, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_user_model_created ON quota_data (user_id, username, model_name, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_id_id_desc ON top_ups (user_id, id DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_quota_data_hour ON quota_data (user_id, username, model_name, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_user_id_created ON quota_data (user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_username_created ON quota_data (username, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_quota_data_created_model ON quota_data (created_at, model_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_end_id ON user_subscriptions (status, end_time, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_next_reset ON user_subscriptions (status, next_reset_time, id)`,
@@ -312,7 +356,22 @@ func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
 
 func ensurePostgresLogPerformanceIndexes(db *gorm.DB) error {
 	statements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_created_at_id ON logs (id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_created_at_type ON logs (created_at, type)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_channel_id ON logs (channel_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_group ON logs ("group")`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_ip ON logs (ip)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_model_name ON logs (model_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_request_id ON logs (request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_token_id ON logs (token_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_token_name ON logs (token_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_upstream_request_id ON logs (upstream_request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs (user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_username ON logs (username)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_id_id ON logs (user_id, id)`,
+		`CREATE INDEX IF NOT EXISTS index_username_model_name ON logs (model_name, username)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_type_created_at ON logs (type, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_user_id_id_desc ON logs (user_id, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_user_type_id ON logs (user_id, type, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_created_at_id_desc ON logs (created_at DESC, id DESC)`,
 	}

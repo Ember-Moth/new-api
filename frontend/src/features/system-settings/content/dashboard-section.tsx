@@ -32,7 +32,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -47,7 +46,6 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const dataDashboardSchema = z.object({
   DataExportEnabled: z.boolean(),
-  DataExportInterval: z.number().int().min(1).max(1440),
   DataExportDefaultTime: z.enum(['hour', 'day', 'week']),
 })
 
@@ -117,31 +115,6 @@ export function DashboardSection({ defaultValues }: DashboardSectionProps) {
           />
 
           <div className='grid gap-6 sm:grid-cols-2'>
-            <FormField
-              control={form.control}
-              name='DataExportInterval'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Refresh interval (minutes)')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      type='number'
-                      min={1}
-                      max={1440}
-                      step={1}
-                      disabled={!isEnabled}
-                      value={field.value}
-                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Keep this above 1 minute to avoid heavy database load')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
             <FormField
               control={form.control}
               name='DataExportDefaultTime'
