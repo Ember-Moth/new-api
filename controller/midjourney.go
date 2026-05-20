@@ -195,6 +195,19 @@ func UpdateMidjourneyTaskBulk() {
 					})
 				}
 			}
+			releaseClaimedMidjourneyTasks(taskIds, taskM)
+		}
+	}
+}
+
+func releaseClaimedMidjourneyTasks(taskIds []string, taskM map[string]*model.Midjourney) {
+	for _, mjID := range taskIds {
+		task := taskM[mjID]
+		if task == nil || task.PollingAt <= 0 {
+			continue
+		}
+		if err := model.ReleaseMidjourneyPolling(task.Id, task.PollingAt); err != nil {
+			common.SysLog(fmt.Sprintf("failed to release midjourney polling lease for %s: %v", task.MjId, err))
 		}
 	}
 }

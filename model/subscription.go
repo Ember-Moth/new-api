@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -998,37 +999,48 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 		limit = 200
 	}
 	now := GetDBTimestamp()
-	var subs []UserSubscription
-	if err := DB.Where("status = ? AND end_time > 0 AND end_time <= ?", "active", now).
-		Order("end_time asc, id asc").
-		Limit(limit).
-		Find(&subs).Error; err != nil {
-		return 0, err
-	}
-	if len(subs) == 0 {
-		return 0, nil
-	}
 	expiredCount := 0
-	userIds := make(map[int]struct{}, len(subs))
-	for _, sub := range subs {
-		if sub.UserId > 0 {
-			userIds[sub.UserId] = struct{}{}
+	cacheGroups := make(map[int]string)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var subs []UserSubscription
+		if err := lockForUpdateSkipLocked(tx).
+			Where("status = ? AND end_time > 0 AND end_time <= ?", "active", now).
+			Order("end_time asc, id asc").
+			Limit(limit).
+			Find(&subs).Error; err != nil {
+			return err
 		}
-	}
-	for userId := range userIds {
-		cacheGroup := ""
-		err := DB.Transaction(func(tx *gorm.DB) error {
-			res := tx.Model(&UserSubscription{}).
-				Where("user_id = ? AND status = ? AND end_time > 0 AND end_time <= ?", userId, "active", now).
-				Updates(map[string]interface{}{
-					"status":     "expired",
-					"updated_at": common.GetTimestamp(),
-				})
-			if res.Error != nil {
-				return res.Error
-			}
-			expiredCount += int(res.RowsAffected)
+		if len(subs) == 0 {
+			return nil
+		}
 
+		ids := make([]int, 0, len(subs))
+		userIds := make(map[int]struct{}, len(subs))
+		for _, sub := range subs {
+			ids = append(ids, sub.Id)
+			if sub.UserId > 0 {
+				userIds[sub.UserId] = struct{}{}
+			}
+		}
+
+		res := tx.Model(&UserSubscription{}).
+			Where("id IN ?", ids).
+			Updates(map[string]interface{}{
+				"status":     "expired",
+				"updated_at": common.GetTimestamp(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		expiredCount = int(res.RowsAffected)
+
+		orderedUserIds := make([]int, 0, len(userIds))
+		for userId := range userIds {
+			orderedUserIds = append(orderedUserIds, userId)
+		}
+		sort.Ints(orderedUserIds)
+
+		for _, userId := range orderedUserIds {
 			// If there's an active upgraded subscription, keep current group.
 			var activeSub UserSubscription
 			activeQuery := tx.Where("user_id = ? AND status = ? AND end_time > ? AND upgrade_group <> ''",
@@ -1036,8 +1048,11 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 				Order("end_time desc, id desc").
 				Limit(1).
 				Find(&activeSub)
-			if activeQuery.Error == nil && activeQuery.RowsAffected > 0 {
-				return nil
+			if activeQuery.Error != nil {
+				return activeQuery.Error
+			}
+			if activeQuery.RowsAffected > 0 {
+				continue
 			}
 
 			// No active upgraded subscription, downgrade to previous group if needed.
@@ -1047,31 +1062,36 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 				Order("end_time desc, id desc").
 				Limit(1).
 				Find(&lastExpired)
-			if expiredQuery.Error != nil || expiredQuery.RowsAffected == 0 {
-				return nil
+			if expiredQuery.Error != nil {
+				return expiredQuery.Error
+			}
+			if expiredQuery.RowsAffected == 0 {
+				continue
 			}
 			upgradeGroup := strings.TrimSpace(lastExpired.UpgradeGroup)
 			prevGroup := strings.TrimSpace(lastExpired.PrevUserGroup)
 			if upgradeGroup == "" || prevGroup == "" {
-				return nil
+				continue
 			}
 			currentGroup, err := getUserGroupByIdTx(tx, userId)
 			if err != nil {
 				return err
 			}
 			if currentGroup != upgradeGroup || currentGroup == prevGroup {
-				return nil
+				continue
 			}
 			if err := tx.Model(&User{}).Where("id = ?", userId).
 				Update("group", prevGroup).Error; err != nil {
 				return err
 			}
-			cacheGroup = prevGroup
-			return nil
-		})
-		if err != nil {
-			return expiredCount, err
+			cacheGroups[userId] = prevGroup
 		}
+		return nil
+	})
+	if err != nil {
+		return expiredCount, err
+	}
+	for userId, cacheGroup := range cacheGroups {
 		if cacheGroup != "" {
 			_ = UpdateUserGroupCache(userId, cacheGroup)
 		}
@@ -1275,39 +1295,34 @@ func ResetDueSubscriptions(limit int) (int, error) {
 		limit = 200
 	}
 	now := GetDBTimestamp()
-	var subs []UserSubscription
-	if err := DB.Where("next_reset_time > 0 AND next_reset_time <= ? AND status = ?", now, "active").
-		Order("next_reset_time asc").
-		Limit(limit).
-		Find(&subs).Error; err != nil {
-		return 0, err
-	}
-	if len(subs) == 0 {
-		return 0, nil
-	}
 	resetCount := 0
-	for _, sub := range subs {
-		subCopy := sub
-		plan, err := getSubscriptionPlanByIdTx(nil, sub.PlanId)
-		if err != nil || plan == nil {
-			continue
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var subs []UserSubscription
+		if err := lockForUpdateSkipLocked(tx).
+			Where("next_reset_time > 0 AND next_reset_time <= ? AND status = ?", now, "active").
+			Order("next_reset_time asc, id asc").
+			Limit(limit).
+			Find(&subs).Error; err != nil {
+			return err
 		}
-		err = DB.Transaction(func(tx *gorm.DB) error {
-			var locked UserSubscription
-			if err := lockForUpdate(tx).
-				Where("id = ? AND next_reset_time > 0 AND next_reset_time <= ?", subCopy.Id, now).
-				First(&locked).Error; err != nil {
-				return nil
+		if len(subs) == 0 {
+			return nil
+		}
+		for _, sub := range subs {
+			locked := sub
+			plan, err := getSubscriptionPlanByIdTx(tx, locked.PlanId)
+			if err != nil || plan == nil {
+				continue
 			}
 			if err := maybeResetUserSubscriptionWithPlanTx(tx, &locked, plan, now); err != nil {
 				return err
 			}
 			resetCount++
-			return nil
-		})
-		if err != nil {
-			return resetCount, err
 		}
+		return nil
+	})
+	if err != nil {
+		return resetCount, err
 	}
 	return resetCount, nil
 }

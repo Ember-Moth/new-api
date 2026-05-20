@@ -219,6 +219,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		common.SysLog(fmt.Sprintf("渠道 #%d 未完成的任务有: %d, 成功获取到任务数: %s", channelId, len(taskIds), string(responseBody)))
 		return err
 	}
+	defer releaseClaimedTasks(taskIds, taskM)
 
 	for _, responseItem := range responseItems.Data {
 		task := taskM[responseItem.TaskID]
@@ -498,7 +499,24 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		RefundTaskQuota(ctx, task, task.FailReason)
 	}
 
+	if task.PollingAt > 0 {
+		if err := model.ReleaseTaskPolling(task.ID, task.PollingAt); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("failed to release task polling lease for %s: %v", task.TaskID, err))
+		}
+	}
 	return nil
+}
+
+func releaseClaimedTasks(taskIds []string, taskM map[string]*model.Task) {
+	for _, upstreamID := range taskIds {
+		task := taskM[upstreamID]
+		if task == nil || task.PollingAt <= 0 {
+			continue
+		}
+		if err := model.ReleaseTaskPolling(task.ID, task.PollingAt); err != nil {
+			common.SysLog(fmt.Sprintf("failed to release task polling lease for %s: %v", task.TaskID, err))
+		}
+	}
 }
 
 func redactVideoResponseBody(body []byte) []byte {

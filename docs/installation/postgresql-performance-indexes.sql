@@ -18,9 +18,21 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_user_id_id
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_submit_time_id
   ON tasks (submit_time, id);
 
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_polling_claim
+  ON tasks (polling_at, id)
+  WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS');
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_timeout_claim
+  ON tasks (submit_time, polling_at, id)
+  WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS');
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_unfinished_submit_time
   ON tasks (submit_time, id)
   WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS');
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_midjourneys_polling_claim
+  ON midjourneys (polling_at, id)
+  WHERE progress <> '100%';
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_top_ups_user_create_id
   ON top_ups (user_id, create_time DESC, id DESC);
@@ -145,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_created_at_id_desc
 
 ANALYZE abilities;
 ANALYZE tasks;
+ANALYZE midjourneys;
 ANALYZE top_ups;
 ANALYZE quota_data;
 ANALYZE quota_data_daily;

@@ -303,6 +303,7 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 | `POSTGRES_LOG_PARTITIONING` | 日志表 PostgreSQL 月度分区模式：`auto` 新库自动创建分区表，已有普通表保持不变；`true` 强制要求分区表；`false` 禁用主动维护 | `auto` |
 | `POSTGRES_LOG_PARTITION_MONTHS_BACK` | 启动时预创建过去几个月的日志分区 | `1` |
 | `POSTGRES_LOG_PARTITION_MONTHS_AHEAD` | 启动时预创建未来几个月的日志分区 | `3` |
+| `TASK_POLLING_LEASE_SECONDS` | 异步任务轮询领取租约秒数，多副本 worker 依赖 PostgreSQL `FOR UPDATE SKIP LOCKED` 防止重复处理 | `120` |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |

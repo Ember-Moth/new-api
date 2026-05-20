@@ -119,6 +119,26 @@ ORDER BY tablename, indexname;
 - `quota_data` 增加 PostgreSQL 触发器维护的日/月汇总表：`quota_data_daily`、`quota_data_monthly`。应用仍只写小时表，数据库按增量同步汇总表。
 - 看板接口按 `default_time` 选择数据源：`hour` 读 `quota_data`，`day` / `week` 读 `quota_data_daily`，`month` 读 `quota_data_monthly`。
 - `logs` 支持 PostgreSQL 月度分区，分区表场景下历史日志清理优先 `DROP TABLE` 整月分区。
+- 异步任务轮询和订阅维护使用 PostgreSQL `FOR UPDATE SKIP LOCKED`。任务轮询会写入 `polling_at` 短租约，避免 k3s 多副本 worker 重复拉取同一批任务。
+
+## Worker 并发领取
+
+异步任务轮询不再使用普通 `SELECT ... LIMIT` 直接扫描未完成任务，而是在事务中执行：
+
+```sql
+SELECT ...
+FOR UPDATE SKIP LOCKED
+```
+
+被选中的 `tasks` / `midjourneys` 行会立刻写入 `polling_at`。其他 Pod 在租约未过期前不会领取同一行。处理完成后会释放租约；如果进程崩溃或上游请求异常，租约到期后会自动重新领取。
+
+默认租约：
+
+```bash
+TASK_POLLING_LEASE_SECONDS=120
+```
+
+订阅过期和订阅额度重置在单个数据库事务中用 `FOR UPDATE SKIP LOCKED` 领取并处理，不需要额外分布式锁。这样拆出 `async-worker` 或部署多个 worker 副本时，数据库会成为并发协调点。
 
 ## 用量汇总表
 
@@ -181,6 +201,7 @@ SELECT ...
 
 - 渠道能力查找：`abilities` 按分组、模型、启用状态和权重筛选。
 - 任务列表和超时任务扫描：`tasks` 按用户、提交时间、未完成状态扫描。
+- 任务 worker 领取：`tasks` / `midjourneys` 按 `polling_at`、状态和提交时间扫描，用于 `SKIP LOCKED` 多副本并发领取。
 - 充值记录：`top_ups` 按用户、创建时间、ID 分页。
 - 用量数据：`quota_data` 按用户、用户名、模型和时间范围聚合，并通过唯一键支持 PostgreSQL 原生 UPSERT。
 - 用量汇总：`quota_data_daily`、`quota_data_monthly` 承接中长期看板查询，减少对小时表的重复聚合。

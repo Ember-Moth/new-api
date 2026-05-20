@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 		&Token{},
 		&Log{},
 		&Channel{},
+		&Midjourney{},
 		&TopUp{},
 		&QuotaData{},
 		&QuotaDataDaily{},
@@ -68,6 +69,7 @@ func truncateTables(t *testing.T) {
 			"tokens",
 			"logs",
 			"channels",
+			"midjourneys",
 			"top_ups",
 			"quota_data",
 			"quota_data_daily",
@@ -77,6 +79,183 @@ func truncateTables(t *testing.T) {
 			"user_subscriptions",
 		)
 	})
+}
+
+func TestClaimUnfinishedSyncTasksUsesPollingLease(t *testing.T) {
+	truncateTables(t)
+	t.Setenv(taskPollingLeaseSecondsEnv, "300")
+
+	for i := 0; i < 3; i++ {
+		insertTask(t, &Task{
+			TaskID:     fmt.Sprintf("task_claim_%d", i),
+			Status:     TaskStatusInProgress,
+			Progress:   "50%",
+			SubmitTime: int64(100 + i),
+			Data:       json.RawMessage(`{}`),
+		})
+	}
+
+	firstBatch := GetAllUnFinishSyncTasks(2)
+	require.Len(t, firstBatch, 2)
+	assert.NotZero(t, firstBatch[0].PollingAt)
+	assert.NotEqual(t, firstBatch[0].ID, firstBatch[1].ID)
+
+	secondBatch := GetAllUnFinishSyncTasks(2)
+	require.Len(t, secondBatch, 1)
+	assert.NotContains(t, []int64{firstBatch[0].ID, firstBatch[1].ID}, secondBatch[0].ID)
+
+	require.NoError(t, ReleaseTaskPolling(firstBatch[0].ID, firstBatch[0].PollingAt))
+	thirdBatch := GetAllUnFinishSyncTasks(2)
+	require.Len(t, thirdBatch, 1)
+	assert.Equal(t, firstBatch[0].ID, thirdBatch[0].ID)
+}
+
+func TestClaimTimedOutUnfinishedTasksUsesPollingLease(t *testing.T) {
+	truncateTables(t)
+	t.Setenv(taskPollingLeaseSecondsEnv, "300")
+
+	insertTask(t, &Task{
+		TaskID:     "task_timeout_claimed",
+		Status:     TaskStatusInProgress,
+		Progress:   "50%",
+		SubmitTime: 100,
+		Data:       json.RawMessage(`{}`),
+	})
+	insertTask(t, &Task{
+		TaskID:     "task_timeout_fresh",
+		Status:     TaskStatusInProgress,
+		Progress:   "50%",
+		SubmitTime: 1000,
+		Data:       json.RawMessage(`{}`),
+	})
+
+	firstBatch := GetTimedOutUnfinishedTasks(500, 10)
+	require.Len(t, firstBatch, 1)
+	assert.Equal(t, "task_timeout_claimed", firstBatch[0].TaskID)
+
+	secondBatch := GetTimedOutUnfinishedTasks(500, 10)
+	assert.Empty(t, secondBatch)
+}
+
+func TestClaimMidjourneyTasksUsesPollingLease(t *testing.T) {
+	truncateTables(t)
+	t.Setenv(taskPollingLeaseSecondsEnv, "300")
+
+	require.NoError(t, DB.Create(&Midjourney{MjId: "mj_claim_1", Progress: "50%", Status: "IN_PROGRESS"}).Error)
+	require.NoError(t, DB.Create(&Midjourney{MjId: "mj_claim_2", Progress: "50%", Status: "IN_PROGRESS"}).Error)
+
+	firstBatch := GetAllUnFinishTasks()
+	require.Len(t, firstBatch, 2)
+
+	secondBatch := GetAllUnFinishTasks()
+	assert.Empty(t, secondBatch)
+
+	require.NoError(t, ReleaseMidjourneyPolling(firstBatch[0].Id, firstBatch[0].PollingAt))
+	thirdBatch := GetAllUnFinishTasks()
+	require.Len(t, thirdBatch, 1)
+	assert.Equal(t, firstBatch[0].Id, thirdBatch[0].Id)
+}
+
+func TestExpireDueSubscriptionsProcessesAllUsersInBatch(t *testing.T) {
+	truncateTables(t)
+	now := GetDBTimestamp()
+
+	require.NoError(t, DB.Create(&User{Id: 601, Username: "expire_keep_user", Password: "password123", Status: common.UserStatusEnabled, Group: "vip", AffCode: "expire_keep"}).Error)
+	require.NoError(t, DB.Create(&User{Id: 602, Username: "expire_downgrade_user", Password: "password123", Status: common.UserStatusEnabled, Group: "vip", AffCode: "expire_down"}).Error)
+	require.NoError(t, DB.Create(&UserSubscription{
+		UserId:        601,
+		PlanId:        901,
+		AmountTotal:   1000,
+		EndTime:       now - 10,
+		Status:        "active",
+		UpgradeGroup:  "vip",
+		PrevUserGroup: "default",
+	}).Error)
+	require.NoError(t, DB.Create(&UserSubscription{
+		UserId:        601,
+		PlanId:        901,
+		AmountTotal:   1000,
+		EndTime:       now + 3600,
+		Status:        "active",
+		UpgradeGroup:  "vip",
+		PrevUserGroup: "default",
+	}).Error)
+	require.NoError(t, DB.Create(&UserSubscription{
+		UserId:        602,
+		PlanId:        901,
+		AmountTotal:   1000,
+		EndTime:       now - 5,
+		Status:        "active",
+		UpgradeGroup:  "vip",
+		PrevUserGroup: "default",
+	}).Error)
+
+	expired, err := ExpireDueSubscriptions(10)
+	require.NoError(t, err)
+	assert.Equal(t, 2, expired)
+
+	var expiredCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).
+		Where("status = ? AND end_time <= ?", "expired", now).
+		Count(&expiredCount).Error)
+	assert.Equal(t, int64(2), expiredCount)
+	assert.Equal(t, "vip", getUserGroupForTaskCASTest(t, 601))
+	assert.Equal(t, "default", getUserGroupForTaskCASTest(t, 602))
+}
+
+func TestResetDueSubscriptionsHonorsLimit(t *testing.T) {
+	truncateTables(t)
+	now := GetDBTimestamp()
+	plan := &SubscriptionPlan{
+		Id:                      902,
+		Title:                   "Reset Plan",
+		PriceAmount:             1,
+		Currency:                "USD",
+		DurationUnit:            SubscriptionDurationMonth,
+		DurationValue:           1,
+		Enabled:                 true,
+		TotalAmount:             1000,
+		QuotaResetPeriod:        SubscriptionResetCustom,
+		QuotaResetCustomSeconds: 60,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	for i := 0; i < 2; i++ {
+		require.NoError(t, DB.Create(&UserSubscription{
+			UserId:        701 + i,
+			PlanId:        plan.Id,
+			AmountTotal:   1000,
+			AmountUsed:    int64(100 + i),
+			StartTime:     now - 3600,
+			EndTime:       now + 3600,
+			Status:        "active",
+			LastResetTime: now - 120,
+			NextResetTime: now - 60,
+		}).Error)
+	}
+
+	reset, err := ResetDueSubscriptions(1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, reset)
+	assert.Equal(t, int64(1), countResetSubscriptionsForTaskCASTest(t))
+
+	reset, err = ResetDueSubscriptions(1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, reset)
+	assert.Equal(t, int64(2), countResetSubscriptionsForTaskCASTest(t))
+}
+
+func getUserGroupForTaskCASTest(t *testing.T, userID int) string {
+	t.Helper()
+	var group string
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Select(commonGroupCol).Scan(&group).Error)
+	return group
+}
+
+func countResetSubscriptionsForTaskCASTest(t *testing.T) int64 {
+	t.Helper()
+	var count int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("amount_used = 0").Count(&count).Error)
+	return count
 }
 
 func insertTask(t *testing.T, task *Task) {

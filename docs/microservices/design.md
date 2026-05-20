@@ -101,7 +101,7 @@ controller.Relay
 ### 约束
 
 - Worker 可以直接访问外部数据库和 Redis/DragonflyDB。
-- 需要全局单实例的任务必须加分布式锁。
+- 任务轮询、订阅过期和订阅额度重置已使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 做并发领取；其他仍需全局单实例语义的任务再使用分布式锁。
 - Worker 不暴露公网入口。
 
 ## 第三阶段：Billing Service

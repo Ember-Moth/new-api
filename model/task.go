@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -58,6 +59,7 @@ type Task struct {
 	StartTime  int64                 `json:"start_time" gorm:"index"`
 	FinishTime int64                 `json:"finish_time" gorm:"index"`
 	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
+	PollingAt  int64                 `json:"-" gorm:"type:bigint;default:0;index"`
 	Properties Properties            `json:"properties" gorm:"type:json"`
 	Username   string                `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
@@ -298,28 +300,76 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
+	return claimUnfinishedTasksForPolling(limit, "submit_time", func(tx *gorm.DB, leaseCutoff int64) *gorm.DB {
+		return tx.Where("submit_time < ?", cutoffUnix)
+	})
+}
+
+func GetAllUnFinishSyncTasks(limit int) []*Task {
+	return claimUnfinishedTasksForPolling(limit, "id", nil)
+}
+
+const taskPollingLeaseSecondsEnv = "TASK_POLLING_LEASE_SECONDS"
+
+func claimUnfinishedTasksForPolling(limit int, orderColumn string, extraFilter func(*gorm.DB, int64) *gorm.DB) []*Task {
 	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
-		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
-		Where("submit_time < ?", cutoffUnix).
-		Order("submit_time").
-		Limit(limit).
-		Find(&tasks).Error
+	if limit <= 0 {
+		limit = 100
+	}
+	now := common.GetTimestamp()
+	leaseSeconds := common.GetEnvOrDefault(taskPollingLeaseSecondsEnv, 120)
+	if leaseSeconds < 15 {
+		leaseSeconds = 15
+	}
+	leaseCutoff := now - int64(leaseSeconds)
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := lockForUpdateSkipLocked(tx).
+			Where("progress <> ?", "100%").
+			Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
+			Where("(polling_at IS NULL OR polling_at = 0 OR polling_at < ?)", leaseCutoff)
+		if extraFilter != nil {
+			query = extraFilter(query, leaseCutoff)
+		}
+		if err := query.Order(taskPollingOrder(orderColumn)).
+			Limit(limit).
+			Find(&tasks).Error; err != nil {
+			return err
+		}
+		if len(tasks) == 0 {
+			return nil
+		}
+		ids := make([]int64, 0, len(tasks))
+		for _, task := range tasks {
+			ids = append(ids, task.ID)
+		}
+		if err := tx.Model(&Task{}).Where("id IN ?", ids).Update("polling_at", now).Error; err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			task.PollingAt = now
+		}
+		return nil
+	})
 	if err != nil {
 		return nil
 	}
 	return tasks
 }
 
-func GetAllUnFinishSyncTasks(limit int) []*Task {
-	var tasks []*Task
-	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
-	if err != nil {
+func taskPollingOrder(orderColumn string) string {
+	switch orderColumn {
+	case "submit_time":
+		return "submit_time asc, id asc"
+	default:
+		return "id asc"
+	}
+}
+
+func ReleaseTaskPolling(taskID int64, pollingAt int64) error {
+	if taskID <= 0 || pollingAt <= 0 {
 		return nil
 	}
-	return tasks
+	return DB.Model(&Task{}).Where("id = ? AND polling_at = ?", taskID, pollingAt).Update("polling_at", 0).Error
 }
 
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {

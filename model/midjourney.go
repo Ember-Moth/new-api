@@ -1,5 +1,10 @@
 package model
 
+import (
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -18,6 +23,7 @@ type Midjourney struct {
 	VideoUrls   string `json:"video_urls"`
 	Status      string `json:"status" gorm:"type:varchar(20);index"`
 	Progress    string `json:"progress" gorm:"type:varchar(30);index"`
+	PollingAt   int64  `json:"-" gorm:"type:bigint;default:0;index"`
 	FailReason  string `json:"fail_reason"`
 	ChannelId   int    `json:"channel_id"`
 	Quota       int    `json:"quota"`
@@ -92,13 +98,52 @@ func GetAllTasks(startIdx int, num int, queryParams TaskQueryParams) []*Midjourn
 
 func GetAllUnFinishTasks() []*Midjourney {
 	var tasks []*Midjourney
-	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Find(&tasks).Error
+	limit := common.GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
+	if limit <= 0 {
+		limit = 1000
+	}
+	now := common.GetTimestamp()
+	leaseSeconds := common.GetEnvOrDefault(taskPollingLeaseSecondsEnv, 120)
+	if leaseSeconds < 15 {
+		leaseSeconds = 15
+	}
+	leaseCutoff := now - int64(leaseSeconds)
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdateSkipLocked(tx).
+			Where("progress <> ?", "100%").
+			Where("(polling_at IS NULL OR polling_at = 0 OR polling_at < ?)", leaseCutoff).
+			Order("id asc").
+			Limit(limit).
+			Find(&tasks).Error; err != nil {
+			return err
+		}
+		if len(tasks) == 0 {
+			return nil
+		}
+		ids := make([]int, 0, len(tasks))
+		for _, task := range tasks {
+			ids = append(ids, task.Id)
+		}
+		if err := tx.Model(&Midjourney{}).Where("id IN ?", ids).Update("polling_at", now).Error; err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			task.PollingAt = now
+		}
+		return nil
+	})
 	if err != nil {
 		return nil
 	}
 	return tasks
+}
+
+func ReleaseMidjourneyPolling(taskID int, pollingAt int64) error {
+	if taskID <= 0 || pollingAt <= 0 {
+		return nil
+	}
+	return DB.Model(&Midjourney{}).Where("id = ? AND polling_at = ?", taskID, pollingAt).Update("polling_at", 0).Error
 }
 
 func GetByOnlyMJId(mjId string) *Midjourney {

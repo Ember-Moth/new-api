@@ -42,6 +42,10 @@ func lockForUpdate(tx *gorm.DB) *gorm.DB {
 	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 }
 
+func lockForUpdateSkipLocked(tx *gorm.DB) *gorm.DB {
+	return tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB
@@ -352,6 +356,9 @@ func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_abilities_lookup ON abilities ("group", model, enabled, priority DESC, weight DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id_id ON tasks (user_id, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_submit_time_id ON tasks (submit_time, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_polling_claim ON tasks (polling_at, id) WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS')`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_timeout_claim ON tasks (submit_time, polling_at, id) WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS')`,
+		`CREATE INDEX IF NOT EXISTS idx_midjourneys_polling_claim ON midjourneys (polling_at, id) WHERE progress <> '100%'`,
 		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_create_id ON top_ups (user_id, create_time DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_id_id_desc ON top_ups (user_id, id DESC)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS uq_quota_data_hour ON quota_data (user_id, username, model_name, created_at)`,
