@@ -30,6 +30,7 @@ func TestMain(m *testing.M) {
 	testutil.ConfigurePostgresTestGlobals()
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
+	initCol()
 
 	if err := db.AutoMigrate(
 		&Task{},
@@ -46,6 +47,7 @@ func TestMain(m *testing.M) {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
+		&PerfMetric{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -76,6 +78,7 @@ func truncateTables(t *testing.T) {
 			"subscription_plans",
 			"user_subscriptions",
 			"subscription_pre_consume_records",
+			"perf_metrics",
 		)
 	})
 }
