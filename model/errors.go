@@ -7,6 +7,13 @@ var (
 	ErrDatabase = errors.New("database error")
 )
 
+// Billing errors
+var (
+	ErrUserQuotaInsufficient         = errors.New("user quota insufficient")
+	ErrNoActiveSubscription          = errors.New("no active subscription")
+	ErrSubscriptionQuotaInsufficient = errors.New("subscription quota insufficient")
+)
+
 // User auth errors
 var (
 	ErrInvalidCredentials   = errors.New("invalid credentials")

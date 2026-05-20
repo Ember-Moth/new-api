@@ -120,6 +120,7 @@ ORDER BY tablename, indexname;
 - 看板接口按 `default_time` 选择数据源：`hour` 读 `quota_data`，`day` / `week` 读 `quota_data_daily`，`month` 读 `quota_data_monthly`。
 - `logs` 支持 PostgreSQL 月度分区，分区表场景下历史日志清理优先 `DROP TABLE` 整月分区。
 - 异步任务轮询和订阅维护使用 PostgreSQL `FOR UPDATE SKIP LOCKED`。任务轮询会写入 `polling_at` 短租约，避免 k3s 多副本 worker 重复拉取同一批任务。
+- 钱包余额扣减和订阅额度结算使用 PostgreSQL 条件 `UPDATE ... RETURNING`。余额不足、订阅额度不足由数据库原子判定，避免多副本并发请求超扣。
 
 ## Worker 并发领取
 
@@ -139,6 +140,30 @@ TASK_POLLING_LEASE_SECONDS=120
 ```
 
 订阅过期和订阅额度重置在单个数据库事务中用 `FOR UPDATE SKIP LOCKED` 领取并处理，不需要额外分布式锁。这样拆出 `async-worker` 或部署多个 worker 副本时，数据库会成为并发协调点。
+
+## 计费原子结算
+
+钱包扣费不再依赖“先读余额再写回”的应用层判断，而是使用数据库条件更新：
+
+```sql
+UPDATE users
+SET quota = quota - $amount
+WHERE id = $user_id
+  AND quota >= $amount
+RETURNING quota;
+```
+
+订阅预扣、补扣和退款统一走 `amount_used` 原子更新：
+
+```sql
+UPDATE user_subscriptions
+SET amount_used = amount_used + $delta
+WHERE id = $subscription_id
+  AND (amount_total = 0 OR amount_used + $delta <= amount_total)
+RETURNING amount_total, amount_used;
+```
+
+退款方向使用 `GREATEST(amount_used + $delta, 0)`，避免并发退款把已用额度写成负数。预扣记录使用 `ON CONFLICT DO NOTHING` 保持 `request_id` 幂等，避免 PostgreSQL 唯一约束错误导致事务 abort。
 
 ## 用量汇总表
 

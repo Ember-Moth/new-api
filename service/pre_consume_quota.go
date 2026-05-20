@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -70,6 +71,14 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 		}
 		err = model.DecreaseUserQuota(relayInfo.UserId, preConsumedQuota, false)
 		if err != nil {
+			if !relayInfo.IsPlayground {
+				if rollbackErr := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, preConsumedQuota); rollbackErr != nil {
+					common.SysLog(fmt.Sprintf("error rolling back token quota after wallet pre-consume failed (userId=%d, tokenId=%d): %s", relayInfo.UserId, relayInfo.TokenId, rollbackErr.Error()))
+				}
+			}
+			if errors.Is(err, model.ErrUserQuotaInsufficient) {
+				return types.NewErrorWithStatusCode(fmt.Errorf("预扣费额度失败, 用户剩余额度不足, 需要预扣费额度: %s", logger.FormatQuota(preConsumedQuota)), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			}
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 预扣费 %s, 预扣费后剩余额度: %s", relayInfo.UserId, logger.FormatQuota(preConsumedQuota), logger.FormatQuota(userQuota-preConsumedQuota)))

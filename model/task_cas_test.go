@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
+		&SubscriptionPreConsumeRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -77,6 +78,7 @@ func truncateTables(t *testing.T) {
 			"subscription_orders",
 			"subscription_plans",
 			"user_subscriptions",
+			"subscription_pre_consume_records",
 		)
 	})
 }
@@ -244,11 +246,117 @@ func TestResetDueSubscriptionsHonorsLimit(t *testing.T) {
 	assert.Equal(t, int64(2), countResetSubscriptionsForTaskCASTest(t))
 }
 
+func TestDecreaseUserQuotaRequiresSufficientBalance(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{
+		Id:       801,
+		Username: "quota_atomic_user",
+		Password: "password123",
+		Status:   common.UserStatusEnabled,
+		Quota:    100,
+		AffCode:  "quota_atomic",
+	}).Error)
+
+	require.NoError(t, DecreaseUserQuota(801, 40, false))
+	assert.Equal(t, 60, getUserQuotaForTaskCASTest(t, 801))
+
+	err := DecreaseUserQuota(801, 100, false)
+	require.ErrorIs(t, err, ErrUserQuotaInsufficient)
+	assert.Equal(t, 60, getUserQuotaForTaskCASTest(t, 801))
+}
+
+func TestPostConsumeUserSubscriptionDeltaUsesAtomicBounds(t *testing.T) {
+	truncateTables(t)
+	now := GetDBTimestamp()
+	sub := &UserSubscription{
+		UserId:      802,
+		PlanId:      904,
+		AmountTotal: 100,
+		AmountUsed:  80,
+		StartTime:   now - 3600,
+		EndTime:     now + 3600,
+		Status:      "active",
+	}
+	require.NoError(t, DB.Create(sub).Error)
+
+	err := PostConsumeUserSubscriptionDelta(sub.Id, 30)
+	require.ErrorIs(t, err, ErrSubscriptionQuotaInsufficient)
+	assert.Equal(t, int64(80), getSubscriptionAmountUsedForTaskCASTest(t, sub.Id))
+
+	require.NoError(t, PostConsumeUserSubscriptionDelta(sub.Id, 20))
+	assert.Equal(t, int64(100), getSubscriptionAmountUsedForTaskCASTest(t, sub.Id))
+
+	require.NoError(t, PostConsumeUserSubscriptionDelta(sub.Id, -150))
+	assert.Equal(t, int64(0), getSubscriptionAmountUsedForTaskCASTest(t, sub.Id))
+}
+
+func TestPreConsumeUserSubscriptionIsIdempotentAndBounded(t *testing.T) {
+	truncateTables(t)
+	now := GetDBTimestamp()
+	plan := &SubscriptionPlan{
+		Id:            905,
+		Title:         "Atomic Subscription Plan",
+		PriceAmount:   1,
+		Currency:      "USD",
+		DurationUnit:  SubscriptionDurationMonth,
+		DurationValue: 1,
+		Enabled:       true,
+		TotalAmount:   100,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	sub := &UserSubscription{
+		UserId:      803,
+		PlanId:      plan.Id,
+		AmountTotal: 100,
+		AmountUsed:  0,
+		StartTime:   now - 3600,
+		EndTime:     now + 3600,
+		Status:      "active",
+	}
+	require.NoError(t, DB.Create(sub).Error)
+
+	first, err := PreConsumeUserSubscription("atomic-request-1", 803, "test-model", 0, 60)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, int64(60), first.AmountUsedAfter)
+	assert.Equal(t, int64(60), getSubscriptionAmountUsedForTaskCASTest(t, sub.Id))
+
+	replayed, err := PreConsumeUserSubscription("atomic-request-1", 803, "test-model", 0, 60)
+	require.NoError(t, err)
+	require.NotNil(t, replayed)
+	assert.Equal(t, first.UserSubscriptionId, replayed.UserSubscriptionId)
+	assert.Equal(t, int64(60), getSubscriptionAmountUsedForTaskCASTest(t, sub.Id))
+
+	second, err := PreConsumeUserSubscription("atomic-request-2", 803, "test-model", 0, 60)
+	require.ErrorIs(t, err, ErrSubscriptionQuotaInsufficient)
+	assert.Nil(t, second)
+	assert.Equal(t, int64(60), getSubscriptionAmountUsedForTaskCASTest(t, sub.Id))
+
+	var recordCount int64
+	require.NoError(t, DB.Model(&SubscriptionPreConsumeRecord{}).Where("user_id = ?", 803).Count(&recordCount).Error)
+	assert.Equal(t, int64(1), recordCount)
+}
+
 func getUserGroupForTaskCASTest(t *testing.T, userID int) string {
 	t.Helper()
 	var group string
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Select(commonGroupCol).Scan(&group).Error)
 	return group
+}
+
+func getUserQuotaForTaskCASTest(t *testing.T, userID int) int {
+	t.Helper()
+	var quota int
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Select("quota").Scan(&quota).Error)
+	return quota
+}
+
+func getSubscriptionAmountUsedForTaskCASTest(t *testing.T, subscriptionID int) int64 {
+	t.Helper()
+	var amountUsed int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", subscriptionID).Select("amount_used").Scan(&amountUsed).Error)
+	return amountUsed
 }
 
 func countResetSubscriptionsForTaskCASTest(t *testing.T) int64 {
