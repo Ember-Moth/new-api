@@ -10,6 +10,7 @@ var (
 // Billing errors
 var (
 	ErrUserQuotaInsufficient         = errors.New("user quota insufficient")
+	ErrTokenQuotaInsufficient        = errors.New("token quota insufficient")
 	ErrNoActiveSubscription          = errors.New("no active subscription")
 	ErrSubscriptionQuotaInsufficient = errors.New("subscription quota insufficient")
 )

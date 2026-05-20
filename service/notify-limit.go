@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
@@ -51,7 +52,9 @@ func CheckNotificationLimit(userId int, notifyType string) (bool, error) {
 	if common.RedisEnabled {
 		return checkRedisLimit(userId, notifyType)
 	}
-	return checkMemoryLimit(userId, notifyType)
+	key := fmt.Sprintf("notify_limit:%d:%s", userId, notifyType)
+	allowed, _, err := model.AllowPostgresFixedWindowRateLimit(key, constant.NotifyLimitCount, int64(getDuration().Seconds()))
+	return allowed, err
 }
 
 func checkRedisLimit(userId int, notifyType string) (bool, error) {

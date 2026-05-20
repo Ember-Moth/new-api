@@ -34,10 +34,6 @@ func shouldAutoRefreshCodexChannelStatus(status int) bool {
 
 func StartCodexCredentialAutoRefreshTask() {
 	codexCredentialRefreshOnce.Do(func() {
-		if !common.IsMasterNode {
-			return
-		}
-
 		gopool.Go(func() {
 			logger.LogInfo(context.Background(), fmt.Sprintf("codex credential auto-refresh task started: tick=%s threshold=%s", codexCredentialRefreshTickInterval, codexCredentialRefreshThreshold))
 
@@ -59,6 +55,16 @@ func runCodexCredentialAutoRefreshOnce() {
 	defer codexCredentialRefreshRunning.Store(false)
 
 	ctx := context.Background()
+	err := model.WithPostgresAdvisoryLock(ctx, "new-api:task:codex_credential_refresh", func(ctx context.Context) error {
+		runCodexCredentialAutoRefreshLocked(ctx)
+		return nil
+	})
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("codex credential auto-refresh lock failed: %v", err))
+	}
+}
+
+func runCodexCredentialAutoRefreshLocked(ctx context.Context) {
 	now := time.Now()
 
 	var refreshed int

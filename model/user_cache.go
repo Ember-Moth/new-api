@@ -94,6 +94,11 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	// Try getting from Redis first
 	userCache, err = cacheGetUserBase(userId)
 	if err == nil {
+		if quota, quotaErr := GetUserQuota(userId, true); quotaErr == nil {
+			userCache.Quota = quota
+		} else {
+			common.SysLog("failed to refresh user quota from database: " + quotaErr.Error())
+		}
 		return userCache, nil
 	}
 

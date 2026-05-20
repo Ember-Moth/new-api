@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -525,6 +526,16 @@ func runChannelUpstreamModelUpdateTaskOnce() {
 	}
 	defer channelUpstreamModelUpdateTaskRunning.Store(false)
 
+	ctx := context.Background()
+	if err := model.WithPostgresAdvisoryLock(ctx, "new-api:task:channel_upstream_model_update", func(ctx context.Context) error {
+		runChannelUpstreamModelUpdateTaskLocked()
+		return nil
+	}); err != nil {
+		common.SysError("upstream model update task lock failed: " + err.Error())
+	}
+}
+
+func runChannelUpstreamModelUpdateTaskLocked() {
 	checkedChannels := 0
 	failedChannels := 0
 	failedChannelIDs := make([]int, 0)
@@ -651,9 +662,6 @@ func runChannelUpstreamModelUpdateTaskOnce() {
 
 func StartChannelUpstreamModelUpdateTask() {
 	channelUpstreamModelUpdateTaskOnce.Do(func() {
-		if !common.IsMasterNode {
-			return
-		}
 		if !common.GetEnvOrDefaultBool("CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED", true) {
 			common.SysLog("upstream model update task disabled by CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED")
 			return

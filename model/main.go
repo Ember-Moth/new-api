@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -129,6 +130,7 @@ func InitDB() (err error) {
 			db = db.Debug()
 		}
 		DB = db
+		InitPostgresRuntimeState()
 		sqlDB, err := DB.DB()
 		if err != nil {
 			return err
@@ -137,11 +139,10 @@ func InitDB() (err error) {
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
-		if !common.IsMasterNode {
-			return nil
-		}
 		common.SysLog("database migration started")
-		err = migrateDB()
+		err = WithBlockingPostgresAdvisoryLock(context.Background(), "new-api:migration:main", func(context.Context) error {
+			return migrateDB()
+		})
 		return err
 	} else {
 		common.FatalLog(err)
@@ -168,11 +169,10 @@ func InitLogDB() (err error) {
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
-		if !common.IsMasterNode {
-			return nil
-		}
 		common.SysLog("database migration started")
-		err = migrateLOGDB()
+		err = WithBlockingPostgresAdvisoryLock(context.Background(), "new-api:migration:log", func(context.Context) error {
+			return migrateLOGDB()
+		})
 		return err
 	} else {
 		common.FatalLog(err)

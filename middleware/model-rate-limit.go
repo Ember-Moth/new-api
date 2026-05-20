@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -163,6 +164,46 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 	}
 }
 
+func postgresRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userId := strconv.Itoa(c.GetInt("id"))
+
+		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, userId)
+		allowed, _, err := model.CheckPostgresFixedWindowRateLimit(successKey, successMaxCount, duration)
+		if err != nil {
+			common.SysError("PostgreSQL model success rate limit check failed: " + err.Error())
+			abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
+			return
+		}
+		if !allowed {
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount))
+			return
+		}
+
+		if totalMaxCount > 0 {
+			totalKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitCountMark, userId)
+			allowed, _, err = model.AllowPostgresFixedWindowRateLimit(totalKey, totalMaxCount, duration)
+			if err != nil {
+				common.SysError("PostgreSQL model total rate limit check failed: " + err.Error())
+				abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
+				return
+			}
+			if !allowed {
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount))
+				return
+			}
+		}
+
+		c.Next()
+
+		if c.Writer.Status() < 400 {
+			if _, _, err := model.AllowPostgresFixedWindowRateLimit(successKey, successMaxCount, duration); err != nil {
+				common.SysError("PostgreSQL model success rate limit record failed: " + err.Error())
+			}
+		}
+	}
+}
+
 // ModelRequestRateLimit 模型请求限流中间件
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
@@ -190,11 +231,10 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			successMaxCount = groupSuccessCount
 		}
 
-		// 根据存储类型选择并执行限流处理器
 		if common.RedisEnabled {
 			redisRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
 		} else {
-			memoryRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
+			postgresRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
 		}
 	}
 }

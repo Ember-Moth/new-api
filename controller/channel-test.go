@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -958,10 +959,6 @@ func TestAllChannels(c *gin.Context) {
 var autoTestChannelsOnce sync.Once
 
 func AutomaticallyTestChannels() {
-	// 只在Master节点定时测试渠道
-	if !common.IsMasterNode {
-		return
-	}
 	autoTestChannelsOnce.Do(func() {
 		for {
 			if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
@@ -973,7 +970,12 @@ func AutomaticallyTestChannels() {
 				time.Sleep(time.Duration(int(math.Round(frequency))) * time.Minute)
 				common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", frequency))
 				common.SysLog("automatically testing all channels")
-				_ = testAllChannels(false)
+				err := model.WithPostgresAdvisoryLock(context.Background(), "new-api:task:auto_test_channels", func(context.Context) error {
+					return testAllChannels(false)
+				})
+				if err != nil {
+					common.SysError("automatically channel test lock failed: " + err.Error())
+				}
 				common.SysLog("automatically channel test finished")
 				if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
 					break

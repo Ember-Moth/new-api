@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
 
@@ -78,11 +79,23 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 		return func(c *gin.Context) {
 			redisRateLimiter(c, maxRequestNum, duration, mark)
 		}
-	} else {
-		// It's safe to call multi times.
-		inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
-		return func(c *gin.Context) {
-			memoryRateLimiter(c, maxRequestNum, duration, mark)
+	}
+	return func(c *gin.Context) {
+		key := "rateLimit:" + mark + ":" + c.ClientIP()
+		allowed, retryAfter, err := model.AllowPostgresFixedWindowRateLimit(key, maxRequestNum, duration)
+		if err != nil {
+			common.SysError("PostgreSQL rate limit failed: " + err.Error())
+			c.Status(http.StatusInternalServerError)
+			c.Abort()
+			return
+		}
+		if !allowed {
+			if retryAfter > 0 {
+				c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
+			}
+			c.Status(http.StatusTooManyRequests)
+			c.Abort()
+			return
 		}
 	}
 }
@@ -132,8 +145,6 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 			userRedisRateLimiter(c, maxRequestNum, duration, key)
 		}
 	}
-	// It's safe to call multi times.
-	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
 	return func(c *gin.Context) {
 		userId := c.GetInt("id")
 		if userId == 0 {
@@ -142,7 +153,17 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 			return
 		}
 		key := fmt.Sprintf("%s:user:%d", mark, userId)
-		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
+		allowed, retryAfter, err := model.AllowPostgresFixedWindowRateLimit("rateLimit:"+key, maxRequestNum, duration)
+		if err != nil {
+			common.SysError("PostgreSQL user rate limit failed: " + err.Error())
+			c.Status(http.StatusInternalServerError)
+			c.Abort()
+			return
+		}
+		if !allowed {
+			if retryAfter > 0 {
+				c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
+			}
 			c.Status(http.StatusTooManyRequests)
 			c.Abort()
 			return

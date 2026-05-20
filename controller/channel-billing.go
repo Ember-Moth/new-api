@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -499,7 +500,12 @@ func AutomaticallyUpdateChannels(frequency int) {
 	for {
 		time.Sleep(time.Duration(frequency) * time.Minute)
 		common.SysLog("updating all channels")
-		_ = updateAllChannelsBalance()
+		err := model.WithPostgresAdvisoryLock(context.Background(), "new-api:task:update_channel_balances", func(context.Context) error {
+			return updateAllChannelsBalance()
+		})
+		if err != nil {
+			common.SysError("update channel balances lock failed: " + err.Error())
+		}
 		common.SysLog("channels update done")
 	}
 }

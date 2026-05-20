@@ -80,11 +80,17 @@ func main() {
 			model.InitChannelCache()
 		}()
 
-		go model.SyncChannelCache(common.SyncFrequency)
+		if !common.GetEnvOrDefaultBool("POSTGRES_RUNTIME_EVENT_LISTENER", true) {
+			go model.SyncChannelCache(common.SyncFrequency)
+		}
 	}
 
-	// 热更新配置
-	go model.SyncOptions(common.SyncFrequency)
+	if common.GetEnvOrDefaultBool("POSTGRES_RUNTIME_EVENT_LISTENER", true) {
+		model.StartPostgresRuntimeEventListener()
+	} else {
+		// 热更新配置
+		go model.SyncOptions(common.SyncFrequency)
+	}
 
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
@@ -114,7 +120,7 @@ func main() {
 	// Channel upstream model update check task
 	controller.StartChannelUpstreamModelUpdateTask()
 
-	if common.IsMasterNode && constant.UpdateTask {
+	if constant.UpdateTask {
 		gopool.Go(func() {
 			controller.UpdateMidjourneyTaskBulk()
 		})

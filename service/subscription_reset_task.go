@@ -28,9 +28,6 @@ var (
 
 func StartSubscriptionQuotaResetTask() {
 	subscriptionResetOnce.Do(func() {
-		if !common.IsMasterNode {
-			return
-		}
 		gopool.Go(func() {
 			logger.LogInfo(context.Background(), fmt.Sprintf("subscription quota reset task started: tick=%s", subscriptionResetTickInterval))
 			ticker := time.NewTicker(subscriptionResetTickInterval)
@@ -51,6 +48,16 @@ func runSubscriptionQuotaResetOnce() {
 	defer subscriptionResetRunning.Store(false)
 
 	ctx := context.Background()
+	err := model.WithPostgresAdvisoryLock(ctx, "new-api:task:subscription_quota_reset", func(ctx context.Context) error {
+		runSubscriptionQuotaResetLocked(ctx)
+		return nil
+	})
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("subscription maintenance lock failed: %v", err))
+	}
+}
+
+func runSubscriptionQuotaResetLocked(ctx context.Context) {
 	totalReset := 0
 	totalExpired := 0
 	for {

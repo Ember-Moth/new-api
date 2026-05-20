@@ -780,26 +780,7 @@ func ValidateAccessToken(token string) (*User, error) {
 	return user, nil
 }
 
-// GetUserQuota gets quota from Redis first, falls back to DB if needed
 func GetUserQuota(id int, fromDB bool) (quota int, err error) {
-	defer func() {
-		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) {
-			gopool.Go(func() {
-				if err := updateUserQuotaCache(id, quota); err != nil {
-					common.SysLog("failed to update user quota cache: " + err.Error())
-				}
-			})
-		}
-	}()
-	if !fromDB && common.RedisEnabled {
-		quota, err := getUserQuotaCache(id)
-		if err == nil {
-			return quota, nil
-		}
-		// Don't return error - fall through to DB
-	}
-	fromDB = true
 	err = DB.Model(&User{}).Where("id = ?", id).Select("quota").Find(&quota).Error
 	if err != nil {
 		return 0, err
@@ -897,11 +878,7 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 }
 
 func increaseUserQuota(id int, quota int) (err error) {
-	newQuota, err := updateUserQuotaDelta(id, quota)
-	if err != nil {
-		return err
-	}
-	updateUserQuotaCacheAsync(id, newQuota)
+	_, err = updateUserQuotaDelta(id, quota)
 	return err
 }
 
@@ -916,11 +893,7 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {
-	newQuota, err := updateUserQuotaDelta(id, -quota)
-	if err != nil {
-		return err
-	}
-	updateUserQuotaCacheAsync(id, newQuota)
+	_, err = updateUserQuotaDelta(id, -quota)
 	return err
 }
 
