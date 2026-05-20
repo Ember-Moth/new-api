@@ -199,6 +199,8 @@ func migrateDB() error {
 		&Midjourney{},
 		&TopUp{},
 		&QuotaData{},
+		&QuotaDataDaily{},
+		&QuotaDataMonthly{},
 		&Task{},
 		&Model{},
 		&Vendor{},
@@ -222,6 +224,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
+		return err
+	}
+	if err := ensurePostgresQuotaDataRollups(DB); err != nil {
 		return err
 	}
 	return ensurePostgresPerformanceIndexesIfEnabled(DB)
@@ -249,6 +254,8 @@ func migrateDBFast() error {
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
+		{&QuotaDataDaily{}, "QuotaDataDaily"},
+		{&QuotaDataMonthly{}, "QuotaDataMonthly"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
@@ -294,6 +301,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
+		return err
+	}
+	if err := ensurePostgresQuotaDataRollups(DB); err != nil {
 		return err
 	}
 	if err := ensurePostgresPerformanceIndexesIfEnabled(DB); err != nil {
@@ -348,6 +358,12 @@ func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_quota_data_user_id_created ON quota_data (user_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_quota_data_username_created ON quota_data (username, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_quota_data_created_model ON quota_data (created_at, model_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_daily_user_id_created ON quota_data_daily (user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_daily_username_created ON quota_data_daily (username, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_daily_created_model ON quota_data_daily (created_at, model_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_monthly_user_id_created ON quota_data_monthly (user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_monthly_username_created ON quota_data_monthly (username, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_quota_data_monthly_created_model ON quota_data_monthly (created_at, model_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_end_id ON user_subscriptions (status, end_time, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_next_reset ON user_subscriptions (status, next_reset_time, id)`,
 	}

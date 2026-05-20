@@ -126,8 +126,12 @@ export function UserCharts() {
   }, [resolvedTheme])
 
   const { data: userData, isLoading } = useQuery({
-    queryKey: ['dashboard', 'user-quota', timeRange],
-    queryFn: () => getUserQuotaDataByUsers(timeRange),
+    queryKey: ['dashboard', 'user-quota', timeRange, timeGranularity],
+    queryFn: () =>
+      getUserQuotaDataByUsers({
+        ...timeRange,
+        default_time: timeGranularity,
+      }),
     select: (res) => (res.success ? res.data : []),
     staleTime: 60_000,
   })

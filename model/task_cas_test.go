@@ -39,6 +39,8 @@ func TestMain(m *testing.M) {
 		&Channel{},
 		&TopUp{},
 		&QuotaData{},
+		&QuotaDataDaily{},
+		&QuotaDataMonthly{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
@@ -47,6 +49,9 @@ func TestMain(m *testing.M) {
 	}
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_quota_data_hour ON quota_data (user_id, username, model_name, created_at)`).Error; err != nil {
 		panic("failed to create quota data unique index: " + err.Error())
+	}
+	if err := ensurePostgresQuotaDataRollups(db); err != nil {
+		panic("failed to create quota data rollups: " + err.Error())
 	}
 
 	code := m.Run()
@@ -65,6 +70,8 @@ func truncateTables(t *testing.T) {
 			"channels",
 			"top_ups",
 			"quota_data",
+			"quota_data_daily",
+			"quota_data_monthly",
 			"subscription_orders",
 			"subscription_plans",
 			"user_subscriptions",

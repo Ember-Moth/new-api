@@ -1,6 +1,10 @@
 package model
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -16,6 +20,18 @@ type QuotaData struct {
 	TokenUsed int    `json:"token_used" gorm:"default:0"`
 	Count     int    `json:"count" gorm:"default:0"`
 	Quota     int    `json:"quota" gorm:"default:0"`
+}
+
+type QuotaDataDaily QuotaData
+
+func (QuotaDataDaily) TableName() string {
+	return "quota_data_daily"
+}
+
+type QuotaDataMonthly QuotaData
+
+func (QuotaDataMonthly) TableName() string {
+	return "quota_data_monthly"
 }
 
 func LogQuotaData(userId int, username string, modelName string, quota int, createdAt int64, tokenUsed int) {
@@ -39,11 +55,16 @@ func LogQuotaData(userId int, username string, modelName string, quota int, crea
 const quotaDataUpsertBatchSize = 500
 
 func upsertQuotaDataRows(quotaDatas []*QuotaData) error {
+	return upsertQuotaDataRowsToTable("quota_data", quotaDatas)
+}
+
+func upsertQuotaDataRowsToTable(tableName string, quotaDatas []*QuotaData) error {
 	if len(quotaDatas) == 0 {
 		return nil
 	}
 
-	return DB.Session(&gorm.Session{SkipDefaultTransaction: true}).Clauses(clause.OnConflict{
+	quotedTable := quotePostgresIdentifier(tableName)
+	return DB.Table(tableName).Session(&gorm.Session{SkipDefaultTransaction: true}).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "user_id"},
 			{Name: "username"},
@@ -51,45 +72,138 @@ func upsertQuotaDataRows(quotaDatas []*QuotaData) error {
 			{Name: "created_at"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"count":      gorm.Expr(`quota_data."count" + EXCLUDED."count"`),
-			"quota":      gorm.Expr(`quota_data.quota + EXCLUDED.quota`),
-			"token_used": gorm.Expr(`quota_data.token_used + EXCLUDED.token_used`),
+			"count":      gorm.Expr(fmt.Sprintf(`%s."count" + EXCLUDED."count"`, quotedTable)),
+			"quota":      gorm.Expr(fmt.Sprintf(`%s.quota + EXCLUDED.quota`, quotedTable)),
+			"token_used": gorm.Expr(fmt.Sprintf(`%s.token_used + EXCLUDED.token_used`, quotedTable)),
 		}),
 	}).CreateInBatches(quotaDatas, quotaDataUpsertBatchSize).Error
 }
 
-func GetQuotaDataByUsername(username string, startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+func GetQuotaDataByUsername(username string, startTime int64, endTime int64, defaultTime string) (quotaData []*QuotaData, err error) {
 	var quotaDatas []*QuotaData
-	// 从quota_data表中查询数据
-	err = DB.Table("quota_data").Where("username = ? and created_at >= ? and created_at <= ?", username, startTime, endTime).Find(&quotaDatas).Error
+	target := getQuotaDataReadTarget(defaultTime, startTime, endTime)
+	err = queryQuotaDataByUsername(target.Table, username, target.StartTime, target.EndTime, &quotaDatas)
+	if err == nil && len(quotaDatas) == 0 && target.Table != "quota_data" {
+		err = queryQuotaDataByUsername("quota_data", username, startTime, endTime, &quotaDatas)
+	}
 	return quotaDatas, err
 }
 
-func GetQuotaDataByUserId(userId int, startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+func queryQuotaDataByUsername(tableName string, username string, startTime int64, endTime int64, quotaDatas *[]*QuotaData) error {
+	return applyQuotaDataTimeRange(DB.Table(tableName).Where("username = ?", username), startTime, endTime).Find(quotaDatas).Error
+}
+
+func GetQuotaDataByUserId(userId int, startTime int64, endTime int64, defaultTime string) (quotaData []*QuotaData, err error) {
 	var quotaDatas []*QuotaData
-	// 从quota_data表中查询数据
-	err = DB.Table("quota_data").Where("user_id = ? and created_at >= ? and created_at <= ?", userId, startTime, endTime).Find(&quotaDatas).Error
+	target := getQuotaDataReadTarget(defaultTime, startTime, endTime)
+	err = queryQuotaDataByUserId(target.Table, userId, target.StartTime, target.EndTime, &quotaDatas)
+	if err == nil && len(quotaDatas) == 0 && target.Table != "quota_data" {
+		err = queryQuotaDataByUserId("quota_data", userId, startTime, endTime, &quotaDatas)
+	}
 	return quotaDatas, err
 }
 
-func GetQuotaDataGroupByUser(startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
+func queryQuotaDataByUserId(tableName string, userId int, startTime int64, endTime int64, quotaDatas *[]*QuotaData) error {
+	return applyQuotaDataTimeRange(DB.Table(tableName).Where("user_id = ?", userId), startTime, endTime).Find(quotaDatas).Error
+}
+
+func GetQuotaDataGroupByUser(startTime int64, endTime int64, defaultTime string) (quotaData []*QuotaData, err error) {
 	var quotaDatas []*QuotaData
-	err = DB.Table("quota_data").
+	target := getQuotaDataReadTarget(defaultTime, startTime, endTime)
+	err = queryQuotaDataGroupByUser(target.Table, target.StartTime, target.EndTime, &quotaDatas)
+	if err == nil && len(quotaDatas) == 0 && target.Table != "quota_data" {
+		err = queryQuotaDataGroupByUser("quota_data", startTime, endTime, &quotaDatas)
+	}
+	return quotaDatas, err
+}
+
+func queryQuotaDataGroupByUser(tableName string, startTime int64, endTime int64, quotaDatas *[]*QuotaData) error {
+	return applyQuotaDataTimeRange(DB.Table(tableName), startTime, endTime).
 		Select("username, created_at, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used").
-		Where("created_at >= ? and created_at <= ?", startTime, endTime).
 		Group("username, created_at").
-		Find(&quotaDatas).Error
-	return quotaDatas, err
+		Find(quotaDatas).Error
 }
 
-func GetAllQuotaDates(startTime int64, endTime int64, username string) (quotaData []*QuotaData, err error) {
+func GetAllQuotaDates(startTime int64, endTime int64, username string, defaultTime string) (quotaData []*QuotaData, err error) {
 	if username != "" {
-		return GetQuotaDataByUsername(username, startTime, endTime)
+		return GetQuotaDataByUsername(username, startTime, endTime, defaultTime)
 	}
 	var quotaDatas []*QuotaData
-	// 从quota_data表中查询数据
-	// only select model_name, sum(count) as count, sum(quota) as quota, model_name, created_at from quota_data group by model_name, created_at;
-	//err = DB.Table("quota_data").Where("created_at >= ? and created_at <= ?", startTime, endTime).Find(&quotaDatas).Error
-	err = DB.Table("quota_data").Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, created_at").Where("created_at >= ? and created_at <= ?", startTime, endTime).Group("model_name, created_at").Find(&quotaDatas).Error
+	target := getQuotaDataReadTarget(defaultTime, startTime, endTime)
+	err = queryQuotaDataGroupByModel(target.Table, target.StartTime, target.EndTime, &quotaDatas)
+	if err == nil && len(quotaDatas) == 0 && target.Table != "quota_data" {
+		err = queryQuotaDataGroupByModel("quota_data", startTime, endTime, &quotaDatas)
+	}
 	return quotaDatas, err
+}
+
+func queryQuotaDataGroupByModel(tableName string, startTime int64, endTime int64, quotaDatas *[]*QuotaData) error {
+	return applyQuotaDataTimeRange(DB.Table(tableName), startTime, endTime).
+		Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, created_at").
+		Group("model_name, created_at").
+		Find(quotaDatas).Error
+}
+
+type quotaDataReadTarget struct {
+	Table     string
+	StartTime int64
+	EndTime   int64
+}
+
+func getQuotaDataReadTarget(defaultTime string, startTime int64, endTime int64) quotaDataReadTarget {
+	granularity := normalizeQuotaDataGranularity(defaultTime)
+	target := quotaDataReadTarget{
+		Table:     "quota_data",
+		StartTime: startTime,
+		EndTime:   endTime,
+	}
+	switch granularity {
+	case "day", "week":
+		target.Table = "quota_data_daily"
+		target.StartTime = quotaDataDayBucket(startTime)
+		target.EndTime = quotaDataDayBucket(endTime)
+	case "month":
+		target.Table = "quota_data_monthly"
+		target.StartTime = quotaDataMonthBucket(startTime)
+		target.EndTime = quotaDataMonthBucket(endTime)
+	}
+	return target
+}
+
+func normalizeQuotaDataGranularity(defaultTime string) string {
+	value := strings.ToLower(strings.TrimSpace(defaultTime))
+	if value == "" {
+		value = strings.ToLower(strings.TrimSpace(common.DataExportDefaultTime))
+	}
+	switch value {
+	case "day", "week", "month":
+		return value
+	default:
+		return "hour"
+	}
+}
+
+func applyQuotaDataTimeRange(query *gorm.DB, startTime int64, endTime int64) *gorm.DB {
+	if startTime > 0 {
+		query = query.Where("created_at >= ?", startTime)
+	}
+	if endTime > 0 {
+		query = query.Where("created_at <= ?", endTime)
+	}
+	return query
+}
+
+func quotaDataDayBucket(timestamp int64) int64 {
+	if timestamp <= 0 {
+		return timestamp
+	}
+	return timestamp - timestamp%86400
+}
+
+func quotaDataMonthBucket(timestamp int64) int64 {
+	if timestamp <= 0 {
+		return timestamp
+	}
+	value := time.Unix(timestamp, 0).UTC()
+	return time.Date(value.Year(), value.Month(), 1, 0, 0, 0, 0, time.UTC).Unix()
 }
