@@ -181,15 +181,13 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
-	// Migrate price_amount column from float/double to decimal for existing tables
-	migrateSubscriptionPlanPriceAmount()
-	// Migrate model_limits column from varchar to text for existing tables
-	if err := migrateTokenModelLimitsToText(); err != nil {
-		return err
-	}
-	autoMigrateLog, err := preparePostgresLogTable(DB)
-	if err != nil {
-		return err
+	autoMigrateLog := false
+	if !hasSeparateLogDB() {
+		var err error
+		autoMigrateLog, err = preparePostgresLogTable(DB)
+		if err != nil {
+			return err
+		}
 	}
 
 	models := []interface{}{
@@ -223,23 +221,31 @@ func migrateDB() error {
 	if autoMigrateLog {
 		models = append(models, &Log{})
 	}
-	err = DB.AutoMigrate(models...)
-	if err != nil {
+	if err := DB.AutoMigrate(models...); err != nil {
 		return err
 	}
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 		return err
 	}
-	if err := ensurePostgresQuotaDataRollups(DB); err != nil {
+	if err := runPostgresMainMigrations(DB); err != nil {
 		return err
 	}
-	return ensurePostgresPerformanceIndexesIfEnabled(DB)
+	if !hasSeparateLogDB() {
+		if err := runPostgresLogMigrations(DB); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migrateDBFast() error {
-	autoMigrateLog, err := preparePostgresLogTable(DB)
-	if err != nil {
-		return err
+	autoMigrateLog := false
+	if !hasSeparateLogDB() {
+		var err error
+		autoMigrateLog, err = preparePostgresLogTable(DB)
+		if err != nil {
+			return err
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -307,11 +313,13 @@ func migrateDBFast() error {
 	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 		return err
 	}
-	if err := ensurePostgresQuotaDataRollups(DB); err != nil {
+	if err := runPostgresMainMigrations(DB); err != nil {
 		return err
 	}
-	if err := ensurePostgresPerformanceIndexesIfEnabled(DB); err != nil {
-		return err
+	if !hasSeparateLogDB() {
+		if err := runPostgresLogMigrations(DB); err != nil {
+			return err
+		}
 	}
 	common.SysLog("database migrated")
 	return nil
@@ -327,152 +335,7 @@ func migrateLOGDB() error {
 			return err
 		}
 	}
-	return ensurePostgresLogPerformanceIndexesIfEnabled(LOG_DB)
-}
-
-func ensurePostgresPerformanceIndexesIfEnabled(db *gorm.DB) error {
-	if !common.GetEnvOrDefaultBool(postgresAutoCreatePerformanceIndexesEnv, true) {
-		common.SysLog("skipping PostgreSQL performance index auto-creation; run docs/installation/postgresql-performance-indexes.sql in production")
-		return nil
-	}
-	common.SysLog("creating PostgreSQL performance indexes with regular CREATE INDEX")
-	return ensurePostgresPerformanceIndexes(db)
-}
-
-func ensurePostgresLogPerformanceIndexesIfEnabled(db *gorm.DB) error {
-	if !common.GetEnvOrDefaultBool(postgresAutoCreatePerformanceIndexesEnv, true) {
-		common.SysLog("skipping PostgreSQL log performance index auto-creation; run docs/installation/postgresql-performance-indexes.sql in production")
-		return nil
-	}
-	common.SysLog("creating PostgreSQL log performance indexes with regular CREATE INDEX")
-	return ensurePostgresLogPerformanceIndexes(db)
-}
-
-func ensurePostgresPerformanceIndexes(db *gorm.DB) error {
-	if err := ensurePostgresLogPerformanceIndexes(db); err != nil {
-		return err
-	}
-	statements := []string{
-		`CREATE INDEX IF NOT EXISTS idx_abilities_lookup ON abilities ("group", model, enabled, priority DESC, weight DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_user_id_id ON tasks (user_id, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_submit_time_id ON tasks (submit_time, id)`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_polling_claim ON tasks (polling_at, id) WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS')`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_timeout_claim ON tasks (submit_time, polling_at, id) WHERE progress <> '100%' AND status NOT IN ('FAILURE', 'SUCCESS')`,
-		`CREATE INDEX IF NOT EXISTS idx_midjourneys_polling_claim ON midjourneys (polling_at, id) WHERE progress <> '100%'`,
-		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_create_id ON top_ups (user_id, create_time DESC, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_top_ups_user_id_id_desc ON top_ups (user_id, id DESC)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS uq_quota_data_hour ON quota_data (user_id, username, model_name, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_user_id_created ON quota_data (user_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_username_created ON quota_data (username, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_created_model ON quota_data (created_at, model_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_daily_user_id_created ON quota_data_daily (user_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_daily_username_created ON quota_data_daily (username, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_daily_created_model ON quota_data_daily (created_at, model_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_monthly_user_id_created ON quota_data_monthly (user_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_monthly_username_created ON quota_data_monthly (username, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_quota_data_monthly_created_model ON quota_data_monthly (created_at, model_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_end_id ON user_subscriptions (status, end_time, id)`,
-		`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status_next_reset ON user_subscriptions (status, next_reset_time, id)`,
-	}
-	return execIndexStatements(db, statements)
-}
-
-func ensurePostgresLogPerformanceIndexes(db *gorm.DB) error {
-	statements := []string{
-		`CREATE INDEX IF NOT EXISTS idx_created_at_id ON logs (id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_created_at_type ON logs (created_at, type)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_channel_id ON logs (channel_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_group ON logs ("group")`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_ip ON logs (ip)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_model_name ON logs (model_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_request_id ON logs (request_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_token_id ON logs (token_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_token_name ON logs (token_name)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_upstream_request_id ON logs (upstream_request_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs (user_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_username ON logs (username)`,
-		`CREATE INDEX IF NOT EXISTS idx_user_id_id ON logs (user_id, id)`,
-		`CREATE INDEX IF NOT EXISTS index_username_model_name ON logs (model_name, username)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_type_created_at ON logs (type, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_user_id_id_desc ON logs (user_id, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_user_type_id ON logs (user_id, type, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_created_at_id_desc ON logs (created_at DESC, id DESC)`,
-	}
-	return execIndexStatements(db, statements)
-}
-
-func execIndexStatements(db *gorm.DB, statements []string) error {
-	for _, statement := range statements {
-		if err := db.Exec(statement).Error; err != nil {
-			return fmt.Errorf("failed to create PostgreSQL performance index: %w", err)
-		}
-	}
-	return nil
-}
-
-// migrateTokenModelLimitsToText migrates model_limits column from varchar(1024) to text
-// This is safe to run multiple times - it checks the column type first
-func migrateTokenModelLimitsToText() error {
-	tableName := "tokens"
-	columnName := "model_limits"
-
-	if !DB.Migrator().HasTable(tableName) {
-		return nil
-	}
-
-	if !DB.Migrator().HasColumn(&Token{}, columnName) {
-		return nil
-	}
-
-	var dataType string
-	if err := DB.Raw(`SELECT data_type FROM information_schema.columns
-				WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
-		tableName, columnName).Scan(&dataType).Error; err != nil {
-		common.SysLog(fmt.Sprintf("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
-	} else if strings.ToLower(dataType) == "text" {
-		return nil
-	}
-
-	alterSQL := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
-	if err := DB.Exec(alterSQL).Error; err != nil {
-		return fmt.Errorf("failed to migrate %s.%s to text: %w", tableName, columnName, err)
-	}
-	common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to text", tableName, columnName))
-	return nil
-}
-
-// migrateSubscriptionPlanPriceAmount migrates price_amount column from float/double to decimal(10,6)
-// This is safe to run multiple times - it checks the column type first
-func migrateSubscriptionPlanPriceAmount() {
-	tableName := "subscription_plans"
-	columnName := "price_amount"
-
-	// Check if table exists first
-	if !DB.Migrator().HasTable(tableName) {
-		return
-	}
-
-	// Check if column exists
-	if !DB.Migrator().HasColumn(&SubscriptionPlan{}, columnName) {
-		return
-	}
-
-	var dataType string
-	if err := DB.Raw(`SELECT data_type FROM information_schema.columns
-				WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
-		tableName, columnName).Scan(&dataType).Error; err != nil {
-		common.SysLog(fmt.Sprintf("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
-	} else if strings.ToLower(dataType) == "numeric" {
-		return
-	}
-
-	alterSQL := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE decimal(10,6) USING %s::decimal(10,6)`,
-		tableName, columnName, columnName)
-	if err := DB.Exec(alterSQL).Error; err != nil {
-		common.SysLog(fmt.Sprintf("Warning: failed to migrate %s.%s to decimal: %v", tableName, columnName, err))
-	} else {
-		common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to decimal(10,6)", tableName, columnName))
-	}
+	return runPostgresLogMigrations(LOG_DB)
 }
 
 func closeDB(db *gorm.DB) error {

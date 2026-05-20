@@ -299,8 +299,8 @@ VITE_REACT_APP_SERVER_URL=https://api.example.com bun run build
 | `SESSION_COOKIE_MAX_AGE` | Session Cookie 有效期，单位秒 | `2592000` |
 | `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
 | `SQL_DSN` | PostgreSQL 数据库连接字符串，必须以 `postgres://` 或 `postgresql://` 开头 | - |
-| `POSTGRES_AUTO_CREATE_PERFORMANCE_INDEXES` | 是否在后端启动时自动创建性能索引；当前分支默认开启，正式生产大库可关闭并手动执行并发索引脚本 | `true` |
-| `POSTGRES_LOG_PARTITIONING` | 日志表 PostgreSQL 月度分区模式：`auto` 新库自动创建分区表，已有普通表保持不变；`true` 强制要求分区表；`false` 禁用主动维护 | `auto` |
+| `POSTGRES_AUTO_CREATE_PERFORMANCE_INDEXES` | 是否执行内嵌性能索引迁移；当前分支默认开启，应急时可临时关闭可选索引迁移 | `true` |
+| `POSTGRES_LOG_PARTITIONING` | 日志表 PostgreSQL 月度分区模式：`auto` 新库创建分区表且已有普通表自动迁移；`true` 强制启用分区；`false` 禁用主动维护 | `auto` |
 | `POSTGRES_LOG_PARTITION_MONTHS_BACK` | 启动时预创建过去几个月的日志分区 | `1` |
 | `POSTGRES_LOG_PARTITION_MONTHS_AHEAD` | 启动时预创建未来几个月的日志分区 | `3` |
 | `TASK_POLLING_LEASE_SECONDS` | 异步任务轮询领取租约秒数，多副本 worker 依赖 PostgreSQL `FOR UPDATE SKIP LOCKED` 防止重复处理 | `120` |

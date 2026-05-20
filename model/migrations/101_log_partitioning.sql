@@ -1,15 +1,7 @@
--- new-api PostgreSQL logs table partitioning migration.
---
--- This script converts the current-schema logs heap table into a monthly
--- range-partitioned table on logs.created_at (Unix seconds).
---
--- Run only after taking a database backup. The script takes an ACCESS EXCLUSIVE
--- lock on logs while it rewrites the table.
+-- PostgreSQL logs monthly partitioning migration.
 
-SET statement_timeout = 0;
-SET lock_timeout = '10s';
-
-BEGIN;
+SET LOCAL statement_timeout = 0;
+SET LOCAL lock_timeout = '10s';
 
 DO $$
 DECLARE
@@ -127,8 +119,3 @@ $copy_logs$, legacy_table);
     EXECUTE format('DROP TABLE %I', legacy_table);
   END IF;
 END $$;
-
-COMMIT;
-
--- Recreate parent indexes after migration:
---   psql "$SQL_DSN" -v ON_ERROR_STOP=1 -f docs/installation/postgresql-performance-indexes.sql

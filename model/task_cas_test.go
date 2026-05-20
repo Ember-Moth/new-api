@@ -49,11 +49,8 @@ func TestMain(m *testing.M) {
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_quota_data_hour ON quota_data (user_id, username, model_name, created_at)`).Error; err != nil {
-		panic("failed to create quota data unique index: " + err.Error())
-	}
-	if err := ensurePostgresQuotaDataRollups(db); err != nil {
-		panic("failed to create quota data rollups: " + err.Error())
+	if err := runEmbeddedPostgresMigrations(db, postgresMainMigrations); err != nil {
+		panic("failed to run embedded PostgreSQL migrations: " + err.Error())
 	}
 
 	code := m.Run()

@@ -4,29 +4,43 @@
 
 ## 策略原则
 
-- 当前分支应用启动时默认创建性能索引，适合未正式上线、内部自用或小数据量阶段。
-- 新部署默认支持把 `logs` 创建为 PostgreSQL 月度分区表；已有普通 `logs` 表不会在应用启动时被自动重写。
-- 生产环境尽量使用 `CREATE INDEX CONCURRENTLY IF NOT EXISTS` 手动创建索引；`logs` 分区父表除外，PostgreSQL 不支持在分区父表上并发建索引。
+- 当前分支使用内嵌 SQL 迁移系统，后端启动时自动执行 PostgreSQL 结构迁移、日志分区迁移、汇总回填和性能索引迁移。
+- 新部署默认支持把 `logs` 创建为 PostgreSQL 月度分区表；已有普通 `logs` 表会在启动迁移阶段自动转换为分区表。
+- 非日志表性能索引使用 `CREATE INDEX CONCURRENTLY IF NOT EXISTS` 自动创建；`logs` 分区父表使用普通 `CREATE INDEX IF NOT EXISTS`。
 - 查询优化优先减少无界扫描、修正 PostgreSQL 下不可靠的写法，再按真实慢查询补索引。
 - 大表分页仍以现有 `OFFSET` 兼容前端，后续高流量路径应逐步改为游标分页。
 
-## 应用启动索引开关
+## 嵌入式迁移
 
-默认值：
+SQL 迁移文件位于 `model/migrations/`，通过 `go:embed` 编译进后端二进制。后端启动时会创建并维护 `schema_migrations` 表，记录已执行迁移的 `id`、`checksum`、执行时间和耗时。
+
+迁移执行顺序：
+
+- `000_schema_migrations.sql`：创建嵌入式迁移元数据表。
+- `001_quota_rollups.sql`：创建 `quota_data` 日/月汇总唯一索引、触发器函数和触发器。
+- `002_quota_rollups_backfill.sql`：一次性回填 `quota_data_daily`、`quota_data_monthly`。
+- `010_tokens_model_limits_text.sql`：把 `tokens.model_limits` 历史字段修正为 `text`。
+- `011_subscription_plans_price_amount_decimal.sql`：把 `subscription_plans.price_amount` 历史字段修正为 `decimal(10,6)`。
+- `003_main_performance_indexes.sql`：创建非日志表性能索引。
+- `101_log_partitioning.sql`：创建或转换 `logs` 月度分区表。
+- `102_log_performance_indexes.sql`：创建日志表性能索引。
+- `103_log_partition_maintenance.sql`：创建日志分区维护函数，启动时按配置补齐过去和未来月份分区。
+
+如果已执行迁移的 checksum 与二进制内嵌 SQL 不一致，应用会拒绝继续启动，避免同一个迁移 ID 被静默改写。
+
+性能索引迁移开关默认开启：
 
 ```bash
 POSTGRES_AUTO_CREATE_PERFORMANCE_INDEXES=true
 ```
 
-保持默认值时，后端会在 GORM 表结构迁移后执行普通 `CREATE INDEX IF NOT EXISTS`。这适合当前未正式上线、数据量较小、后端主要服务内部团队的阶段。
-
-正式上线后，如果 `logs`、`top_ups`、`quota_data` 等表已经有大量数据，建议关闭启动时自动建索引：
+应急情况下可以临时关闭可选性能索引迁移，让应用只执行必需结构迁移：
 
 ```bash
 POSTGRES_AUTO_CREATE_PERFORMANCE_INDEXES=false
 ```
 
-关闭后应用只执行 GORM 表结构迁移，不会自动创建性能索引；此时应使用下面的并发索引脚本。
+关闭后无需额外 SQL 操作；后续重新设为 `true` 时，应用会继续执行尚未记录的内嵌索引迁移。
 
 ## 日志表分区
 
@@ -44,47 +58,21 @@ POSTGRES_LOG_PARTITION_MONTHS_AHEAD=3
 
 | 值 | 行为 |
 | --- | --- |
-| `auto` | 默认值。新库没有 `logs` 表时创建分区表；已有普通表时保持普通表并输出提示。 |
-| `true` | 强制要求 `logs` 是分区表。已有普通表会启动失败，提醒先执行迁移脚本。 |
+| `auto` | 默认值。新库没有 `logs` 表时创建分区表；已有普通表时先执行 GORM 表结构迁移，再由内嵌 SQL 自动转换为分区表。 |
+| `true` | 强制启用分区。已有普通表同样会自动转换为分区表。 |
 | `false` | 不主动创建或维护分区；如果表已经是分区表，会跳过 GORM 对 `logs` 的 AutoMigrate。 |
 
 新部署不需要额外操作，应用会创建当前月份、上一个月和未来 3 个月的分区。分区名称形如 `logs_y2026m05`。
 
-已有普通 `logs` 表要转为分区表时，先备份数据库，然后执行：
-
-```bash
-psql "$SQL_DSN" -v ON_ERROR_STOP=1 -f docs/installation/postgresql-log-partitioning.sql
-psql "$SQL_DSN" -v ON_ERROR_STOP=1 -f docs/installation/postgresql-performance-indexes.sql
-```
-
-迁移脚本会短暂独占锁定 `logs`，把原表数据复制到新的月度分区表，然后删除临时旧表。正式生产大库应在维护窗口执行，或按业务规模拆成更细的在线迁移流程。
+已有普通 `logs` 表会由内嵌迁移自动转换。迁移会短暂独占锁定 `logs`，把原表数据复制到新的月度分区表，然后删除临时旧表。正式生产大库应在维护窗口发布新版本。
 
 启用分区后，历史日志清理会先删除完整过期月份分区，剩余不足一个月的区间再按 ID 分批删除。完整分区删除比逐行 `DELETE` 更少产生膨胀，也显著降低 autovacuum 压力。
 
-## 生产执行索引
+## 生产索引执行
 
-索引脚本位于：
+性能索引由内嵌迁移自动执行，不再提供安装文档里的额外 SQL 脚本。非日志表索引用 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，可以降低对线上写入的影响；`logs` 分区父表索引用普通 `CREATE INDEX IF NOT EXISTS`，这是 PostgreSQL 对分区父表的限制。
 
-```bash
-docs/installation/postgresql-performance-indexes.sql
-```
-
-执行前确认：
-
-- 已备份数据库。
-- 不要把脚本放在 `BEGIN` / `COMMIT` 事务中执行；脚本内非日志表使用 `CREATE INDEX CONCURRENTLY`。
-- 建议在低峰期执行。
-- 云数据库账号需要有创建索引权限。
-
-执行示例：
-
-```bash
-psql "$SQL_DSN" -v ON_ERROR_STOP=1 -f docs/installation/postgresql-performance-indexes.sql
-```
-
-脚本设置了较短 `lock_timeout`。如果遇到锁等待失败，说明当时有冲突事务，低峰期重跑即可；`IF NOT EXISTS` 保证重复执行是安全的。`logs` 相关索引会使用普通 `CREATE INDEX`，这是为了兼容分区父表；大日志库应优先在维护窗口执行。
-
-如果 `CREATE INDEX CONCURRENTLY` 在构建过程中失败，PostgreSQL 可能留下同名但不可用的 invalid index。重跑前先检查：
+如果 `CREATE INDEX CONCURRENTLY` 在构建过程中失败，PostgreSQL 可能留下同名但不可用的 invalid index。排查时先检查：
 
 ```sql
 SELECT c.relname AS index_name,
@@ -98,7 +86,7 @@ WHERE NOT i.indisvalid
   AND t.relname IN ('logs', 'top_ups', 'quota_data', 'tasks', 'user_subscriptions', 'abilities');
 ```
 
-确认是本脚本创建失败留下的索引后，使用 `DROP INDEX CONCURRENTLY IF EXISTS index_name;` 删除，再重新执行脚本。
+确认是本项目迁移创建失败留下的索引后，使用 `DROP INDEX CONCURRENTLY IF EXISTS index_name;` 删除，再重启后端让内嵌迁移继续执行。
 
 执行后确认索引状态：
 
@@ -114,7 +102,7 @@ ORDER BY tablename, indexname;
 - 用户日志和充值搜索的总数统计改为“先取有限 ID 子查询，再统计子查询行数”，避免 `LIMIT` 在 PostgreSQL `COUNT` 上失效导致全表计数。
 - 旧日志清理改为先按 `created_at, id` 分批取 ID，再 `DELETE WHERE id IN (...)`，避免依赖 PostgreSQL 不直接支持的 `DELETE ... LIMIT`。
 - 日志统计聚合使用 `COALESCE(sum(...), 0)`，避免空结果返回 `NULL`。
-- 性能索引从启动流程中抽离到生产脚本，并保留开发环境显式开关。
+- 性能索引纳入内嵌 SQL 迁移，并保留显式开关用于应急跳过可选索引。
 - `quota_data` 写入不再经过 Go 进程内聚合，记录用量时直接执行 `INSERT ... ON CONFLICT DO UPDATE`，唯一键为 `(user_id, username, model_name, created_at)`，用于小时级用量数据的原子累加。
 - `quota_data` 增加 PostgreSQL 触发器维护的日/月汇总表：`quota_data_daily`、`quota_data_monthly`。应用仍只写小时表，数据库按增量同步汇总表。
 - 看板接口按 `default_time` 选择数据源：`hour` 读 `quota_data`，`day` / `week` 读 `quota_data_daily`，`month` 读 `quota_data_monthly`。
@@ -182,13 +170,7 @@ sync_quota_data_rollups()
 trg_quota_data_rollups
 ```
 
-已有历史 `quota_data` 需要回填日/月汇总表时，在维护窗口执行：
-
-```bash
-psql "$SQL_DSN" -v ON_ERROR_STOP=1 -f docs/installation/postgresql-quota-rollups-backfill.sql
-```
-
-该脚本会锁定 `quota_data` 写入并重建 `quota_data_daily`、`quota_data_monthly`，适合正式上线前或维护窗口执行。未回填时，新写入的数据仍会自动进入汇总表；看板查询如果汇总表为空，会回退到小时表，避免新旧环境直接空白。
+历史 `quota_data` 会由 `002_quota_rollups_backfill.sql` 在启动迁移阶段自动回填。该迁移会锁定 `quota_data` 写入并重建 `quota_data_daily`、`quota_data_monthly`，正式生产大库应在维护窗口发布包含该迁移的版本。
 
 ## 慢查询排查
 

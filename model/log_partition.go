@@ -49,24 +49,12 @@ func preparePostgresLogTable(db *gorm.DB) (bool, error) {
 
 	switch relkind {
 	case "":
-		common.SysLog("creating PostgreSQL partitioned logs table")
-		if err := createPostgresPartitionedLogsTable(db); err != nil {
-			return false, err
-		}
-		if err := ensurePostgresLogPartitions(db, time.Now().UTC()); err != nil {
-			return false, err
-		}
+		common.SysLog("PostgreSQL logs table does not exist; embedded migration will create a monthly partitioned logs table")
 		return false, nil
 	case "p":
-		if err := ensurePostgresLogPartitions(db, time.Now().UTC()); err != nil {
-			return false, err
-		}
 		return false, nil
 	case "r":
-		if mode == postgresLogPartitionModeEnabled {
-			return false, fmt.Errorf("%s=true requires logs to be a PostgreSQL partitioned table; run docs/installation/postgresql-log-partitioning.sql first or set %s=auto", postgresLogPartitioningEnv, postgresLogPartitioningEnv)
-		}
-		common.SysLog("PostgreSQL logs table is not partitioned; keeping existing heap table. Run docs/installation/postgresql-log-partitioning.sql to migrate")
+		common.SysLog("PostgreSQL logs table is a heap table; embedded migration will convert it to monthly partitions after AutoMigrate")
 		return true, nil
 	default:
 		return false, fmt.Errorf("unsupported logs table relkind %q", relkind)
@@ -110,49 +98,9 @@ func isPostgresLogsPartitioned(db *gorm.DB) (bool, error) {
 	return relkind == "p", nil
 }
 
-func createPostgresPartitionedLogsTable(db *gorm.DB) error {
-	if err := db.Exec(`CREATE SEQUENCE IF NOT EXISTS logs_id_seq AS bigint`).Error; err != nil {
-		return fmt.Errorf("failed to create logs_id_seq: %w", err)
-	}
-	if err := db.Exec(`
-CREATE TABLE IF NOT EXISTS logs (
-	id bigint NOT NULL DEFAULT nextval('logs_id_seq'::regclass),
-	user_id bigint,
-	created_at bigint NOT NULL,
-	type bigint,
-	content text,
-	username text DEFAULT '',
-	token_name text DEFAULT '',
-	model_name text DEFAULT '',
-	quota bigint DEFAULT 0,
-	prompt_tokens bigint DEFAULT 0,
-	completion_tokens bigint DEFAULT 0,
-	use_time bigint DEFAULT 0,
-	is_stream boolean,
-	channel_id bigint,
-	channel_name text,
-	token_id bigint DEFAULT 0,
-	"group" text,
-	ip text DEFAULT '',
-	request_id varchar(64) DEFAULT '',
-	upstream_request_id varchar(128) DEFAULT '',
-	other text
-) PARTITION BY RANGE (created_at)`).Error; err != nil {
-		return fmt.Errorf("failed to create partitioned logs table: %w", err)
-	}
-	if err := db.Exec(`ALTER SEQUENCE logs_id_seq OWNED BY logs.id`).Error; err != nil {
-		return fmt.Errorf("failed to bind logs_id_seq ownership: %w", err)
-	}
-	return nil
-}
-
-func ensurePostgresLogPartitions(db *gorm.DB, now time.Time) error {
+func maintainPostgresLogPartitions(db *gorm.DB) error {
 	monthsAhead := common.GetEnvOrDefault(postgresLogPartitionMonthsAheadEnv, defaultLogPartitionMonthsAhead)
 	monthsBack := common.GetEnvOrDefault(postgresLogPartitionMonthsBackEnv, defaultLogPartitionMonthsBack)
-	return ensurePostgresLogPartitionRange(db, now, monthsBack, monthsAhead)
-}
-
-func ensurePostgresLogPartitionRange(db *gorm.DB, now time.Time, monthsBack int, monthsAhead int) error {
 	if monthsBack < 0 {
 		monthsBack = 0
 	}
@@ -166,30 +114,7 @@ func ensurePostgresLogPartitionRange(db *gorm.DB, now time.Time, monthsBack int,
 		monthsAhead = 120
 	}
 
-	current := monthStartUTC(now)
-	for offset := -monthsBack; offset <= monthsAhead; offset++ {
-		start := current.AddDate(0, offset, 0)
-		if err := createPostgresLogPartition(db, start); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func createPostgresLogPartition(db *gorm.DB, start time.Time) error {
-	start = monthStartUTC(start)
-	end := start.AddDate(0, 1, 0)
-	partitionName := postgresLogPartitionName(start)
-	statement := fmt.Sprintf(
-		`CREATE TABLE IF NOT EXISTS %s PARTITION OF logs FOR VALUES FROM (%d) TO (%d)`,
-		quotePostgresIdentifier(partitionName),
-		start.Unix(),
-		end.Unix(),
-	)
-	if err := db.Exec(statement).Error; err != nil {
-		return fmt.Errorf("failed to create logs partition %s: %w", partitionName, err)
-	}
-	return nil
+	return db.Exec("SELECT ensure_log_partitions(?, ?)", monthsBack, monthsAhead).Error
 }
 
 func monthStartUTC(value time.Time) time.Time {

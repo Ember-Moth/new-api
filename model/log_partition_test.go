@@ -18,10 +18,11 @@ func TestPreparePostgresLogTableCreatesPartitionedLogsForNewSchema(t *testing.T)
 	require.NoError(t, err)
 	assert.False(t, autoMigrateLog)
 
+	require.NoError(t, runPostgresLogMigrations(db))
+
 	partitioned, err := isPostgresLogsPartitioned(db)
 	require.NoError(t, err)
 	assert.True(t, partitioned)
-	require.NoError(t, ensurePostgresLogPerformanceIndexes(db))
 
 	log := &Log{
 		UserId:    1001,
@@ -33,7 +34,7 @@ func TestPreparePostgresLogTableCreatesPartitionedLogsForNewSchema(t *testing.T)
 	assert.NotZero(t, log.Id)
 }
 
-func TestPreparePostgresLogTableKeepsExistingHeapTableInAutoMode(t *testing.T) {
+func TestEmbeddedLogMigrationConvertsExistingHeapTableInAutoMode(t *testing.T) {
 	db := testutil.OpenPostgresTestDB(t, "log_partition_existing_heap")
 	t.Setenv(postgresLogPartitioningEnv, "auto")
 	require.NoError(t, db.AutoMigrate(&Log{}))
@@ -41,26 +42,36 @@ func TestPreparePostgresLogTableKeepsExistingHeapTableInAutoMode(t *testing.T) {
 	autoMigrateLog, err := preparePostgresLogTable(db)
 	require.NoError(t, err)
 	assert.True(t, autoMigrateLog)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	require.NoError(t, runPostgresLogMigrations(db))
 
 	partitioned, err := isPostgresLogsPartitioned(db)
 	require.NoError(t, err)
-	assert.False(t, partitioned)
+	assert.True(t, partitioned)
 }
 
-func TestPreparePostgresLogTableRequiresMigrationWhenForced(t *testing.T) {
+func TestEmbeddedLogMigrationConvertsExistingHeapTableWhenForced(t *testing.T) {
 	db := testutil.OpenPostgresTestDB(t, "log_partition_required")
 	t.Setenv(postgresLogPartitioningEnv, "true")
 	require.NoError(t, db.AutoMigrate(&Log{}))
 
 	autoMigrateLog, err := preparePostgresLogTable(db)
-	require.Error(t, err)
-	assert.False(t, autoMigrateLog)
+	require.NoError(t, err)
+	assert.True(t, autoMigrateLog)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	require.NoError(t, runPostgresLogMigrations(db))
+
+	partitioned, err := isPostgresLogsPartitioned(db)
+	require.NoError(t, err)
+	assert.True(t, partitioned)
 }
 
 func TestDeleteOldLogDropsWholePostgresPartitions(t *testing.T) {
 	db := testutil.OpenPostgresTestDB(t, "log_partition_cleanup")
-	require.NoError(t, createPostgresPartitionedLogsTable(db))
-	require.NoError(t, ensurePostgresLogPartitionRange(db, time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC), 1, 1))
+	t.Setenv(postgresLogPartitioningEnv, "true")
+	t.Setenv(postgresLogPartitionMonthsBackEnv, "1")
+	t.Setenv(postgresLogPartitionMonthsAheadEnv, "1")
+	require.NoError(t, runPostgresLogMigrations(db))
 
 	oldLogDB := LOG_DB
 	LOG_DB = db
@@ -68,16 +79,21 @@ func TestDeleteOldLogDropsWholePostgresPartitions(t *testing.T) {
 		LOG_DB = oldLogDB
 	})
 
-	require.NoError(t, db.Create(&Log{UserId: 1001, CreatedAt: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC).Unix(), Type: LogTypeSystem}).Error)
-	require.NoError(t, db.Create(&Log{UserId: 1001, CreatedAt: time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC).Unix(), Type: LogTypeSystem}).Error)
-	require.NoError(t, db.Create(&Log{UserId: 1001, CreatedAt: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC).Unix(), Type: LogTypeSystem}).Error)
+	baseMonth := monthStartUTC(time.Now().UTC())
+	oldMonth := baseMonth.AddDate(0, -1, 0)
+	nextMonth := baseMonth.AddDate(0, 1, 0)
 
-	deleted, err := DeleteOldLog(context.Background(), time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Unix(), 100)
+	require.NoError(t, db.Create(&Log{UserId: 1001, CreatedAt: oldMonth.Add(14 * 24 * time.Hour).Unix(), Type: LogTypeSystem}).Error)
+	require.NoError(t, db.Create(&Log{UserId: 1001, CreatedAt: baseMonth.Add(14 * 24 * time.Hour).Unix(), Type: LogTypeSystem}).Error)
+	require.NoError(t, db.Create(&Log{UserId: 1001, CreatedAt: nextMonth.Add(14 * 24 * time.Hour).Unix(), Type: LogTypeSystem}).Error)
+
+	deleted, err := DeleteOldLog(context.Background(), baseMonth.Unix(), 100)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, deleted)
 
+	oldPartitionName := postgresLogPartitionName(oldMonth)
 	var januaryPartitionExists bool
-	require.NoError(t, db.Raw(`SELECT to_regclass('logs_y2026m01') IS NOT NULL`).Scan(&januaryPartitionExists).Error)
+	require.NoError(t, db.Raw(`SELECT to_regclass(?) IS NOT NULL`, oldPartitionName).Scan(&januaryPartitionExists).Error)
 	assert.False(t, januaryPartitionExists)
 
 	var remaining int64

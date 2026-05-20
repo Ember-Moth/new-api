@@ -98,6 +98,8 @@ This branch supports PostgreSQL only. Do not add SQLite or MySQL runtime paths, 
 **Migrations:**
 - `SQL_DSN` is required and must start with `postgres://` or `postgresql://`.
 - `LOG_SQL_DSN`, when set, must also point to PostgreSQL.
+- Hand-written schema changes, index changes, log partition DDL, and backfill SQL must live in standalone files under `model/migrations/` and be embedded into the backend binary with the PostgreSQL migration runner.
+- Do not add new Go functions that inline SQL migration DDL such as `CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, or `CREATE TABLE ... PARTITION OF`; add a new numbered SQL migration file instead.
 - Database tests should use `TEST_POSTGRES_DSN` and isolated schemas rather than SQLite in-memory databases.
 
 ### Rule 3: Frontend — Prefer Bun
