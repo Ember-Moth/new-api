@@ -36,7 +36,7 @@ func checkWriter(writer io.Writer) stringWriter {
 // W3C Working Draft 29 October 2009
 // http://www.w3.org/TR/2009/WD-eventsource-20091029/
 
-var contentType = []string{"text/event-stream"}
+var writeContentType = []string{"text/event-stream"}
 var noCache = []string{"no-cache"}
 
 var fieldReplacer = strings.NewReplacer(
@@ -74,7 +74,7 @@ func (r CustomEvent) Render(w http.ResponseWriter) error {
 
 func (r CustomEvent) WriteContentType(w http.ResponseWriter) {
 	header := w.Header()
-	header["Content-Type"] = contentType
+	header["Content-Type"] = writeContentType
 
 	if _, exist := header["Cache-Control"]; !exist {
 		header["Cache-Control"] = noCache

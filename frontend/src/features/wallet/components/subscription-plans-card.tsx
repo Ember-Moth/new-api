@@ -127,6 +127,7 @@ export function SubscriptionPlansCard({
   const enableStripePaymentIntent =
     !!topupInfo?.enable_stripe_payment_intent_topup
   const enableCreem = !!topupInfo?.enable_creem_topup
+  const enableWaffoPancake = !!topupInfo?.enable_waffo_pancake_topup
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
   const epayMethods = useMemo(
     () => getEpayMethods(topupInfo?.pay_methods),
@@ -651,6 +652,7 @@ export function SubscriptionPlansCard({
         enableStripePaymentIntent={enableStripePaymentIntent}
         stripePaymentIntentMethod={stripePaymentIntentMethod}
         enableCreem={enableCreem}
+        enableWaffoPancake={enableWaffoPancake}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
         purchaseLimit={

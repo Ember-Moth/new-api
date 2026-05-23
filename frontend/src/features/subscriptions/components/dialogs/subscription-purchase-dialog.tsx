@@ -48,6 +48,7 @@ import {
   paySubscriptionEpay,
   paySubscriptionStripe,
   paySubscriptionStripePaymentIntent,
+  paySubscriptionWaffoPancake,
   paySubscriptionWallet,
 } from '../../api'
 import { formatDuration, formatResetPeriod } from '../../lib'
@@ -66,6 +67,7 @@ interface Props {
   enableStripePaymentIntent?: boolean
   stripePaymentIntentMethod?: PaymentMethod
   enableCreem?: boolean
+  enableWaffoPancake?: boolean
   enableOnlineTopUp?: boolean
   epayMethods?: PaymentMethod[]
   purchaseLimit?: number
@@ -97,10 +99,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const hasStripePaymentIntent =
     props.enableStripePaymentIntent && Number(plan.price_amount || 0) > 0
   const hasCreem = props.enableCreem && !!plan.creem_product_id
+  const hasWaffoPancake =
+    props.enableWaffoPancake && !!plan.waffo_pancake_product_id
   const hasEpay =
     props.enableOnlineTopUp && (props.epayMethods || []).length > 0
   const hasAnyPayment =
-    hasWallet || hasStripe || hasStripePaymentIntent || hasCreem || hasEpay
+    hasWallet ||
+    hasStripe ||
+    hasStripePaymentIntent ||
+    hasCreem ||
+    hasWaffoPancake ||
+    hasEpay
   const selectedEpayMethodLabel =
     (props.epayMethods || []).find((m) => m.type === selectedEpayMethod)
       ?.name ||
@@ -144,6 +153,27 @@ export function SubscriptionPurchaseDialog(props: Props) {
         window.open(res.data.checkout_url, '_blank')
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
+      } else {
+        toast.error(
+          res.message && res.message !== 'success'
+            ? res.message
+            : t('Payment request failed')
+        )
+      }
+    } catch {
+      toast.error(t('Payment request failed'))
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  const handlePayWaffoPancake = async () => {
+    setPaying(true)
+    try {
+      const res = await paySubscriptionWaffoPancake({ plan_id: plan.id })
+      if (res.message === 'success' && res.data?.checkout_url) {
+        toast.success(t('Redirecting to payment page...'))
+        window.location.href = res.data.checkout_url
       } else {
         toast.error(
           res.message && res.message !== 'success'
@@ -337,7 +367,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
                 {(hasWallet ||
                   hasStripe ||
                   hasStripePaymentIntent ||
-                  hasCreem) && (
+                  hasCreem ||
+                  hasWaffoPancake) && (
                   <div className='grid grid-cols-2 gap-2 sm:flex'>
                     {hasWallet && (
                       <Button
@@ -377,6 +408,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         disabled={paying || limitReached}
                       >
                         Creem
+                      </Button>
+                    )}
+                    {hasWaffoPancake && (
+                      <Button
+                        variant='outline'
+                        className='flex-1'
+                        onClick={handlePayWaffoPancake}
+                        disabled={paying || limitReached}
+                      >
+                        Waffo Pancake
                       </Button>
                     )}
                   </div>

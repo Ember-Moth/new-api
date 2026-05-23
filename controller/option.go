@@ -68,8 +68,14 @@ var sensitiveOptionKeys = map[string]struct{}{
 }
 
 func isSensitiveOptionKey(key string) bool {
-	_, ok := sensitiveOptionKeys[key]
-	return ok
+	if _, ok := sensitiveOptionKeys[key]; ok {
+		return true
+	}
+	return strings.HasSuffix(key, "Token") ||
+		strings.HasSuffix(key, "Secret") ||
+		strings.HasSuffix(key, "Key") ||
+		strings.HasSuffix(key, "secret") ||
+		strings.HasSuffix(key, "api_key")
 }
 
 func sensitiveOptionConfiguredKey(key string) string {
