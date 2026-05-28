@@ -43,6 +43,9 @@ import {
   type StripePaymentIntentData,
   StripePaymentIntentDialog,
 } from '@/features/wallet/components/dialogs/stripe-payment-intent-dialog'
+import { useSystemConfig } from '@/hooks/use-system-config'
+import { formatQuota } from '@/lib/format'
+import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
 import {
   paySubscriptionCreem,
   paySubscriptionEpay,
@@ -72,10 +75,13 @@ interface Props {
   epayMethods?: PaymentMethod[]
   purchaseLimit?: number
   purchaseCount?: number
+  userQuota?: number
+  onPurchaseSuccess?: () => void | Promise<void>
 }
 
 export function SubscriptionPurchaseDialog(props: Props) {
   const { t } = useTranslation()
+  const { currency } = useSystemConfig()
   const [paying, setPaying] = useState(false)
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('')
   const [stripePaymentIntentDialogOpen, setStripePaymentIntentDialogOpen] =
@@ -119,6 +125,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
     props.stripePaymentIntentMethod?.name?.trim() || t('Stripe Payment Element')
   const totalAmount = Number(plan.total_amount || 0)
   const price = Number(plan.price_amount || 0).toFixed(2)
+  const quotaPerUnit =
+    currency?.quotaPerUnit && currency.quotaPerUnit > 0
+      ? currency.quotaPerUnit
+      : DEFAULT_CURRENCY_CONFIG.quotaPerUnit
+  const walletCost = Math.max(
+    0,
+    Math.ceil(Number(plan.price_amount || 0) * quotaPerUnit)
+  )
+  const userQuota = Math.max(0, Number(props.userQuota || 0))
+  const insufficientWalletBalance = hasWallet && userQuota < walletCost
   const limitReached =
     (props.purchaseLimit || 0) > 0 &&
     (props.purchaseCount || 0) >= (props.purchaseLimit || 0)
@@ -189,11 +205,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handlePayWallet = async () => {
+    if (insufficientWalletBalance) {
+      toast.error(t('Insufficient balance'))
+      return
+    }
+
     setPaying(true)
     try {
       const res = await paySubscriptionWallet({ plan_id: plan.id })
       if (res.message === 'success' || res.success) {
         toast.success(t('Subscription activated'))
+        await props.onPurchaseSuccess?.()
         props.onOpenChange(false)
       } else {
         toast.error(
@@ -348,6 +370,27 @@ export function SubscriptionPurchaseDialog(props: Props) {
                 <span className='text-sm font-medium'>{t('Amount Due')}</span>
                 <span className='text-primary text-lg font-bold'>${price}</span>
               </div>
+              {hasWallet && (
+                <div className='text-muted-foreground grid gap-1 rounded-md border px-3 py-2 text-xs'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <span>{t('Required')}</span>
+                    <span className='text-foreground'>
+                      {formatQuota(walletCost)}
+                    </span>
+                  </div>
+                  <div className='flex items-center justify-between gap-3'>
+                    <span>{t('Available')}</span>
+                    <span className='text-foreground'>
+                      {formatQuota(userQuota)}
+                    </span>
+                  </div>
+                  {insufficientWalletBalance && (
+                    <span className='text-destructive'>
+                      {t('Insufficient balance')}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {limitReached && (
@@ -375,7 +418,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         variant='outline'
                         className='flex-1'
                         onClick={handlePayWallet}
-                        disabled={paying || limitReached}
+                        disabled={
+                          paying || limitReached || insufficientWalletBalance
+                        }
                       >
                         {t('Wallet Balance')}
                       </Button>
