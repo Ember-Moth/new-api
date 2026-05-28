@@ -92,6 +92,10 @@ func UpdateSubscriptionPreference(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"billing_preference": pref})
 }
 
+func SubscriptionRequestBalancePay(c *gin.Context) {
+	SubscriptionRequestWalletPay(c)
+}
+
 // ---- Admin APIs ----
 
 func AdminListSubscriptionPlans(c *gin.Context) {
