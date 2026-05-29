@@ -45,6 +45,7 @@ import {
   FormField,
   FormItem,
   FormLabel,
+  FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -66,6 +67,7 @@ import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { safeNumberFieldProps } from '../utils/numeric-field'
 
 const perfSchema = z.object({
   performance_setting: z.object({
@@ -348,11 +350,18 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Disk Cache Threshold (MB)')}</FormLabel>
                   <FormControl>
-                    <Input type='number' {...field} disabled={!diskEnabled} />
+                    <Input
+                      type='number'
+                      min={1}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                      disabled={!diskEnabled}
+                    />
                   </FormControl>
                   <FormDescription>
                     {t('Use disk cache when request body exceeds this size')}
                   </FormDescription>
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -363,7 +372,13 @@ export function PerformanceSection(props: Props) {
                 <FormItem>
                   <FormLabel>{t('Max Disk Cache Size (MB)')}</FormLabel>
                   <FormControl>
-                    <Input type='number' {...field} disabled={!diskEnabled} />
+                    <Input
+                      type='number'
+                      min={100}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                      disabled={!diskEnabled}
+                    />
                   </FormControl>
                   {stats?.disk_space_info &&
                     stats.disk_space_info.total > 0 && (
@@ -374,6 +389,7 @@ export function PerformanceSection(props: Props) {
                         })}
                       </FormDescription>
                     )}
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -450,10 +466,13 @@ export function PerformanceSection(props: Props) {
                   <FormControl>
                     <Input
                       type='number'
-                      {...field}
+                      min={0}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
                       disabled={!monitorEnabled}
                     />
                   </FormControl>
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -466,10 +485,14 @@ export function PerformanceSection(props: Props) {
                   <FormControl>
                     <Input
                       type='number'
-                      {...field}
+                      min={0}
+                      max={100}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
                       disabled={!monitorEnabled}
                     />
                   </FormControl>
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -482,10 +505,14 @@ export function PerformanceSection(props: Props) {
                   <FormControl>
                     <Input
                       type='number'
-                      {...field}
+                      min={0}
+                      max={100}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
                       disabled={!monitorEnabled}
                     />
                   </FormControl>
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -528,10 +555,12 @@ export function PerformanceSection(props: Props) {
                     <Input
                       type='number'
                       min={1}
-                      {...field}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
                       disabled={!perfMetricsEnabled}
                     />
                   </FormControl>
+                  <FormMessage />
                 </FormItem>
               )}
             />
@@ -577,13 +606,15 @@ export function PerformanceSection(props: Props) {
                     <Input
                       type='number'
                       min={0}
-                      {...field}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
                       disabled={!perfMetricsEnabled}
                     />
                   </FormControl>
                   <FormDescription>
                     {t('0 means data is kept permanently')}
                   </FormDescription>
+                  <FormMessage />
                 </FormItem>
               )}
             />

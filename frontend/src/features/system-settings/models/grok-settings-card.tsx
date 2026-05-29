@@ -18,7 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useForm } from 'react-hook-form'
+import { useMemo } from 'react'
+import type { Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
 import { Button } from '@/components/ui/button'
@@ -29,53 +30,68 @@ import {
   FormField,
   FormItem,
   FormLabel,
+  FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { SettingsSection } from '../components/settings-section'
-import { useResetForm } from '../hooks/use-reset-form'
+import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { safeNumberFieldProps } from '../utils/numeric-field'
 
 const XAI_VIOLATION_FEE_DOC_URL =
   'https://docs.x.ai/docs/models#usage-guidelines-violation-fee'
 
 const grokSchema = z.object({
-  'grok.violation_deduction_enabled': z.boolean(),
-  'grok.violation_deduction_amount': z.coerce.number().min(0),
+  grok: z.object({
+    violation_deduction_enabled: z.boolean(),
+    violation_deduction_amount: z.coerce.number().min(0),
+  }),
 })
 
 type GrokFormValues = z.infer<typeof grokSchema>
 
+type FlatGrokDefaults = {
+  'grok.violation_deduction_enabled': boolean
+  'grok.violation_deduction_amount': number
+}
+
+const buildGrokFormDefaults = (defaults: FlatGrokDefaults): GrokFormValues => ({
+  grok: {
+    violation_deduction_enabled: defaults['grok.violation_deduction_enabled'],
+    violation_deduction_amount: defaults['grok.violation_deduction_amount'],
+  },
+})
+
 interface Props {
-  defaultValues: GrokFormValues
+  defaultValues: FlatGrokDefaults
 }
 
 export function GrokSettingsCard(props: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const defaultValues = useMemo(
+    () => buildGrokFormDefaults(props.defaultValues),
+    [props.defaultValues]
+  )
 
-  const form = useForm<GrokFormValues>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(grokSchema) as any,
-    defaultValues: props.defaultValues,
+  const { form, handleSubmit, isDirty } = useSettingsForm<GrokFormValues>({
+    resolver: zodResolver(grokSchema) as Resolver<
+      GrokFormValues,
+      unknown,
+      GrokFormValues
+    >,
+    defaultValues,
+    onSubmit: async (_data, changedFields) => {
+      for (const [key, value] of Object.entries(changedFields)) {
+        await updateOption.mutateAsync({
+          key,
+          value: value as string | number | boolean,
+        })
+      }
+    },
   })
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useResetForm(form as any, props.defaultValues)
-
-  const onSubmit = async (data: GrokFormValues) => {
-    const entries = Object.entries(data) as [string, unknown][]
-    const updates = entries.filter(
-      ([key, value]) =>
-        value !== (props.defaultValues[key as keyof GrokFormValues] as unknown)
-    )
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({
-        key,
-        value: value as string | number | boolean,
-      })
-    }
-  }
 
   const enabled = form.watch('grok.violation_deduction_enabled')
 
@@ -85,7 +101,8 @@ export function GrokSettingsCard(props: Props) {
       description={t('Configure xAI Grok model specific settings')}
     >
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+        <form onSubmit={handleSubmit} className='space-y-6'>
+          <FormDirtyIndicator isDirty={isDirty} />
           <FormField
             control={form.control}
             name='grok.violation_deduction_enabled'
@@ -128,7 +145,7 @@ export function GrokSettingsCard(props: Props) {
                     type='number'
                     step={0.01}
                     min={0}
-                    {...field}
+                    {...safeNumberFieldProps(field)}
                     disabled={!enabled}
                   />
                 </FormControl>
@@ -137,6 +154,7 @@ export function GrokSettingsCard(props: Props) {
                     'Base amount. Actual deduction = base amount × system group rate.'
                   )}
                 </FormDescription>
+                <FormMessage />
               </FormItem>
             )}
           />

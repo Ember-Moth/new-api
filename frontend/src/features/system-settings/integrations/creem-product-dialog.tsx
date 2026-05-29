@@ -50,6 +50,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { CreemProduct } from '@/features/wallet/types'
+import { safeNumberFieldProps } from '../utils/numeric-field'
 
 const creemProductDialogSchema = z.object({
   name: z.string().min(1, 'Product name is required'),
@@ -217,8 +218,7 @@ export function CreemProductDialog({
                         step='0.01'
                         min={0.01}
                         placeholder='10.00'
-                        {...field}
-                        onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                        {...safeNumberFieldProps(field)}
                       />
                     </FormControl>
                     <FormMessage />
@@ -238,8 +238,7 @@ export function CreemProductDialog({
                       type='number'
                       min={1}
                       placeholder={t('e.g., 500000')}
-                      {...field}
-                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                      {...safeNumberFieldProps(field)}
                     />
                   </FormControl>
                   <FormDescription>
