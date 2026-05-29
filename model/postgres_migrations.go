@@ -39,6 +39,7 @@ var postgresMainMigrations = []embeddedPostgresMigration{
 	{ID: "011_subscription_plans_price_amount_decimal", File: "011_subscription_plans_price_amount_decimal.sql", Transactional: true},
 	{ID: "012_postgres_runtime_state", File: "012_postgres_runtime_state.sql", Transactional: true},
 	{ID: "013_subscription_plans_waffo_pancake_product_id", File: "013_subscription_plans_waffo_pancake_product_id.sql", Transactional: true},
+	{ID: "014_subscription_plans_allow_balance_pay", File: "014_subscription_plans_allow_balance_pay.sql", Transactional: true},
 }
 
 var postgresPerformanceMigrations = []embeddedPostgresMigration{

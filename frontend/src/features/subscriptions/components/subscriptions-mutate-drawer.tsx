@@ -54,8 +54,8 @@ import {
 import { Switch } from '@/components/ui/switch'
 import {
   createPlan,
-  getGroups,
   createWaffoPancakeSubscriptionProduct,
+  getGroups,
   listWaffoPancakeSubscriptionProductOptions,
   updatePlan,
 } from '../api'
@@ -452,6 +452,24 @@ export function SubscriptionsMutateDrawer({
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name='allow_balance_pay'
+                  render={({ field }) => (
+                    <FormItem className='flex flex-row items-center gap-2 pt-8'>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                      <FormLabel className='!mt-0'>
+                        {t('Allow balance redemption')}
+                      </FormLabel>
+                    </FormItem>
+                  )}
+                />
               </div>
             </div>
 
@@ -679,9 +697,7 @@ export function SubscriptionsMutateDrawer({
                           disabled={items.length === 0}
                         >
                           <SelectTrigger className='w-full flex-1'>
-                            <SelectValue
-                              placeholder={t('Select a product')}
-                            />
+                            <SelectValue placeholder={t('Select a product')} />
                           </SelectTrigger>
                           <SelectContent>
                             {items.map((item) => (
@@ -695,7 +711,9 @@ export function SubscriptionsMutateDrawer({
                           type='button'
                           variant='outline'
                           onClick={handleCreatePancakeProduct}
-                          disabled={creatingPancakeProduct || !pancakeCreateReady}
+                          disabled={
+                            creatingPancakeProduct || !pancakeCreateReady
+                          }
                           className='shrink-0'
                         >
                           {creatingPancakeProduct

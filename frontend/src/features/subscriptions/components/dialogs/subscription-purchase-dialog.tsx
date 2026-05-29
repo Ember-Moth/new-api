@@ -100,6 +100,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const plan = props.plan?.plan
   if (!plan) return null
 
+  const allowBalancePay = plan.allow_balance_pay !== false
   const hasWallet = Number(plan.price_amount || 0) > 0
   const hasStripe = props.enableStripe && !!plan.stripe_price_id
   const hasStripePaymentIntent =
@@ -205,6 +206,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handlePayWallet = async () => {
+    if (!allowBalancePay) {
+      toast.error(t('This plan does not allow balance redemption'))
+      return
+    }
     if (insufficientWalletBalance) {
       toast.error(t('Insufficient balance'))
       return
@@ -384,10 +389,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
                       {formatQuota(userQuota)}
                     </span>
                   </div>
-                  {insufficientWalletBalance && (
+                  {!allowBalancePay ? (
                     <span className='text-destructive'>
-                      {t('Insufficient balance')}
+                      {t('This plan does not allow balance redemption')}
                     </span>
+                  ) : (
+                    insufficientWalletBalance && (
+                      <span className='text-destructive'>
+                        {t('Insufficient balance')}
+                      </span>
+                    )
                   )}
                 </div>
               )}
@@ -419,10 +430,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         className='flex-1'
                         onClick={handlePayWallet}
                         disabled={
-                          paying || limitReached || insufficientWalletBalance
+                          paying ||
+                          limitReached ||
+                          !allowBalancePay ||
+                          insufficientWalletBalance
                         }
                       >
-                        {t('Wallet Balance')}
+                        {t('Pay with Balance')}
                       </Button>
                     )}
                     {hasStripe && (
