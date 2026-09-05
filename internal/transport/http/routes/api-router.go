@@ -4,10 +4,10 @@ import (
 	"github.com/QuantumNous/new-api/controller"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
-	"github.com/QuantumNous/new-api/service/authz"
 
 	// Import oauth package to register providers via init()
 	_ "github.com/QuantumNous/new-api/oauth"
@@ -22,6 +22,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
 	identityHandler := identityhttp.New(deps.Identity, deps.IdentityHooks)
 	apiRouter := router.Group("/api")
+	apiRouter.Use(middleware.Authorization(deps.Authorization))
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
@@ -259,7 +260,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		}
 		apiRouter.GET("/task_plugin_options", middleware.AdminAuth(), middleware.RequirePermission(authz.TaskPluginBind), controller.GetTaskPluginOptions)
 		registerChannelRoutes(apiRouter, channelHandler)
-		registerAuthzRoutes(apiRouter)
+		registerAuthzRoutes(apiRouter, identityHandler)
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

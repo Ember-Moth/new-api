@@ -9,7 +9,7 @@ type Permission struct {
 }
 
 // PermissionsMap is a resource -> action -> allowed lookup.
-type PermissionsMap map[string]map[string]bool
+type PermissionsMap = map[string]map[string]bool
 
 const (
 	EffectAllow = "allow"

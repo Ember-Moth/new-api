@@ -12,11 +12,11 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -229,7 +229,7 @@ func RequirePermission(permission authz.Permission) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		role := c.GetInt("role")
 		userID := c.GetInt("id")
-		if authz.Can(userID, role, permission) {
+		if authz.FromContext(c.Request.Context()).Can(userID, role, permission) {
 			c.Next()
 			return
 		}
@@ -535,4 +535,11 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 		}
 	}
 	return nil
+}
+
+func Authorization(engine *authz.Engine) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request = c.Request.WithContext(authz.WithEngine(c.Request.Context(), engine))
+		c.Next()
+	}
 }

@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/logger"
-	"github.com/QuantumNous/new-api/service/authz"
-	"gorm.io/gorm"
 
 	"context"
 
@@ -40,19 +38,6 @@ func tokenPolicy() identity.TokenPolicy {
 		AutoGroups:        service.GetUserAutoGroup,
 	}
 }
-
-type userAuthorization struct{}
-
-func (userAuthorization) Capabilities(id, role int) map[string]map[string]bool {
-	return authz.Capabilities(id, role)
-}
-func (userAuthorization) SetPermissions(tx *gorm.DB, id int, permissions map[string]map[string]bool) error {
-	return authz.SetUserPermissionsInTx(tx, id, permissions)
-}
-func (userAuthorization) ClearPermissions(tx *gorm.DB, id int) error {
-	return authz.ClearUserAuthorizationInTx(tx, id)
-}
-func (userAuthorization) Reload() error { return authz.ReloadPolicy() }
 
 func userSecurity() identity.UserSecurity {
 	return identity.UserSecurity{

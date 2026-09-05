@@ -90,7 +90,7 @@ func (s *Service) CreateUser(ctx context.Context, actor contract.UserActor, inpu
 		return nil, err
 	}
 	if touched {
-		if err := s.userAuthorization.Reload(); err != nil {
+		if err := s.userAuthorization.ReloadPolicy(); err != nil {
 			return nil, err
 		}
 	}
@@ -152,7 +152,7 @@ func (s *Service) UpdateUser(ctx context.Context, actor contract.UserActor, inpu
 		return nil, err
 	}
 	if touched {
-		if err := s.userAuthorization.Reload(); err != nil {
+		if err := s.userAuthorization.ReloadPolicy(); err != nil {
 			return nil, err
 		}
 	}
@@ -332,7 +332,7 @@ func (s *Service) ManageUser(ctx context.Context, actor contract.UserActor, inpu
 			return err
 		}
 		if input.Action == "demote" {
-			return s.userAuthorization.ClearPermissions(tx, user.Id)
+			return s.userAuthorization.ClearUserAuthorizationInTx(tx, user.Id)
 		}
 		return nil
 	})
@@ -351,7 +351,7 @@ func (s *Service) ManageUser(ctx context.Context, actor contract.UserActor, inpu
 		}
 	} else {
 		if input.Action == "demote" {
-			if err := s.userAuthorization.Reload(); err != nil {
+			if err := s.userAuthorization.ReloadPolicy(); err != nil {
 				return nil, err
 			}
 		}
@@ -381,7 +381,7 @@ func (s *Service) ManageUser(ctx context.Context, actor contract.UserActor, inpu
 func (s *Service) updateUserPermissions(tx *gorm.DB, actor contract.UserActor, id, role int, permissions map[string]map[string]bool) (bool, error) {
 	if permissions == nil {
 		if role < common.RoleAdminUser && actor.Role == common.RoleRootUser {
-			return true, s.userAuthorization.ClearPermissions(tx, id)
+			return true, s.userAuthorization.ClearUserAuthorizationInTx(tx, id)
 		}
 		return false, nil
 	}
@@ -389,9 +389,9 @@ func (s *Service) updateUserPermissions(tx *gorm.DB, actor contract.UserActor, i
 		return false, errors.New("only root can update admin permissions")
 	}
 	if role < common.RoleAdminUser {
-		return true, s.userAuthorization.ClearPermissions(tx, id)
+		return true, s.userAuthorization.ClearUserAuthorizationInTx(tx, id)
 	}
-	return true, s.userAuthorization.SetPermissions(tx, id, permissions)
+	return true, s.userAuthorization.SetUserPermissionsInTx(tx, id, permissions)
 }
 
 func userResponse(user *entity.User) *contract.UserResponse {

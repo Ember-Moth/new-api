@@ -37,9 +37,9 @@ type UserSecurity struct {
 
 type UserAuthorization interface {
 	Capabilities(int, int) map[string]map[string]bool
-	SetPermissions(*gorm.DB, int, map[string]map[string]bool) error
-	ClearPermissions(*gorm.DB, int) error
-	Reload() error
+	SetUserPermissionsInTx(*gorm.DB, int, map[string]map[string]bool) error
+	ClearUserAuthorizationInTx(*gorm.DB, int) error
+	ReloadPolicy() error
 }
 
 type UserWallet interface {

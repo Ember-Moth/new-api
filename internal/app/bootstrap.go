@@ -15,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/oauth"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/service/authz"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/joho/godotenv"
@@ -53,10 +52,6 @@ func initResources() error {
 	channelDeps.DisableChannel = service.DisableChannel
 	channelDeps.NotifyModelUpdate = service.NotifyUpstreamModelUpdateWatchers
 	model.ConfigureChannelService(channel.New(channelDeps))
-	if err = authz.Init(model.DB); err != nil {
-		common.FatalLog("failed to initialize authorization: " + err.Error())
-		return err
-	}
 	if common.PasswordLoginEncryptionEnabled {
 		if err = model.InitPasswordEncryption(); err != nil {
 			common.FatalLog("failed to initialize password encryption: " + err.Error())

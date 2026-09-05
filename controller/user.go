@@ -16,10 +16,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -224,7 +224,7 @@ func setupLoginAtAuthVersion(user *model.User, expectedAuthVersion int64, c *gin
 			"token_type":        bundle.TokenType,
 			"access_expires_at": bundle.AccessExpiresAt,
 			"session":           bundle.Session,
-			"user":              buildSelfUserData(currentUser),
+			"user":              buildSelfUserData(c, currentUser),
 		},
 	})
 }
@@ -382,8 +382,8 @@ func TransferAffQuota(c *gin.Context) {
 }
 
 // buildSelfUserData bridges login/refresh until the authentication transport is migrated.
-func buildSelfUserData(user *model.User) *identitycontract.SelfUserResponse {
-	return identity.SelfUserData((*identityentity.User)(user), user.Role, authz.Capabilities(user.Id, user.Role))
+func buildSelfUserData(c *gin.Context, user *model.User) *identitycontract.SelfUserResponse {
+	return identity.SelfUserData((*identityentity.User)(user), user.Role, authz.FromContext(c.Request.Context()).Capabilities(user.Id, user.Role))
 }
 
 func GetUserModels(c *gin.Context) {

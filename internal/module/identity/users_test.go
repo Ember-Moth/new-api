@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
@@ -23,20 +24,22 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-type userAuthorizationFixture struct{ fail bool }
+type userAuthorizationFixture struct {
+	fail   bool
+	engine *authz.Engine
+}
 
-func (*userAuthorizationFixture) Capabilities(id, role int) map[string]map[string]bool {
-	return authz.Capabilities(id, role)
+func (f *userAuthorizationFixture) Capabilities(id, role int) map[string]map[string]bool {
+	return f.engine.Capabilities(id, role)
 }
-func (f *userAuthorizationFixture) SetPermissions(tx *gorm.DB, id int, permissions map[string]map[string]bool) error {
-	if err := authz.SetUserPermissionsInTx(tx, id, permissions); err != nil {
+func (f *userAuthorizationFixture) SetUserPermissionsInTx(tx *gorm.DB, id int, permissions map[string]map[string]bool) error {
+	if err := f.engine.SetUserPermissionsInTx(tx, id, permissions); err != nil {
 		return err
 	}
 	if f.fail {
@@ -44,8 +47,8 @@ func (f *userAuthorizationFixture) SetPermissions(tx *gorm.DB, id int, permissio
 	}
 	return nil
 }
-func (f *userAuthorizationFixture) ClearPermissions(tx *gorm.DB, id int) error {
-	if err := authz.ClearUserAuthorizationInTx(tx, id); err != nil {
+func (f *userAuthorizationFixture) ClearUserAuthorizationInTx(tx *gorm.DB, id int) error {
+	if err := f.engine.ClearUserAuthorizationInTx(tx, id); err != nil {
 		return err
 	}
 	if f.fail {
@@ -53,7 +56,7 @@ func (f *userAuthorizationFixture) ClearPermissions(tx *gorm.DB, id int) error {
 	}
 	return nil
 }
-func (*userAuthorizationFixture) Reload() error { return authz.ReloadPolicy() }
+func (f *userAuthorizationFixture) ReloadPolicy() error { return f.engine.ReloadPolicy() }
 
 type userFixture struct {
 	db            *gorm.DB
@@ -88,8 +91,9 @@ func newUserFixture(t *testing.T) *userFixture {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool, schema.Main))
 	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, authz.Init(db))
-	f := &userFixture{db: db, router: gin.New(), authorization: &userAuthorizationFixture{}}
+	authorization, err := authz.New(db, false)
+	require.NoError(t, err)
+	f := &userFixture{db: db, router: gin.New(), authorization: &userAuthorizationFixture{engine: authorization}}
 	wallet := billing.New(billing.Dependencies{DB: db, WalletRuntime: billing.WalletRuntime{
 		Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
 		Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
@@ -114,6 +118,7 @@ func newUserFixture(t *testing.T) *userFixture {
 	h := identityhttp.New(f.service, identityhttp.ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, Audit: func(c *gin.Context, id int, action string, params map[string]any) {
 		f.audits = append(f.audits, contract.UserAudit{TargetID: id, Action: action, Parameters: params})
 	}})
+	f.router.Use(middleware.Authorization(authorization))
 	f.router.Use(func(c *gin.Context) {
 		role, _ := strconv.Atoi(c.GetHeader("X-Test-Role"))
 		c.Set("role", role)
@@ -222,7 +227,7 @@ func TestUserCreationAndEditCommitPermissionsAtomically(t *testing.T) {
 	assert.Empty(t, user.Email)
 	assert.NotEmpty(t, user.GetSetting().SidebarModules)
 	assert.Equal(t, []int{user.Id}, f.grants)
-	assert.True(t, authz.Can(user.Id, user.Role, authz.ChannelRead))
+	assert.True(t, f.authorization.engine.Can(user.Id, user.Role, authz.ChannelRead))
 	seedManagedSession(t, f, &user, "edit-session")
 	beforePassword := user.Password
 	edit := map[string]any{"id": user.Id, "username": "managed-edited", "display_name": "", "group": "default", "remark": "", "password": "",
@@ -233,7 +238,7 @@ func TestUserCreationAndEditCommitPermissionsAtomically(t *testing.T) {
 	assert.False(t, failed.Success)
 	require.NoError(t, f.db.First(&user, user.Id).Error)
 	assert.Equal(t, "managed", user.Username)
-	assert.True(t, authz.Can(user.Id, user.Role, authz.ChannelRead))
+	assert.True(t, f.authorization.engine.Can(user.Id, user.Role, authz.ChannelRead))
 	assert.Empty(t, f.revocations)
 	assert.Len(t, f.audits, 1)
 	f.authorization.fail = false
@@ -247,7 +252,7 @@ func TestUserCreationAndEditCommitPermissionsAtomically(t *testing.T) {
 	assert.Zero(t, user.UsedQuota)
 	assert.Equal(t, common.UserStatusEnabled, user.Status)
 	assert.EqualValues(t, 1, user.AuthVersion)
-	assert.False(t, authz.Can(user.Id, user.Role, authz.ChannelRead))
+	assert.False(t, f.authorization.engine.Can(user.Id, user.Role, authz.ChannelRead))
 	assert.Empty(t, f.revocations)
 	edit["password"] = "NewPassword123"
 	updated = userRequest(t, f, common.RoleRootUser, http.MethodPut, "/users", edit)
@@ -286,7 +291,7 @@ func TestUserManagementProtectsRolesAndRevokesSessionsOnce(t *testing.T) {
 	admin := seedManagedUser(t, f, "managed-demote", common.RoleAdminUser)
 	seedManagedSession(t, f, admin, "demote-one")
 	seedManagedSession(t, f, admin, "demote-two")
-	require.NoError(t, authz.SetUserPermissions(admin.Id, authz.PermissionsMap{"channel": {"read": true}}))
+	require.NoError(t, f.authorization.engine.SetUserPermissions(admin.Id, authz.PermissionsMap{"channel": {"read": true}}))
 	demoted := userRequest(t, f, common.RoleRootUser, http.MethodPost, "/users/manage", contract.ManageUserRequest{Id: admin.Id, Action: "demote"})
 	require.True(t, demoted.Success, demoted.Message)
 	require.NoError(t, f.db.First(admin, admin.Id).Error)
@@ -301,7 +306,7 @@ func TestUserManagementProtectsRolesAndRevokesSessionsOnce(t *testing.T) {
 		assert.Equal(t, "admin_demote", session.RevokedReason)
 	}
 	var policies int64
-	require.NoError(t, f.db.Model(&model.CasbinRule{}).Where("v0 = ?", authz.UserSubject(admin.Id)).Count(&policies).Error)
+	require.NoError(t, f.db.Model(&entity.CasbinRule{}).Where("v0 = ?", authz.UserSubject(admin.Id)).Count(&policies).Error)
 	assert.Zero(t, policies)
 	root := seedManagedUser(t, f, "protected-root", common.RoleRootUser)
 	for _, action := range []string{"disable", "delete", "demote", "unknown"} {

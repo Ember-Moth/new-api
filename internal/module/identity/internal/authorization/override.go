@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/casbin/casbin/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -17,8 +17,8 @@ type overridePolicy struct {
 	Effect   string
 }
 
-func SetUserPermissions(userID int, permissions PermissionsMap) error {
-	e := currentEnforcer()
+func (a *Engine) SetUserPermissions(userID int, permissions PermissionsMap) error {
+	e := a.currentEnforcer()
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
@@ -39,8 +39,8 @@ func SetUserPermissions(userID int, permissions PermissionsMap) error {
 	return nil
 }
 
-func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap) error {
-	e := currentEnforcer()
+func (a *Engine) SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap) error {
+	e := a.currentEnforcer()
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
@@ -49,14 +49,14 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 		if !isKnownResource(resource) {
 			continue
 		}
-		if err := tx.Where("ptype = ? AND v0 = ? AND v1 = ?", "p", UserSubject(userID), resource).Delete(&model.CasbinRule{}).Error; err != nil {
+		if err := tx.Where("ptype = ? AND v0 = ? AND v1 = ?", "p", UserSubject(userID), resource).Delete(&identityentity.CasbinRule{}).Error; err != nil {
 			return err
 		}
 		policies := userOverridePolicies(e, resource, actions)
 		if len(policies) == 0 {
 			continue
 		}
-		rules := make([]model.CasbinRule, 0, len(policies))
+		rules := make([]identityentity.CasbinRule, 0, len(policies))
 		for _, policy := range policies {
 			rules = append(rules, newRule("p", []string{UserSubject(userID), policy.Resource, policy.Action, policy.Effect}))
 		}
@@ -67,8 +67,8 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 	return nil
 }
 
-func ClearUserPermissions(userID int) error {
-	e := currentEnforcer()
+func (a *Engine) ClearUserPermissions(userID int) error {
+	e := a.currentEnforcer()
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
@@ -81,32 +81,32 @@ func ClearUserPermissions(userID int) error {
 	return nil
 }
 
-func ClearUserPermissionsInTx(tx *gorm.DB, userID int) error {
+func (a *Engine) ClearUserPermissionsInTx(tx *gorm.DB, userID int) error {
 	for _, resource := range registry {
-		if err := tx.Where("ptype = ? AND v0 = ? AND v1 = ?", "p", UserSubject(userID), resource.Resource).Delete(&model.CasbinRule{}).Error; err != nil {
+		if err := tx.Where("ptype = ? AND v0 = ? AND v1 = ?", "p", UserSubject(userID), resource.Resource).Delete(&identityentity.CasbinRule{}).Error; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func ClearUserAuthorization(userID int) error {
-	return ClearUserPermissions(userID)
+func (a *Engine) ClearUserAuthorization(userID int) error {
+	return a.ClearUserPermissions(userID)
 }
 
-func ClearUserAuthorizationInTx(tx *gorm.DB, userID int) error {
-	return ClearUserPermissionsInTx(tx, userID)
+func (a *Engine) ClearUserAuthorizationInTx(tx *gorm.DB, userID int) error {
+	return a.ClearUserPermissionsInTx(tx, userID)
 }
 
 // ExplicitUserPermissions returns the effective permission matrix for the
 // managed role plus any per-user overrides.
-func ExplicitUserPermissions(userID int) PermissionsMap {
-	return Capabilities(userID, common.RoleAdminUser)
+func (a *Engine) ExplicitUserPermissions(userID int) PermissionsMap {
+	return a.Capabilities(userID, common.RoleAdminUser)
 }
 
 // ExplicitUserOverrides returns only the per-user override entries.
-func ExplicitUserOverrides(userID int) PermissionsMap {
-	e := currentEnforcer()
+func (a *Engine) ExplicitUserOverrides(userID int) PermissionsMap {
+	e := a.currentEnforcer()
 	if e == nil {
 		return PermissionsMap{}
 	}

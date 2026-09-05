@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
-	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

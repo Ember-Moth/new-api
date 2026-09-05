@@ -3,7 +3,7 @@ package authz
 import (
 	"strings"
 
-	"github.com/QuantumNous/new-api/model"
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	casbinmodel "github.com/casbin/casbin/v2/model"
 	"github.com/casbin/casbin/v2/persist"
 	"gorm.io/gorm"
@@ -19,7 +19,7 @@ func newGormAdapter(db *gorm.DB) *gormAdapter {
 }
 
 func (a *gormAdapter) LoadPolicy(m casbinmodel.Model) error {
-	var rules []model.CasbinRule
+	var rules []identityentity.CasbinRule
 	if err := a.db.Order("id asc").Find(&rules).Error; err != nil {
 		return err
 	}
@@ -33,10 +33,10 @@ func (a *gormAdapter) LoadPolicy(m casbinmodel.Model) error {
 
 func (a *gormAdapter) SavePolicy(m casbinmodel.Model) error {
 	return a.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("1 = 1").Delete(&model.CasbinRule{}).Error; err != nil {
+		if err := tx.Where("1 = 1").Delete(&identityentity.CasbinRule{}).Error; err != nil {
 			return err
 		}
-		rules := make([]model.CasbinRule, 0)
+		rules := make([]identityentity.CasbinRule, 0)
 		for ptype, ast := range m["p"] {
 			for _, policy := range ast.Policy {
 				rules = append(rules, newRule(ptype, policy))
@@ -57,7 +57,7 @@ func (a *gormAdapter) SavePolicy(m casbinmodel.Model) error {
 func (a *gormAdapter) AddPolicy(_ string, ptype string, rule []string) error {
 	casbinRule := newRule(ptype, rule)
 	var count int64
-	if err := a.ruleQuery(a.db.Model(&model.CasbinRule{}), ptype, rule).Count(&count).Error; err != nil {
+	if err := a.ruleQuery(a.db.Model(&identityentity.CasbinRule{}), ptype, rule).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -67,7 +67,7 @@ func (a *gormAdapter) AddPolicy(_ string, ptype string, rule []string) error {
 }
 
 func (a *gormAdapter) RemovePolicy(_ string, ptype string, rule []string) error {
-	return a.ruleQuery(a.db, ptype, rule).Delete(&model.CasbinRule{}).Error
+	return a.ruleQuery(a.db, ptype, rule).Delete(&identityentity.CasbinRule{}).Error
 }
 
 func (a *gormAdapter) RemoveFilteredPolicy(_ string, ptype string, fieldIndex int, fieldValues ...string) error {
@@ -78,7 +78,7 @@ func (a *gormAdapter) RemoveFilteredPolicy(_ string, ptype string, fieldIndex in
 		}
 		query = query.Where("v"+string(rune('0'+fieldIndex+i))+" = ?", value)
 	}
-	return query.Delete(&model.CasbinRule{}).Error
+	return query.Delete(&identityentity.CasbinRule{}).Error
 }
 
 func (a *gormAdapter) ruleQuery(query *gorm.DB, ptype string, rule []string) *gorm.DB {
@@ -93,8 +93,8 @@ func (a *gormAdapter) ruleQuery(query *gorm.DB, ptype string, rule []string) *go
 	return query
 }
 
-func newRule(ptype string, policy []string) model.CasbinRule {
-	rule := model.CasbinRule{Ptype: ptype}
+func newRule(ptype string, policy []string) identityentity.CasbinRule {
+	rule := identityentity.CasbinRule{Ptype: ptype}
 	values := []*string{&rule.V0, &rule.V1, &rule.V2, &rule.V3, &rule.V4, &rule.V5}
 	for idx, value := range policy {
 		if idx >= len(values) {
@@ -105,7 +105,7 @@ func newRule(ptype string, policy []string) model.CasbinRule {
 	return rule
 }
 
-func ruleToLine(rule model.CasbinRule) string {
+func ruleToLine(rule identityentity.CasbinRule) string {
 	parts := []string{rule.Ptype}
 	values := []string{rule.V0, rule.V1, rule.V2, rule.V3, rule.V4, rule.V5}
 	if rule.Ptype == "p" && rule.V0 != "" && rule.V1 != "" && rule.V2 != "" && rule.V3 == "" {

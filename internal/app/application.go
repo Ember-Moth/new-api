@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
@@ -33,7 +34,6 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/bytedance/gopkg/util/gopool"
@@ -55,6 +55,12 @@ func Run(assets router.WebAssets) {
 		return
 	}
 
+	authorization, err := authz.New(model.DB, common.IsMasterNode)
+	if err != nil {
+		common.FatalLog("failed to initialize authorization: " + err.Error())
+		return
+	}
+
 	common.SysLog("New API " + common.Version + " started")
 	if common.DebugEnabled {
 		common.SysLog("running in debug mode")
@@ -63,6 +69,7 @@ func Run(assets router.WebAssets) {
 	kitutil.Debug.Store(common.DebugEnabled)
 
 	defer func() {
+		cancelRun()
 		err := model.CloseDB()
 		if err != nil {
 			common.FatalLog("failed to close database: " + err.Error())
@@ -104,7 +111,7 @@ func Run(assets router.WebAssets) {
 	go controller.SyncTaskPlugins()
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
-	go authz.StartPolicySync(common.SyncFrequency)
+	go authorization.StartPolicySync(runCtx, common.SyncFrequency)
 
 	// 数据看板
 	go model.UpdateQuotaData()
@@ -173,6 +180,7 @@ func Run(assets router.WebAssets) {
 		},
 	})
 	server, err := httpserver.New(assets, router.Dependencies{
+		Authorization: authorization,
 		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity},
 		Billing:       billingService,
 		BillingHooks:  billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
@@ -187,11 +195,11 @@ func Run(assets router.WebAssets) {
 		}),
 		Identity: identity.New(identity.Dependencies{VerifyEmail: func(email, code string) bool {
 			return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
-		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: userAuthorization{}, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
+		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
 		Channel: model.ChannelService(),
 		ChannelHooks: channelhttp.ManagementHooks{
 			Can: func(userID, role int, resource, action string) bool {
-				return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})
+				return authorization.Can(userID, role, authz.Permission{Resource: resource, Action: action})
 			},
 			Audit: controller.RecordManageAudit,
 			EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {

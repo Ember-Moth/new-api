@@ -115,6 +115,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 新部署 schema 的个人访问令牌列改为 `VARCHAR(32)`，与生成器实际输出的 28/32 位长度匹配，避免 `CHAR(32)` 补空格；唯一约束保留。没有添加历史数据兼容路径。
 
+第十二批将权限目录、内置角色、用户权限覆盖、Casbin 存储适配器和策略同步收进 identity。对外入口是 `identity/authz`，具体实现位于模块私有的 `internal/authorization`；旧 `service/authz`、`controller/authz.go` 和 model 中的权限实体已移除。
+
+权限引擎由应用创建并显式注入，替代进程级全局 enforcer。用户管理直接使用同一引擎完成事务内权限写入和提交后的重载，HTTP 中间件及尚未迁移的登录响应通过请求上下文读取它；渠道管理捕获应用实例。周期同步接受生命周期 context，关闭时停止重载。
+
+主节点的角色/基线初始化改为一个事务，失败会保留原有基线和用户覆盖；副本仅加载策略。SQL 集成测试验证两个独立数据库实例的权限互不影响，同库副本在重载后才观察到已提交修改，初始化失败后角色和授权保持完整。权限目录保留现有能力，没有新增角色管理接口。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -277,3 +283,18 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1
 在 SQL 迁移初始化两次的独立 schema 中验证：真实认证中间件下的 self 脱敏和字段白名单、原密码校验、无密码账户保护、过期认证版本拒绝、当前会话续签及其他会话撤销、设置并发合并、通知校验、个人令牌原样读取/轮换/唯一约束、邮箱规范化与冲突、邀请码稳定性和注销。DragonflyDB 覆盖预热缓存后的改密会话转换及通知更新保留额度和其他偏好。
 
 输出：`/tmp/new-api-self-crud-tests.log`、`/tmp/new-api-self-crud-dragonfly.log`、`/tmp/new-api-self-crud-full-tests.log`、`/tmp/new-api-self-crud-vet.log`、`/tmp/new-api-self-crud-startup.log`。
+
+## 第十二批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归和第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./internal/transport/http/... ./controller -count=1
+```
+
+权限测试使用正式 SQL 迁移并重复初始化，保留角色基线、用户覆盖、事务回滚和任务插件绑定权限回归，补充实例隔离、跨实例重载和初始化失败回滚。现有用户管理、渠道和请求中间件集成测试已改为显式持有权限实例。
+
+输出：`/tmp/new-api-authz-module-tests.log`、`/tmp/new-api-authz-module-full-tests.log`、`/tmp/new-api-authz-module-vet.log`、`/tmp/new-api-authz-module-startup.log`。

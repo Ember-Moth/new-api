@@ -5,12 +5,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,8 +26,9 @@ func TestGetTaskPluginOptionsAdminForbiddenRootAllowed(t *testing.T) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}))
-	require.NoError(t, authz.Init(db))
+	require.NoError(t, db.AutoMigrate(&identityentity.CasbinRule{}, &identityentity.AuthzRole{}))
+	authorization, err := authz.New(db, true)
+	require.NoError(t, err)
 	t.Cleanup(func() { common.IsMasterNode = wasMaster })
 
 	gin.SetMode(gin.TestMode)
@@ -45,6 +47,7 @@ func TestGetTaskPluginOptionsAdminForbiddenRootAllowed(t *testing.T) {
 			context.Request = httptest.NewRequest(http.MethodGet, "/api/task_plugin_options", nil)
 			context.Set("id", testCase.id)
 			context.Set("role", testCase.role)
+			context.Request = context.Request.WithContext(authz.WithEngine(context.Request.Context(), authorization))
 			middleware.RequirePermission(authz.TaskPluginBind)(context)
 			if !context.IsAborted() {
 				controller.GetTaskPluginOptions(context)

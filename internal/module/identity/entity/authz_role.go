@@ -1,4 +1,4 @@
-package model
+package entity
 
 type AuthzRole struct {
 	Id          uint   `json:"id" gorm:"primaryKey;autoIncrement"`

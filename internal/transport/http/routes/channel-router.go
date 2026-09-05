@@ -5,8 +5,8 @@ import (
 
 	"github.com/QuantumNous/new-api/controller"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
-	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
 

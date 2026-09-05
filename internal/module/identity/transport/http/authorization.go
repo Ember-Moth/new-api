@@ -1,9 +1,9 @@
-package controller
+package identityhttp
 
 import (
 	"net/http"
 
-	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,7 +12,7 @@ import (
 // render the permission editor: the registry of resources with their actions
 // and display label keys, plus the roles with their baseline grant matrices.
 // Defining it in the authz package keeps the schema in a single place.
-func GetPermissionCatalog(c *gin.Context) {
+func (h *Handler) PermissionCatalog(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

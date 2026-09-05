@@ -12,7 +12,7 @@ import (
 	channelcontract "github.com/QuantumNous/new-api/internal/module/channel/contract"
 
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
-	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/gin-gonic/gin"
 
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
@@ -475,54 +475,54 @@ func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 
 // Existing controller integration fixtures exercise the migrated handlers with
 // the same authorization and audit adapters as the application composition.
-func managementTestHandler() *channelhttp.Handler {
+func managementTestHandler(c *gin.Context) *channelhttp.Handler {
 	return channelhttp.New(model.ChannelService(), channelhttp.ManagementHooks{
 		Can: func(id, role int, resource, action string) bool {
-			return authz.Can(id, role, authz.Permission{Resource: resource, Action: action})
+			return authz.FromContext(c.Request.Context()).Can(id, role, authz.Permission{Resource: resource, Action: action})
 		},
 		Audit: RecordManageAudit,
 	})
 }
 
-func AddChannel(c *gin.Context) { managementTestHandler().AddChannel(c) }
+func AddChannel(c *gin.Context) { managementTestHandler(c).AddChannel(c) }
 
-func BatchSetChannelTag(c *gin.Context) { managementTestHandler().BatchSetChannelTag(c) }
+func BatchSetChannelTag(c *gin.Context) { managementTestHandler(c).BatchSetChannelTag(c) }
 
-func BatchUpdateChannelStatus(c *gin.Context) { managementTestHandler().BatchUpdateChannelStatus(c) }
+func BatchUpdateChannelStatus(c *gin.Context) { managementTestHandler(c).BatchUpdateChannelStatus(c) }
 
-func CopyChannel(c *gin.Context) { managementTestHandler().CopyChannel(c) }
+func CopyChannel(c *gin.Context) { managementTestHandler(c).CopyChannel(c) }
 
-func DeleteChannel(c *gin.Context) { managementTestHandler().DeleteChannel(c) }
+func DeleteChannel(c *gin.Context) { managementTestHandler(c).DeleteChannel(c) }
 
-func DeleteChannelBatch(c *gin.Context) { managementTestHandler().DeleteChannelBatch(c) }
+func DeleteChannelBatch(c *gin.Context) { managementTestHandler(c).DeleteChannelBatch(c) }
 
-func DeleteDisabledChannel(c *gin.Context) { managementTestHandler().DeleteDisabledChannel(c) }
+func DeleteDisabledChannel(c *gin.Context) { managementTestHandler(c).DeleteDisabledChannel(c) }
 
-func DisableTagChannels(c *gin.Context) { managementTestHandler().DisableTagChannels(c) }
+func DisableTagChannels(c *gin.Context) { managementTestHandler(c).DisableTagChannels(c) }
 
-func EditTagChannels(c *gin.Context) { managementTestHandler().EditTagChannels(c) }
+func EditTagChannels(c *gin.Context) { managementTestHandler(c).EditTagChannels(c) }
 
-func EnableTagChannels(c *gin.Context) { managementTestHandler().EnableTagChannels(c) }
+func EnableTagChannels(c *gin.Context) { managementTestHandler(c).EnableTagChannels(c) }
 
-func FixChannelsAbilities(c *gin.Context) { managementTestHandler().FixChannelsAbilities(c) }
+func FixChannelsAbilities(c *gin.Context) { managementTestHandler(c).FixChannelsAbilities(c) }
 
-func GetAllChannels(c *gin.Context) { managementTestHandler().GetAllChannels(c) }
+func GetAllChannels(c *gin.Context) { managementTestHandler(c).GetAllChannels(c) }
 
-func GetChannel(c *gin.Context) { managementTestHandler().GetChannel(c) }
+func GetChannel(c *gin.Context) { managementTestHandler(c).GetChannel(c) }
 
-func GetChannelKey(c *gin.Context) { managementTestHandler().GetChannelKey(c) }
+func GetChannelKey(c *gin.Context) { managementTestHandler(c).GetChannelKey(c) }
 
-func GetChannelOps(c *gin.Context) { managementTestHandler().GetChannelOps(c) }
+func GetChannelOps(c *gin.Context) { managementTestHandler(c).GetChannelOps(c) }
 
-func GetTagModels(c *gin.Context) { managementTestHandler().GetTagModels(c) }
+func GetTagModels(c *gin.Context) { managementTestHandler(c).GetTagModels(c) }
 
-func ManageMultiKeys(c *gin.Context) { managementTestHandler().ManageMultiKeys(c) }
+func ManageMultiKeys(c *gin.Context) { managementTestHandler(c).ManageMultiKeys(c) }
 
-func SearchChannels(c *gin.Context) { managementTestHandler().SearchChannels(c) }
+func SearchChannels(c *gin.Context) { managementTestHandler(c).SearchChannels(c) }
 
-func UpdateChannel(c *gin.Context) { managementTestHandler().UpdateChannel(c) }
+func UpdateChannel(c *gin.Context) { managementTestHandler(c).UpdateChannel(c) }
 
-func UpdateChannelStatus(c *gin.Context) { managementTestHandler().UpdateChannelStatus(c) }
+func UpdateChannelStatus(c *gin.Context) { managementTestHandler(c).UpdateChannelStatus(c) }
 
 type AddChannelRequest = channelhttp.AddChannelRequest
 
@@ -530,5 +530,5 @@ type ChannelBatch = channelhttp.ChannelBatch
 
 type fetchModelsRequest = channelcontract.ModelDiscoveryRequest
 
-func FetchModels(c *gin.Context)         { managementTestHandler().FetchModels(c) }
-func FetchUpstreamModels(c *gin.Context) { managementTestHandler().FetchUpstreamModels(c) }
+func FetchModels(c *gin.Context)         { managementTestHandler(c).FetchModels(c) }
+func FetchUpstreamModels(c *gin.Context) { managementTestHandler(c).FetchUpstreamModels(c) }
