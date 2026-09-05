@@ -10,9 +10,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"context"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/usage"
+	"github.com/QuantumNous/new-api/internal/module/usage/contract"
+	"github.com/QuantumNous/new-api/internal/module/usage/metadata"
 	usagehttp "github.com/QuantumNous/new-api/internal/module/usage/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
@@ -130,6 +134,59 @@ func TestLogCursorPaginationPreservesTiesAndViewerIsolation(t *testing.T) {
 			after, err := store.CountOldLog(t.Context(), cutoff)
 			require.NoError(t, err)
 			assert.Equal(t, before-deleted, after)
+			previousConsume, previousExport := common.LogConsumeEnabled, common.DataExportEnabled
+			common.LogConsumeEnabled, common.DataExportEnabled = true, true
+			t.Cleanup(func() { common.LogConsumeEnabled, common.DataExportEnabled = previousConsume, previousExport })
+			var exports []contract.QuotaDataLogParams
+			writer := usage.New(usage.Dependencies{DB: logsDB, Kind: kind, Writer: usage.WriterPolicy{
+				Username:  func(context.Context, int) (string, error) { return "resolved-user", nil },
+				TokenName: func(context.Context, int) (string, error) { return "resolved-token", nil },
+				RecordIP:  func(ctx context.Context, id int) (bool, error) { return id == 90, nil },
+				Export:    func(event contract.QuotaDataLogParams) { exports = append(exports, event) },
+			}})
+			request := contract.RequestMetadata{Username: "request-user", RequestID: "event-request", UpstreamRequestID: "upstream-request", ClientIP: "203.0.113.7"}
+			other := metadata.NewLogOther()
+			other.SetPublic("visible", "yes")
+			other.SetAdmin("private", "admin-only")
+			other.SetRoot("private", "root-only")
+			writer.RecordConsumeLog(t.Context(), request, 90, contract.RecordConsumeLogParams{Quota: 123, PromptTokens: 4, CompletionTokens: 5, ModelName: "event-model", TokenName: "request-token", TokenId: 47, ChannelId: 9, Group: "gold", Content: "consume-event", Other: other})
+			writer.RecordErrorLog(t.Context(), request, 91, 9, "event-model", "request-token", "error-event", 47, 2, false, "gold", other)
+			writer.RecordTaskBillingLog(t.Context(), contract.RecordTaskBillingLogParams{UserId: 90, LogType: 2, Quota: 22, ModelName: "task-model", TokenId: 47, ChannelId: 9, Group: "gold", Content: "task-event", NodeName: "origin-node", Other: other})
+			writer.RecordOperationAuditLog(t.Context(), 92, "audit-event", "203.0.113.9", "test.action", map[string]any{"target_user_id": 90}, map[string]any{"private": "operator"}, map[string]any{"private": "audit"})
+			var storedEvents []usage.Log
+			require.NoError(t, logsDB.Where("content IN ?", []string{"consume-event", "error-event", "task-event", "audit-event"}).Find(&storedEvents).Error)
+			require.Len(t, storedEvents, 4)
+			events := make(map[string]usage.Log)
+			for _, event := range storedEvents {
+				events[event.Content] = event
+			}
+			assert.Equal(t, 123, events["consume-event"].Quota)
+			assert.Equal(t, "request-user", events["consume-event"].Username)
+			assert.Equal(t, "event-request", events["consume-event"].RequestId)
+			assert.Equal(t, "upstream-request", events["consume-event"].UpstreamRequestId)
+			assert.Equal(t, "203.0.113.7", events["consume-event"].Ip)
+			assert.Empty(t, events["error-event"].Ip)
+			assert.Equal(t, "resolved-token", events["task-event"].TokenName)
+			assert.Equal(t, "resolved-user", events["task-event"].Username)
+			assert.NotEmpty(t, events["task-event"].RequestId)
+			assert.Equal(t, 92, events["audit-event"].UserId)
+			require.Len(t, exports, 2)
+			assert.Equal(t, 9, exports[0].TokenUsed)
+			assert.Equal(t, "origin-node", exports[1].NodeName)
+			assert.Equal(t, "gold", exports[1].UseGroup)
+			assert.Equal(t, 47, exports[1].TokenID)
+			auditView, _, err := writer.GetUserLogs(t.Context(), 92, 0, 0, 0, "", "", 0, 10, "", "", "")
+			require.NoError(t, err)
+			require.Len(t, auditView, 1)
+			assert.Contains(t, auditView[0].Other, "test.action")
+			assert.NotContains(t, auditView[0].Other, "operator")
+			assert.NotContains(t, auditView[0].Other, `"audit_info"`)
+			common.LogConsumeEnabled = false
+			writer.RecordConsumeLog(t.Context(), request, 90, contract.RecordConsumeLogParams{Content: "disabled-event"})
+			var disabledCount int64
+			require.NoError(t, logsDB.Model(&usage.Log{}).Where("content = ?", "disabled-event").Count(&disabledCount).Error)
+			assert.Zero(t, disabledCount)
+			assert.Len(t, exports, 2)
 
 		})
 	}

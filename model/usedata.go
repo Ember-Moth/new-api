@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	usagecontract "github.com/QuantumNous/new-api/internal/module/usage/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
@@ -25,18 +27,7 @@ type QuotaData struct {
 	Quota     int    `json:"quota" gorm:"default:0"`
 }
 
-type QuotaDataLogParams struct {
-	UserID    int
-	Username  string
-	ModelName string
-	Quota     int
-	CreatedAt int64
-	TokenUsed int
-	UseGroup  string
-	TokenID   int
-	ChannelID int
-	NodeName  string
-}
+type QuotaDataLogParams = usagecontract.QuotaDataLogParams
 
 func UpdateQuotaData() {
 	for {

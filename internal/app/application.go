@@ -155,7 +155,7 @@ func Run(assets router.WebAssets) {
 	// (DB-lease dedup across masters + run history), then start the runner that
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
-	logService := usage.New(usage.Dependencies{DB: model.LOG_DB, Kind: common.LogDatabaseType(), ChannelNames: model.ChannelService().ChannelNames})
+	logService := usage.New(usage.Dependencies{DB: model.LOG_DB, Kind: common.LogDatabaseType(), ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
 	systemService := system.New(system.Dependencies{Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
 		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},

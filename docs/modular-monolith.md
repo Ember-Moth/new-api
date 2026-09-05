@@ -177,6 +177,12 @@ Passkey 登录通过应用注入的完成回调连接剩余登录传输层，并
 
 原 controller/log.go 已移除，model 日志查询与存储函数为剩余调用方提供适配。计费、任务结算和审计事件的组装仍留在原调用路径，后续继续按业务归属收拢。
 
+第二十三批将消费、错误、任务结算、登录、充值和管理审计日志的事件组装迁入 usage。核心写入接收 context 和明确的请求元数据，不再依赖 Gin；用户名、令牌名、IP 记录偏好及汇总输出由业务接口提供。
+
+消费与任务日志继续保留计费参数、请求/上游请求 ID 和发起节点；审计日志归属于操作者，目标用户留在操作参数中。IP 偏好控制仍在模块内执行，关闭消费日志时不写入也不输出汇总事件。汇总事件参数归模块契约，按小时聚合的具体实现留待下一步迁移。
+
+model/log.go 仅保留旧入口适配与业务依赖连接；元数据测试迁至 usage，剩余调用方将随各业务模块迁移继续消减。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -527,3 +533,20 @@ GOWORK=off go test ./internal/arch ./internal/module/usage/... ./model ./control
 在真实 PostgreSQL/ClickHouse 上验证相同时间戳的游标分页、游标身份绑定与篡改拒绝、字符串转义、用户 ID 统计隔离、请求 ID 补齐/保留、展示 ID、敏感元数据过滤和清理批次。原角色分层及大整数元数据回归随实现保留，系统日志清理任务继续通过。
 
 输出：`/tmp/new-api-usage-module-tests.log`、`/tmp/new-api-usage-module-full-tests.log`、`/tmp/new-api-usage-module-vet.log`、`/tmp/new-api-usage-module-startup.log`。
+
+## 第二十三批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归及第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test ./internal/arch ./internal/module/usage/... ./model ./controller ./service \
+  -run 'TestModular|TestLog|TestRecord|TestAudit|TestRelayError|TestTaskLog|TestQuotaData|TestLegacyLog' -count=1
+```
+
+真实 PostgreSQL/ClickHouse 验证消费、错误、任务和审计日志写入，覆盖 IP 偏好、请求 ID 保留、任务发起节点、汇总参数、审计所属用户和角色过滤，以及关闭消费日志后的存储/汇总行为。原计费日志回归继续通过。
+
+输出：`/tmp/new-api-usage-writers-tests.log`、`/tmp/new-api-usage-writers-full-tests.log`、`/tmp/new-api-usage-writers-vet.log`、`/tmp/new-api-usage-writers-startup.log`。
