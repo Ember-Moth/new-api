@@ -18,7 +18,7 @@ LOG_SQL_DSN=postgresql://user:password@postgres-host:5432/new-api-log
 # LOG_SQL_DSN=clickhouse://default:password@clickhouse-host:9000/new_api_logs
 ```
 
-The packaged Electron app reads `.env` from its application data directory and also accepts inherited environment variables. PostgreSQL data needs a separate backup; the application's local data directory does not contain the database.
+The backend reads `.env` from its working directory and also accepts environment variables. PostgreSQL data needs a separate backup; the application's local data directory does not contain the database.
 
 ## Development and tests
 
