@@ -17,9 +17,11 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	httpserver "github.com/QuantumNous/new-api/internal/transport/http/server"
+	tasktransport "github.com/QuantumNous/new-api/internal/transport/task"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
@@ -31,6 +33,8 @@ import (
 
 // Run assembles application services and owns their process lifecycle.
 func Run(assets router.WebAssets) {
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
 	startTime := time.Now()
 	kitutil.SetLogging(common.SysLog, func(message string) {
 		logger.LogError(nil, message)
@@ -102,7 +106,7 @@ func Run(assets router.WebAssets) {
 		if err != nil {
 			common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
 		}
-		go controller.AutomaticallyUpdateChannels(frequency)
+		go model.ChannelService().SyncBalances(runCtx, frequency)
 	}
 
 	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
@@ -132,6 +136,7 @@ func Run(assets router.WebAssets) {
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
+	tasktransport.RegisterChannelUpdates(model.ChannelService())
 	service.StartSystemTaskRunner()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
@@ -158,6 +163,13 @@ func Run(assets router.WebAssets) {
 			return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})
 		},
 		Audit: controller.RecordManageAudit,
+		EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {
+			task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
+			if err != nil {
+				return channelhttp.TaskSubmission{}, err
+			}
+			return channelhttp.TaskSubmission{TaskID: task.TaskID, Status: string(task.Status), Type: task.Type, Created: created}, nil
+		},
 	}})
 	if err != nil {
 		common.FatalLog("failed to configure HTTP server: " + err.Error())
@@ -186,6 +198,7 @@ func Run(assets router.WebAssets) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
+	cancelRun()
 	common.SysLog(fmt.Sprintf("received signal: %v, shutting down...", sig))
 
 	// SSE streams may run for minutes; give them time to finish before forced exit

@@ -18,8 +18,16 @@ type Handler struct {
 // Catalog handlers do not need these hooks; sensitive-field permission checks fail closed
 // when no authorization evaluator has been supplied.
 type ManagementHooks struct {
-	Can   func(userID, role int, resource, action string) bool
-	Audit func(*gin.Context, string, map[string]any)
+	Can                func(userID, role int, resource, action string) bool
+	Audit              func(*gin.Context, string, map[string]any)
+	EnqueueModelUpdate func() (TaskSubmission, error)
+}
+
+type TaskSubmission struct {
+	TaskID  string
+	Status  string
+	Type    string
+	Created bool
 }
 
 func New(service *channel.Service, hooks ManagementHooks) *Handler {

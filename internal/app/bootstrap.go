@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"github.com/QuantumNous/new-api/internal/app/channelprovider"
+
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
 	"github.com/QuantumNous/new-api/common"
@@ -47,6 +49,9 @@ func initResources() error {
 	}
 	channelDeps := model.ChannelDependencies()
 	channelDeps.Pricing = channelPricing{}
+	channelDeps.Providers = channelprovider.Adapter{}
+	channelDeps.DisableChannel = service.DisableChannel
+	channelDeps.NotifyModelUpdate = service.NotifyUpstreamModelUpdateWatchers
 	model.ConfigureChannelService(channel.New(channelDeps))
 	if err = authz.Init(model.DB); err != nil {
 		common.FatalLog("failed to initialize authorization: " + err.Error())

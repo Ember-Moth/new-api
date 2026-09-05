@@ -1,105 +1,37 @@
-package controller
+package channelhttp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
+
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/model"
-	relaychannel "github.com/QuantumNous/new-api/relay/channel"
-	"github.com/QuantumNous/new-api/relay/channel/ollama"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-type OpenAIModel struct {
-	ID         string         `json:"id"`
-	Object     string         `json:"object"`
-	Created    int64          `json:"created"`
-	OwnedBy    string         `json:"owned_by"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	Permission []struct {
-		ID                 string `json:"id"`
-		Object             string `json:"object"`
-		Created            int64  `json:"created"`
-		AllowCreateEngine  bool   `json:"allow_create_engine"`
-		AllowSampling      bool   `json:"allow_sampling"`
-		AllowLogprobs      bool   `json:"allow_logprobs"`
-		AllowSearchIndices bool   `json:"allow_search_indices"`
-		AllowView          bool   `json:"allow_view"`
-		AllowFineTuning    bool   `json:"allow_fine_tuning"`
-		Organization       string `json:"organization"`
-		Group              string `json:"group"`
-		IsBlocking         bool   `json:"is_blocking"`
-	} `json:"permission"`
-	Root   string `json:"root"`
-	Parent string `json:"parent"`
-}
-
-type OpenAIModelsResponse struct {
-	Data    []OpenAIModel `json:"data"`
-	Success bool          `json:"success"`
-}
-
-func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
-	var headers http.Header
-	switch channel.Type {
-	case constant.ChannelTypeAnthropic:
-		headers = GetClaudeAuthHeader(key)
-	default:
-		headers = GetAuthHeader(key)
-	}
-
-	if err := applyFetchModelsHeaderOverrides(channel, key, headers); err != nil {
-		return nil, err
-	}
-	return headers, nil
-}
-
-func applyFetchModelsHeaderOverrides(channel *model.Channel, key string, headers http.Header) error {
-	info := &relaycommon.RelayInfo{
-		IsChannelTest: true,
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiKey:          key,
-			HeadersOverride: channel.GetHeaderOverride(),
-		},
-	}
-	overrides, err := relaychannel.ResolveHeaderOverride(info, nil)
-	if err != nil {
-		return err
-	}
-	for name, value := range overrides {
-		headers.Set(name, value)
-	}
-
-	return nil
-}
-
-func FetchUpstreamModels(c *gin.Context) {
+func (h *Handler) FetchUpstreamModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	channel, err := model.GetChannelById(id, true)
+	channel, err := h.channel.GetChannelById(id, true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	ids, err := fetchChannelUpstreamModelIDs(channel)
+	ids, err := h.channel.FetchUpstreamModelIDs(c.Request.Context(), channel)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -115,7 +47,7 @@ func FetchUpstreamModels(c *gin.Context) {
 	})
 }
 
-func RefreshCodexChannelCredential(c *gin.Context) {
+func (h *Handler) RefreshCodexChannelCredential(c *gin.Context) {
 	channelId, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		common.ApiError(c, fmt.Errorf("invalid channel id: %w", err))
@@ -125,7 +57,7 @@ func RefreshCodexChannelCredential(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	oauthKey, ch, err := service.RefreshCodexChannelCredential(ctx, channelId, service.CodexCredentialRefreshOptions{ResetCaches: true})
+	result, err := h.channel.RefreshProviderCredential(ctx, channelId)
 	if err != nil {
 		common.SysError("failed to refresh codex channel credential: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "刷新凭证失败，请稍后重试"})
@@ -135,98 +67,12 @@ func RefreshCodexChannelCredential(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "refreshed",
-		"data": gin.H{
-			"expires_at":   oauthKey.Expired,
-			"last_refresh": oauthKey.LastRefresh,
-			"account_id":   oauthKey.AccountID,
-			"email":        oauthKey.Email,
-			"channel_id":   ch.Id,
-			"channel_type": ch.Type,
-			"channel_name": ch.Name,
-		},
+		"data":    result,
 	})
 }
 
-type fetchModelsRequest struct {
-	ChannelID      int     `json:"channel_id"`
-	BaseURL        *string `json:"base_url"`
-	Type           int     `json:"type"`
-	Key            string  `json:"key"`
-	AdvancedCustom *string `json:"advanced_custom"`
-	HeaderOverride *string `json:"header_override"`
-	Proxy          *string `json:"proxy"`
-}
-
-func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Channel, error) {
-	var channel *model.Channel
-	if req.ChannelID > 0 {
-		savedChannel, err := model.GetChannelById(req.ChannelID, true)
-		if err != nil {
-			return nil, err
-		}
-		if savedChannel.Type != constant.ChannelTypeAdvancedCustom {
-			return nil, fmt.Errorf("channel %d is not an advanced custom channel", req.ChannelID)
-		}
-		channel = savedChannel
-	} else {
-		key := strings.TrimSpace(req.Key)
-		if key != "" {
-			key = strings.Split(key, "\n")[0]
-		}
-		channel = &model.Channel{
-			Type: req.Type,
-			Key:  key,
-		}
-	}
-
-	if channel.Type != constant.ChannelTypeAdvancedCustom {
-		return nil, fmt.Errorf("channel type must be advanced custom")
-	}
-	if req.BaseURL != nil {
-		baseURL := strings.TrimSpace(*req.BaseURL)
-		channel.BaseURL = &baseURL
-	}
-
-	settings := channel.GetOtherSettings()
-	if req.AdvancedCustom != nil {
-		rawConfig := strings.TrimSpace(*req.AdvancedCustom)
-		if rawConfig == "" {
-			return nil, fmt.Errorf("advanced_custom is required")
-		}
-		var config dto.AdvancedCustomConfig
-		if err := common.UnmarshalJsonStr(rawConfig, &config); err != nil {
-			return nil, err
-		}
-		settings.AdvancedCustom = &config
-	} else if req.ChannelID <= 0 {
-		return nil, fmt.Errorf("advanced_custom is required")
-	}
-	channel.SetOtherSettings(settings)
-
-	if req.HeaderOverride != nil {
-		rawHeaderOverride := strings.TrimSpace(*req.HeaderOverride)
-		if rawHeaderOverride != "" {
-			var headerOverride map[string]any
-			if err := common.UnmarshalJsonStr(rawHeaderOverride, &headerOverride); err != nil {
-				return nil, fmt.Errorf("header_override must be a JSON object: %w", err)
-			}
-		}
-		channel.HeaderOverride = &rawHeaderOverride
-	}
-	if req.Proxy != nil {
-		channelSettings := channel.GetSetting()
-		channelSettings.Proxy = strings.TrimSpace(*req.Proxy)
-		channel.SetSetting(channelSettings)
-	}
-
-	if err := channelmodule.ValidateConfiguration(channel, false); err != nil {
-		return nil, err
-	}
-	return channel, nil
-}
-
-func FetchModels(c *gin.Context) {
-	var req fetchModelsRequest
+func (h *Handler) FetchModels(c *gin.Context) {
+	var req contract.ModelDiscoveryRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -236,10 +82,10 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	var channel *model.Channel
+	var channel *channelmodule.Channel
 	if req.Type == constant.ChannelTypeAdvancedCustom || req.ChannelID > 0 {
 		var err error
-		channel, err = buildAdvancedCustomModelPreviewChannel(req)
+		channel, err = h.channel.PreviewModelDiscovery(c.Request.Context(), req)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -260,14 +106,14 @@ func FetchModels(c *gin.Context) {
 		if req.Type != constant.ChannelTypeCodex {
 			key = strings.Split(key, "\n")[0]
 		}
-		channel = &model.Channel{
+		channel = &channelmodule.Channel{
 			Type:    req.Type,
 			Key:     key,
 			BaseURL: &baseURL,
 		}
 	}
 
-	models, err := fetchChannelUpstreamModelIDs(channel)
+	models, err := h.channel.FetchUpstreamModelIDs(c.Request.Context(), channel)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -283,7 +129,7 @@ func FetchModels(c *gin.Context) {
 }
 
 // OllamaPullModel 拉取 Ollama 模型
-func OllamaPullModel(c *gin.Context) {
+func (h *Handler) OllamaPullModel(c *gin.Context) {
 	var req struct {
 		ChannelID int    `json:"channel_id"`
 		ModelName string `json:"model_name"`
@@ -306,7 +152,7 @@ func OllamaPullModel(c *gin.Context) {
 	}
 
 	// 获取渠道信息
-	channel, err := model.GetChannelById(req.ChannelID, true)
+	channel, err := h.channel.GetChannelById(req.ChannelID, true)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -330,7 +176,7 @@ func OllamaPullModel(c *gin.Context) {
 	}
 
 	key := strings.Split(channel.Key, "\n")[0]
-	err = ollama.PullOllamaModel(baseURL, key, req.ModelName)
+	err = h.channel.PullProviderModel(c.Request.Context(), baseURL, key, req.ModelName, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -346,7 +192,7 @@ func OllamaPullModel(c *gin.Context) {
 }
 
 // OllamaPullModelStream 流式拉取 Ollama 模型
-func OllamaPullModelStream(c *gin.Context) {
+func (h *Handler) OllamaPullModelStream(c *gin.Context) {
 	var req struct {
 		ChannelID int    `json:"channel_id"`
 		ModelName string `json:"model_name"`
@@ -369,7 +215,7 @@ func OllamaPullModelStream(c *gin.Context) {
 	}
 
 	// 获取渠道信息
-	channel, err := model.GetChannelById(req.ChannelID, true)
+	channel, err := h.channel.GetChannelById(req.ChannelID, true)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -401,22 +247,21 @@ func OllamaPullModelStream(c *gin.Context) {
 	key := strings.Split(channel.Key, "\n")[0]
 
 	// 创建进度回调函数
-	progressCallback := func(progress ollama.OllamaPullResponse) {
-		data, _ := json.Marshal(progress)
+	progressCallback := func(data []byte) {
 		fmt.Fprintf(c.Writer, "data: %s\n\n", string(data))
 		c.Writer.Flush()
 	}
 
 	// 执行拉取
-	err = ollama.PullOllamaModelStream(baseURL, key, req.ModelName, progressCallback)
+	err = h.channel.PullProviderModel(c.Request.Context(), baseURL, key, req.ModelName, progressCallback)
 
 	if err != nil {
-		errorData, _ := json.Marshal(gin.H{
+		errorData, _ := common.Marshal(gin.H{
 			"error": err.Error(),
 		})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", string(errorData))
 	} else {
-		successData, _ := json.Marshal(gin.H{
+		successData, _ := common.Marshal(gin.H{
 			"message": fmt.Sprintf("Model %s pulled successfully", req.ModelName),
 		})
 		fmt.Fprintf(c.Writer, "data: %s\n\n", string(successData))
@@ -428,7 +273,7 @@ func OllamaPullModelStream(c *gin.Context) {
 }
 
 // OllamaDeleteModel 删除 Ollama 模型
-func OllamaDeleteModel(c *gin.Context) {
+func (h *Handler) OllamaDeleteModel(c *gin.Context) {
 	var req struct {
 		ChannelID int    `json:"channel_id"`
 		ModelName string `json:"model_name"`
@@ -451,7 +296,7 @@ func OllamaDeleteModel(c *gin.Context) {
 	}
 
 	// 获取渠道信息
-	channel, err := model.GetChannelById(req.ChannelID, true)
+	channel, err := h.channel.GetChannelById(req.ChannelID, true)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -475,7 +320,7 @@ func OllamaDeleteModel(c *gin.Context) {
 	}
 
 	key := strings.Split(channel.Key, "\n")[0]
-	err = ollama.DeleteOllamaModel(baseURL, key, req.ModelName)
+	err = h.channel.DeleteProviderModel(c.Request.Context(), baseURL, key, req.ModelName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -491,7 +336,7 @@ func OllamaDeleteModel(c *gin.Context) {
 }
 
 // OllamaVersion 获取 Ollama 服务版本信息
-func OllamaVersion(c *gin.Context) {
+func (h *Handler) OllamaVersion(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -501,7 +346,7 @@ func OllamaVersion(c *gin.Context) {
 		return
 	}
 
-	channel, err := model.GetChannelById(id, true)
+	channel, err := h.channel.GetChannelById(id, true)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -524,7 +369,7 @@ func OllamaVersion(c *gin.Context) {
 	}
 
 	key := strings.Split(channel.Key, "\n")[0]
-	version, err := ollama.FetchOllamaVersion(baseURL, key)
+	version, err := h.channel.ProviderVersion(c.Request.Context(), baseURL, key)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

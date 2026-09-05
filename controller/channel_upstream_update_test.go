@@ -2,11 +2,17 @@ package controller
 
 import (
 	"bytes"
-	"errors"
+	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
+
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
+
+	"github.com/QuantumNous/new-api/internal/app/channelprovider"
+	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
+	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -37,39 +43,6 @@ func newAdvancedCustomModelListChannel(baseURL string, key string, upstreamPath 
 	return channel
 }
 
-func TestParseOpenAIModelIDsStrictResponseContract(t *testing.T) {
-	tests := []struct {
-		name      string
-		body      string
-		want      []string
-		wantError string
-	}{
-		{name: "malformed JSON", body: `{"data":`, wantError: "invalid OpenAI Models response"},
-		{name: "missing data", body: `{"object":"list"}`, wantError: "data is required"},
-		{name: "null data", body: `{"data":null}`, wantError: "data is required"},
-		{name: "empty data", body: `{"data":[]}`, wantError: "no valid model IDs"},
-		{name: "all IDs empty", body: `{"data":[{"id":""},{"id":"   "}]}`, wantError: "no valid model IDs"},
-		{
-			name: "filters empty IDs and normalizes valid IDs",
-			body: `{"data":[{"id":" gpt-4.1 "},{"id":""},{"id":"gpt-4.1"},{"id":"o3"}]}`,
-			want: []string{"gpt-4.1", "o3"},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			models, err := parseOpenAIModelIDs([]byte(test.body))
-			if test.wantError != "" {
-				require.ErrorContains(t, err, test.wantError)
-				require.Nil(t, models)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, test.want, models)
-		})
-	}
-}
-
 func TestFetchAdvancedCustomModelsAppliesHeaderOverrideAfterRouteAuth(t *testing.T) {
 	type receivedRequest struct {
 		Headers http.Header
@@ -97,7 +70,7 @@ func TestFetchAdvancedCustomModelsAppliesHeaderOverrideAfterRouteAuth(t *testing
 	}`
 	channel.HeaderOverride = &headerOverride
 
-	models, err := fetchChannelUpstreamModelIDs(channel)
+	models, err := discoveryTestService().FetchUpstreamModelIDs(context.Background(), channel)
 	require.NoError(t, err)
 	require.Equal(t, []string{"gpt-4.1"}, models)
 
@@ -125,7 +98,7 @@ func TestFetchAdvancedCustomModelsUsesEnabledSavedMultiKey(t *testing.T) {
 		},
 	}
 
-	models, err := fetchChannelUpstreamModelIDs(channel)
+	models, err := discoveryTestService().FetchUpstreamModelIDs(context.Background(), channel)
 	require.NoError(t, err)
 	require.Equal(t, []string{"gpt-4.1-mini"}, models)
 	require.Equal(t, "Bearer enabled-key", <-authorization)
@@ -139,7 +112,7 @@ func TestFetchAdvancedCustomModelsRejectsNonOKResponse(t *testing.T) {
 	defer server.Close()
 
 	channel := newAdvancedCustomModelListChannel(server.URL, "secret-key", "/v1/models", nil)
-	models, err := fetchChannelUpstreamModelIDs(channel)
+	models, err := discoveryTestService().FetchUpstreamModelIDs(context.Background(), channel)
 	require.ErrorContains(t, err, "status code: 502")
 	require.Nil(t, models)
 }
@@ -156,27 +129,12 @@ func TestFetchAdvancedCustomModelsRedactsQueryKeyFromTransportErrors(t *testing.
 		Value: "prefix-{api_key}",
 	})
 
-	_, err := fetchChannelUpstreamModelIDs(channel)
+	_, err := discoveryTestService().FetchUpstreamModelIDs(context.Background(), channel)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), secret)
 	require.NotContains(t, err.Error(), "custom-token")
 	require.NotContains(t, err.Error(), "prefix-")
 
-	direct := sanitizeFetchModelsError(&url.Error{
-		Op:  http.MethodGet,
-		URL: baseURL + "/v1/models?custom-token=prefix-" + url.QueryEscape(secret),
-		Err: errors.New("connection refused"),
-	}, secret)
-	require.EqualError(t, direct, "connection refused")
-
-	queryValue := "prefix-" + secret
-	queryError := sanitizeAdvancedCustomRequestError(
-		errors.New("dial "+queryValue+": connection refused"),
-		queryValue,
-		baseURL+"/v1/models?custom-token="+url.QueryEscape(queryValue),
-	)
-	require.NotContains(t, queryError.Error(), queryValue)
-	require.EqualError(t, queryError, "dial [REDACTED]: connection refused")
 }
 
 func TestFetchOrdinaryOpenAIModelsKeepsExistingEmptyDataBehavior(t *testing.T) {
@@ -191,7 +149,7 @@ func TestFetchOrdinaryOpenAIModelsKeepsExistingEmptyDataBehavior(t *testing.T) {
 		Key:     "ordinary-key",
 		BaseURL: &baseURL,
 	}
-	models, err := fetchChannelUpstreamModelIDs(channel)
+	models, err := discoveryTestService().FetchUpstreamModelIDs(context.Background(), channel)
 	require.NoError(t, err)
 	require.Empty(t, models)
 }
@@ -228,6 +186,7 @@ func TestFetchModelsAdvancedCustomCreatePreview(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
+	model.ConfigureChannelService(discoveryTestService())
 	FetchModels(ctx)
 
 	var response struct {
@@ -265,7 +224,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 	savedChannel.SetSetting(dto.ChannelSettings{Proxy: "http://127.0.0.1:1"})
 	require.NoError(t, db.Create(savedChannel).Error)
 
-	preserved, err := buildAdvancedCustomModelPreviewChannel(fetchModelsRequest{ChannelID: savedChannel.Id})
+	preserved, err := discoveryTestService().PreviewModelDiscovery(t.Context(), fetchModelsRequest{ChannelID: savedChannel.Id})
 	require.NoError(t, err)
 	require.Equal(t, "http://127.0.0.1:1", preserved.GetBaseURL())
 	require.JSONEq(t, savedHeaderOverride, *preserved.HeaderOverride)
@@ -290,7 +249,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 		HeaderOverride: &explicitEmpty,
 		Proxy:          &explicitEmpty,
 	}
-	cleared, err := buildAdvancedCustomModelPreviewChannel(fetchModelsRequest{
+	cleared, err := discoveryTestService().PreviewModelDiscovery(t.Context(), fetchModelsRequest{
 		ChannelID:      savedChannel.Id,
 		BaseURL:        &explicitEmpty,
 		AdvancedCustom: &rawConfig,
@@ -311,6 +270,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
+	model.ConfigureChannelService(discoveryTestService())
 	FetchModels(ctx)
 
 	var response struct {
@@ -345,7 +305,7 @@ func TestFailedAdvancedCustomDetectionDoesNotStageFullRemoval(t *testing.T) {
 	channel.SetOtherSettings(settings)
 	require.NoError(t, db.Create(channel).Error)
 
-	modelsChanged, autoAdded, err := checkAndPersistChannelUpstreamModelUpdates(channel, &settings, true, true)
+	modelsChanged, autoAdded, err := discoveryTestService().CheckUpstreamModels(t.Context(), channel, &settings, true, true)
 	require.ErrorContains(t, err, "no valid model IDs")
 	require.False(t, modelsChanged)
 	require.Zero(t, autoAdded)
@@ -388,6 +348,7 @@ func TestFetchModelsUsesSharedChannelFetchBehavior(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
+	model.ConfigureChannelService(discoveryTestService())
 	FetchModels(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -411,180 +372,10 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 		BaseURL: &baseURL,
 	}
 
-	models, err := fetchChannelUpstreamModelIDs(channel)
+	models, err := discoveryTestService().FetchUpstreamModelIDs(context.Background(), channel)
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
-}
-
-func TestNormalizeModelNames(t *testing.T) {
-	result := normalizeModelNames([]string{
-		" gpt-4o ",
-		"",
-		"gpt-4o",
-		"gpt-4.1",
-		"   ",
-	})
-
-	require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, result)
-}
-
-func TestMergeModelNames(t *testing.T) {
-	result := mergeModelNames(
-		[]string{"gpt-4o", "gpt-4.1"},
-		[]string{"gpt-4.1", " gpt-4.1-mini ", "gpt-4o"},
-	)
-
-	require.Equal(t, []string{"gpt-4o", "gpt-4.1", "gpt-4.1-mini"}, result)
-}
-
-func TestSubtractModelNames(t *testing.T) {
-	result := subtractModelNames(
-		[]string{"gpt-4o", "gpt-4.1", "gpt-4.1-mini"},
-		[]string{"gpt-4.1", "not-exists"},
-	)
-
-	require.Equal(t, []string{"gpt-4o", "gpt-4.1-mini"}, result)
-}
-
-func TestIntersectModelNames(t *testing.T) {
-	result := intersectModelNames(
-		[]string{"gpt-4o", "gpt-4.1", "gpt-4.1", "not-exists"},
-		[]string{"gpt-4.1", "gpt-4o-mini", "gpt-4o"},
-	)
-
-	require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, result)
-}
-
-func TestApplySelectedModelChanges(t *testing.T) {
-	t.Run("add and remove together", func(t *testing.T) {
-		result := applySelectedModelChanges(
-			[]string{"gpt-4o", "gpt-4.1", "claude-3"},
-			[]string{"gpt-4.1-mini"},
-			[]string{"claude-3"},
-		)
-
-		require.Equal(t, []string{"gpt-4o", "gpt-4.1", "gpt-4.1-mini"}, result)
-	})
-
-	t.Run("add wins when conflict with remove", func(t *testing.T) {
-		result := applySelectedModelChanges(
-			[]string{"gpt-4o"},
-			[]string{"gpt-4.1"},
-			[]string{"gpt-4.1"},
-		)
-
-		require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, result)
-	})
-}
-
-func TestCollectPendingApplyUpstreamModelChanges(t *testing.T) {
-	settings := dto.ChannelOtherSettings{
-		UpstreamModelUpdateLastDetectedModels: []string{" gpt-4o ", "gpt-4o", "gpt-4.1"},
-		UpstreamModelUpdateLastRemovedModels:  []string{" old-model ", "", "old-model"},
-	}
-
-	pendingAddModels, pendingRemoveModels := collectPendingApplyUpstreamModelChanges(settings)
-
-	require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, pendingAddModels)
-	require.Equal(t, []string{"old-model"}, pendingRemoveModels)
-}
-
-func TestNormalizeChannelModelMapping(t *testing.T) {
-	modelMapping := `{
-		" alias-model ": " upstream-model ",
-		"": "invalid",
-		"invalid-target": ""
-	}`
-	channel := &model.Channel{
-		ModelMapping: &modelMapping,
-	}
-
-	result := normalizeChannelModelMapping(channel)
-	require.Equal(t, map[string]string{
-		"alias-model": "upstream-model",
-	}, result)
-}
-
-func TestCollectPendingUpstreamModelChangesFromModels_WithModelMapping(t *testing.T) {
-	pendingAddModels, pendingRemoveModels := collectPendingUpstreamModelChangesFromModels(
-		[]string{"alias-model", "gpt-4o", "stale-model"},
-		[]string{"gpt-4o", "gpt-4.1", "mapped-target"},
-		[]string{"gpt-4.1"},
-		map[string]string{
-			"alias-model": "mapped-target",
-		},
-	)
-
-	require.Equal(t, []string{}, pendingAddModels)
-	require.Equal(t, []string{"stale-model"}, pendingRemoveModels)
-}
-
-func TestCollectPendingUpstreamModelChangesFromModels_WithIgnoredRegexPatterns(t *testing.T) {
-	pendingAddModels, pendingRemoveModels := collectPendingUpstreamModelChangesFromModels(
-		[]string{"gpt-4o"},
-		[]string{"gpt-4o", "claude-3-5-sonnet", "sora-video", "gpt-4.1"},
-		[]string{"regex:^sora-.*$", "gpt-4.1"},
-		nil,
-	)
-
-	require.Equal(t, []string{"claude-3-5-sonnet"}, pendingAddModels)
-	require.Equal(t, []string{}, pendingRemoveModels)
-}
-
-func TestBuildUpstreamModelUpdateTaskNotificationContent_OmitOverflowDetails(t *testing.T) {
-	channelSummaries := make([]upstreamModelUpdateChannelSummary, 0, 12)
-	for i := 0; i < 12; i++ {
-		channelSummaries = append(channelSummaries, upstreamModelUpdateChannelSummary{
-			ChannelName: "channel-" + string(rune('A'+i)),
-			AddCount:    i + 1,
-			RemoveCount: i,
-		})
-	}
-
-	content := buildUpstreamModelUpdateTaskNotificationContent(
-		24,
-		12,
-		56,
-		21,
-		9,
-		[]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		channelSummaries,
-		[]string{
-			"gpt-4.1", "gpt-4.1-mini", "o3", "o4-mini", "gemini-2.5-pro", "claude-3.7-sonnet",
-			"qwen-max", "deepseek-r1", "llama-3.3-70b", "mistral-large", "command-r-plus", "doubao-pro-32k",
-			"hunyuan-large",
-		},
-		[]string{
-			"gpt-3.5-turbo", "claude-2.1", "gemini-1.5-pro", "mixtral-8x7b", "qwen-plus", "glm-4",
-			"yi-large", "moonshot-v1", "doubao-lite",
-		},
-	)
-
-	require.Contains(t, content, "其余 4 个渠道已省略")
-	require.Contains(t, content, "其余 1 个已省略")
-	require.Contains(t, content, "失败渠道 ID（展示 10/12）")
-	require.Contains(t, content, "其余 2 个已省略")
-}
-
-func TestShouldSendUpstreamModelUpdateNotification(t *testing.T) {
-	channelUpstreamModelUpdateNotifyState.Lock()
-	channelUpstreamModelUpdateNotifyState.lastNotifiedAt = 0
-	channelUpstreamModelUpdateNotifyState.lastChangedChannels = 0
-	channelUpstreamModelUpdateNotifyState.lastFailedChannels = 0
-	channelUpstreamModelUpdateNotifyState.Unlock()
-
-	baseTime := int64(2000000)
-
-	require.True(t, shouldSendUpstreamModelUpdateNotification(baseTime, 6, 0))
-	require.False(t, shouldSendUpstreamModelUpdateNotification(baseTime+3600, 6, 0))
-	require.True(t, shouldSendUpstreamModelUpdateNotification(baseTime+3600, 7, 0))
-	require.False(t, shouldSendUpstreamModelUpdateNotification(baseTime+7200, 7, 0))
-	require.True(t, shouldSendUpstreamModelUpdateNotification(baseTime+8000, 0, 3))
-	require.False(t, shouldSendUpstreamModelUpdateNotification(baseTime+9000, 0, 3))
-	require.True(t, shouldSendUpstreamModelUpdateNotification(baseTime+10000, 0, 4))
-	require.True(t, shouldSendUpstreamModelUpdateNotification(baseTime+90000, 7, 0))
-	require.True(t, shouldSendUpstreamModelUpdateNotification(baseTime+90001, 0, 0))
 }
 
 func TestDetectAllChannelUpstreamModelUpdatesRejectsExistingActiveTask(t *testing.T) {
@@ -598,9 +389,21 @@ func TestDetectAllChannelUpstreamModelUpdatesRejectsExistingActiveTask(t *testin
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/upstream-models/detect-all", nil)
 
-	DetectAllChannelUpstreamModelUpdates(ctx)
+	channelhttp.New(discoveryTestService(), channelhttp.ManagementHooks{EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {
+		task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
+		if err != nil {
+			return channelhttp.TaskSubmission{}, err
+		}
+		return channelhttp.TaskSubmission{TaskID: task.TaskID, Status: string(task.Status), Type: task.Type, Created: created}, nil
+	}}).DetectAllChannelUpstreamModelUpdates(ctx)
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 	require.Contains(t, recorder.Body.String(), existing.TaskID)
 	require.Contains(t, recorder.Body.String(), "已有模型更新任务正在运行或等待中")
+}
+
+func discoveryTestService() *channelmodule.Service {
+	deps := model.ChannelDependencies()
+	deps.Providers = channelprovider.Adapter{}
+	return channelmodule.New(deps)
 }

@@ -4,32 +4,46 @@ package channel
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/repo"
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/routing"
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/upstream"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"gorm.io/gorm"
 )
 
 type Service struct {
 	*routing.Runtime
-	prefillGroups *repo.PrefillGroups
-	catalog       *repo.Catalog
-	pricing       CatalogPricing
-	upstream      *upstream.Client
+	prefillGroups  *repo.PrefillGroups
+	catalog        *repo.Catalog
+	pricing        CatalogPricing
+	upstream       *upstream.Client
+	providers      ProviderRequests
+	disable        func(types.ChannelError, string)
+	notifyModels   func(string, string)
+	upstreamNotify struct {
+		sync.Mutex
+		lastNotifiedAt      int64
+		lastChangedChannels int
+		lastFailedChannels  int
+	}
 }
 
 type Dependencies struct {
-	DB             *gorm.DB
-	Pricing        CatalogPricing
-	RoutingChanged func()
-	QueueUsedQuota func(int, int) bool
+	DB                *gorm.DB
+	Pricing           CatalogPricing
+	RoutingChanged    func()
+	QueueUsedQuota    func(int, int) bool
+	Providers         ProviderRequests
+	DisableChannel    func(types.ChannelError, string)
+	NotifyModelUpdate func(string, string)
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{Runtime: routing.New(deps.DB, deps.RoutingChanged, deps.QueueUsedQuota), prefillGroups: repo.NewPrefillGroups(deps.DB), catalog: repo.NewCatalog(deps.DB), pricing: deps.Pricing, upstream: upstream.New()}
+	return &Service{Runtime: routing.New(deps.DB, deps.RoutingChanged, deps.QueueUsedQuota), prefillGroups: repo.NewPrefillGroups(deps.DB), catalog: repo.NewCatalog(deps.DB), pricing: deps.Pricing, upstream: upstream.New(), providers: deps.Providers, disable: deps.DisableChannel, notifyModels: deps.NotifyModelUpdate}
 }
 
 func (s *Service) ListPrefillGroups(ctx context.Context, groupType string) ([]*contract.PrefillGroup, error) {

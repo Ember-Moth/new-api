@@ -25,8 +25,9 @@ internal/app/  — Application composition, startup, and shutdown
 internal/transport/http/routes/ — HTTP route composition
 internal/transport/http/middleware/ — Shared inbound HTTP middleware
 internal/transport/http/server/ — HTTP server and dashboard delivery
+internal/transport/task/ — Background task adapters (channel model updates migrated)
 internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
-internal/module/channel/ — Channel management HTTP handlers, validation, entities/persistence, routing/cache/key state, catalog and upstream sync; provider-specific operations are still being migrated
+internal/module/channel/ — Channel management, provider operations, catalog/discovery, persistence and routing; health testing and remaining callers are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules
 controller/    — Request handlers awaiting migration to their modules

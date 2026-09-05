@@ -12,11 +12,13 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/app/channelprovider"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,7 +100,7 @@ func newChannelTestRouter(t *testing.T, pricing channel.CatalogPricing) (*gin.En
 	pool, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	service := channel.New(channel.Dependencies{DB: db, Pricing: pricing})
+	service := channel.New(channel.Dependencies{DB: db, Pricing: pricing, Providers: channelprovider.Adapter{}})
 	handler := channelhttp.New(service, channelhttp.ManagementHooks{})
 	router := gin.New()
 	router.GET("/groups", handler.GetPrefillGroups)
@@ -120,7 +122,58 @@ func newChannelTestRouter(t *testing.T, pricing channel.CatalogPricing) (*gin.En
 	router.POST("/models", handler.CreateModelMeta)
 	router.PUT("/models", handler.UpdateModelMeta)
 	router.DELETE("/models/:id", handler.DeleteModelMeta)
+	router.GET("/balance/:id", handler.UpdateChannelBalance)
 	return router, db, service
+}
+
+func TestAdvancedBalanceUsesProviderAdapterAndPreservesUnknownResponse(t *testing.T) {
+	var payload atomic.Value
+	payload.Store(`{"object":"credit_summary","total_available":7.25}`)
+	headers := make(chan http.Header, 2)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers <- r.Header.Clone()
+		_, _ = w.Write([]byte(payload.Load().(string)))
+	}))
+	defer upstream.Close()
+	router, db, service := newChannelTestRouter(t, nil)
+	entry := channel.Channel{Name: "balance", Type: constant.ChannelTypeAdvancedCustom, Key: "secret", BaseURL: &upstream.URL}
+	entry.SetOtherSettings(kitdto.ChannelOtherSettings{AdvancedCustom: &kitdto.AdvancedCustomConfig{Routes: []kitdto.AdvancedCustomRoute{{
+		IncomingPath: kitdto.AdvancedCustomBalancePath, UpstreamPath: "/credits", Converter: "none",
+		Auth: &kitdto.AdvancedCustomRouteAuth{Type: kitdto.AdvancedCustomAuthTypeHeader, Name: "X-Key", Value: "route-{api_key}"},
+	}}}})
+	overrides := `{"X-Key":"override-{api_key}"}`
+	entry.HeaderOverride = &overrides
+	require.NoError(t, service.InsertChannel(&entry))
+	path := "/balance/" + strconv.Itoa(entry.Id)
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success     bool    `json:"success"`
+		Balance     float64 `json:"balance"`
+		RawResponse string  `json:"raw_response"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	assert.Equal(t, 7.25, response.Balance)
+	assert.Equal(t, "override-secret", (<-headers).Get("X-Key"))
+	var stored channel.Channel
+	require.NoError(t, db.First(&stored, entry.Id).Error)
+	assert.Equal(t, 7.25, stored.Balance)
+	payload.Store(`{"credits":"unrecognized format"}`)
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	response = struct {
+		Success     bool    `json:"success"`
+		Balance     float64 `json:"balance"`
+		RawResponse string  `json:"raw_response"`
+	}{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	assert.JSONEq(t, payload.Load().(string), response.RawResponse)
+	require.NoError(t, db.First(&stored, entry.Id).Error)
+	assert.Equal(t, 7.25, stored.Balance, "unrecognized provider data must not replace the numeric balance")
 }
 
 type catalogPricingFixture struct {

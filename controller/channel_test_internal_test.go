@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	channelcontract "github.com/QuantumNous/new-api/internal/module/channel/contract"
+
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
@@ -525,3 +527,8 @@ func UpdateChannelStatus(c *gin.Context) { managementTestHandler().UpdateChannel
 type AddChannelRequest = channelhttp.AddChannelRequest
 
 type ChannelBatch = channelhttp.ChannelBatch
+
+type fetchModelsRequest = channelcontract.ModelDiscoveryRequest
+
+func FetchModels(c *gin.Context)         { managementTestHandler().FetchModels(c) }
+func FetchUpstreamModels(c *gin.Context) { managementTestHandler().FetchUpstreamModels(c) }

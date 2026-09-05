@@ -77,7 +77,13 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 第四批已迁移渠道 HTTP 管理流程：列表与搜索、增删改、复制、标签批处理、状态切换、密钥查看及多 Key 管理。handler 直接持有渠道服务，授权和审计由应用组装注入；新 handler 不再导入旧 model/service/controller，也不再构造数据库查询。分页、标签及类型统计使用模块查询接口，渠道配置校验由模块公开能力负责。
 
-现有权限/审计集成测试继续调用真实模块 handler；敏感字段分类测试已随实现迁移。原 controller 只保留尚未迁移的提供商专属探测、凭证刷新和 Ollama 操作等渠道功能。后续继续处理这些适配与后台渠道任务，并逐步移除桥接层。identity、gateway、billing、subscription、usage、system、配置及全局状态拆分均仍在完整目标内。按用户要求，工作在 `main` 上进行，每批完成验证后提交，不再创建分支。
+现有权限/审计集成测试继续调用真实模块 handler；敏感字段分类测试已随实现迁移。
+
+第五批已迁移提供商余额查询、模型列表探测与预览、凭证刷新入口、Ollama 管理接口、上游模型更新检测/应用及周期性余额刷新。模块通过 `ProviderRequests` 接收协议请求构造和供应商 SDK 集成，应用层提供 `channelprovider.Adapter`；通知和自动禁用通过明确回调协作。上游巡检的通知抑制状态归模块实例所有，数据库扫描与配置更新归模块仓储。
+
+上游模型巡检改由 `internal/transport/task` 注册并直接调用渠道服务；手动检测的入队与冲突响应由应用层连接现有任务框架。共享 OpenAI 账单响应类型归独立 RelayKit DTO。原 `controller/channel.go`、`channel-billing.go`、`channel_upstream_update.go` 已移除。
+
+后续继续处理渠道健康测试、亲和性和剩余跨模块调用，并逐步移除桥接层。identity、gateway、billing、subscription、usage、system、配置及全局状态拆分均仍在完整目标内。按用户要求，工作在 `main` 上进行，每批完成验证后提交，不再创建分支。
 
 ## 第一批验证（2026-09-05）
 
@@ -136,3 +142,11 @@ GOWORK=off make test
 ```
 
 构建与启动命令沿用第一批记录。输出为 `/tmp/new-api-channel-management-tests.log`、`/tmp/new-api-management-full-tests.log`、`/tmp/new-api-management-startup.log`。
+
+## 第五批验证（2026-09-05）
+
+使用 Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**，执行第四批的完整后端命令、主模块 build/vet、RelayKit 独立 build/vet/test 和第一批的全新数据库重复启动命令，均通过。
+
+回归覆盖：普通/高级自定义模型列表、请求头覆盖优先级、多 Key 选择、显式清空预览配置、URL/密钥脱敏、失败探测不生成全量删除、更新通知抑制、手动任务去重；新增真实协议适配器和 PostgreSQL 的余额测试，确认未识别的余额响应只返回原始 JSON、不覆盖已有数值。
+
+输出：`/tmp/new-api-channel-providers-tests.log`、`/tmp/new-api-channel-providers-full-tests.log`、`/tmp/new-api-channel-providers-startup.log`。
