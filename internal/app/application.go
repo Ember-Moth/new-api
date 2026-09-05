@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	httpserver "github.com/QuantumNous/new-api/internal/transport/http/server"
 	tasktransport "github.com/QuantumNous/new-api/internal/transport/task"
@@ -172,7 +173,7 @@ func Run(assets router.WebAssets) {
 		},
 	})
 	server, err := httpserver.New(assets, router.Dependencies{
-		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor},
+		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity},
 		Billing:       billingService,
 		BillingHooks:  billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		Subscription: subscription.New(subscription.Dependencies{
@@ -184,8 +185,10 @@ func Run(assets router.WebAssets) {
 			},
 			InvalidatePlan: model.InvalidateSubscriptionPlanCache,
 		}),
-		Identity: identity.New(identity.Dependencies{DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: userAuthorization{}, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
-		Channel:  model.ChannelService(),
+		Identity: identity.New(identity.Dependencies{VerifyEmail: func(email, code string) bool {
+			return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
+		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: userAuthorization{}, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
+		Channel: model.ChannelService(),
 		ChannelHooks: channelhttp.ManagementHooks{
 			Can: func(userID, role int, resource, action string) bool {
 				return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})

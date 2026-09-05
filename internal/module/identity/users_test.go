@@ -2,6 +2,7 @@ package identity_test
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -18,7 +19,10 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -65,12 +69,15 @@ func newUserFixture(t *testing.T) *userFixture {
 	t.Helper()
 	require.NoError(t, i18n.Init())
 	previousDB, previousLog := model.DB, model.LOG_DB
+	previousSecret := common.SessionSecret
+	common.SessionSecret = "identity-self-test-secret"
 	previousRedis, previousMaster, previousBatch := common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled
 	previousMain, previousLogs := common.MainDatabaseType(), common.LogDatabaseType()
 	common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = false, false, false
 	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLog
+		common.SessionSecret = previousSecret
 		common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = previousRedis, previousMaster, previousBatch
 		common.SetDatabaseTypes(previousMain, previousLogs)
 	})
@@ -88,10 +95,12 @@ func newUserFixture(t *testing.T) *userFixture {
 		Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
 	}})
 	f.service = identity.New(identity.Dependencies{
-		DB: db, UserAuthorization: f.authorization, UserWallet: wallet, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
+		VerifyEmail: func(email, code string) bool { return code == "valid" },
+		DB:          db, UserAuthorization: f.authorization, UserWallet: wallet, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
 		WelcomeQuota: func() int { return 250 }, WelcomeGrant: func(id, quota int) { assert.Equal(t, 250, quota); f.grants = append(f.grants, id) },
 		UserSecurity: identity.UserSecurity{
-			AdvanceVersion: model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
+			AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
+			AdvanceVersion:        model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
 			PublishDeletedVersion: model.PublishCommittedUserAuthVersion,
 			RevokeSessions: func(id int, reason string) error {
 				f.revocations = append(f.revocations, reason)
@@ -102,7 +111,7 @@ func newUserFixture(t *testing.T) *userFixture {
 			DeleteCredentials: model.DeleteUserAuthenticationData, ReleaseExternalBinding: model.ReleaseExternalIdentityWithTx,
 		},
 	})
-	h := identityhttp.New(f.service, identityhttp.ManagementHooks{Audit: func(c *gin.Context, id int, action string, params map[string]any) {
+	h := identityhttp.New(f.service, identityhttp.ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, Audit: func(c *gin.Context, id int, action string, params map[string]any) {
 		f.audits = append(f.audits, contract.UserAudit{TargetID: id, Action: action, Parameters: params})
 	}})
 	f.router.Use(func(c *gin.Context) {
@@ -111,6 +120,12 @@ func newUserFixture(t *testing.T) *userFixture {
 		c.Set("id", 9999)
 		c.Next()
 	})
+	selfRoutes := f.router.Group("/self", middleware.UserAuth())
+	selfRoutes.GET("", h.Self)
+	selfRoutes.PUT("", h.UpdateSelf)
+	selfRoutes.DELETE("", h.DeleteSelf)
+	selfRoutes.PUT("/notifications", h.UpdateNotificationSettings)
+	selfRoutes.POST("/email", h.BindEmail)
 	f.router.GET("/users", h.ListUsers)
 	f.router.GET("/users/search", h.SearchUsers)
 	f.router.GET("/users/:id", h.GetUser)
@@ -386,6 +401,225 @@ func userRequest(t *testing.T, f *userFixture, role int, method, path string, bo
 	request := httptest.NewRequest(method, path, strings.NewReader(string(data)))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Test-Role", strconv.Itoa(role))
+	recorder := httptest.NewRecorder()
+	f.router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var result tokenAPIResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &result))
+	return result
+}
+
+func TestSelfProfileUsesSafeProjectionAndRotatesOnlyCurrentSession(t *testing.T) {
+	f := newUserFixture(t)
+	user := seedManagedUser(t, f, "self-profile", common.RoleCommonUser)
+	password, err := common.Password2Hash("CurrentPassword123")
+	require.NoError(t, err)
+	require.NoError(t, f.db.Model(user).Updates(map[string]any{"password": password, "access_token": "personal-management-secret", "remark": "private-admin-remark"}).Error)
+	first, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "first-browser")
+	require.NoError(t, err)
+	second, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "second-browser")
+	require.NoError(t, err)
+	currentIdentity, err := service.ParseAccessToken(first.AccessToken)
+	require.NoError(t, err)
+	self := selfRequest(t, f, first.AccessToken, http.MethodGet, "/self", nil)
+	require.True(t, self.Success, self.Message)
+	assert.NotContains(t, string(self.Data), password)
+	assert.NotContains(t, string(self.Data), "personal-management-secret")
+	assert.NotContains(t, string(self.Data), "private-admin-remark")
+	var view contract.SelfUserResponse
+	require.NoError(t, common.Unmarshal(self.Data, &view))
+	assert.Equal(t, user.Id, view.Id)
+	assert.True(t, view.Permissions.SidebarSettings)
+	assert.Equal(t, false, view.Permissions.SidebarModules["admin"])
+	edited := selfRequest(t, f, first.AccessToken, http.MethodPut, "/self", map[string]any{
+		"id": 9999, "username": "self-renamed", "display_name": "Self", "role": common.RoleRootUser, "quota": 0, "used_quota": 999, "group": "vip", "remark": "injected", "password": "",
+	})
+	require.True(t, edited.Success, edited.Message)
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.Equal(t, "self-renamed", user.Username)
+	assert.Equal(t, common.RoleCommonUser, user.Role)
+	assert.Equal(t, "default", user.Group)
+	assert.Equal(t, 1000, user.Quota)
+	assert.Equal(t, 20, user.UsedQuota)
+	assert.Equal(t, "personal-management-secret", user.GetAccessToken())
+	assert.Equal(t, "private-admin-remark", user.Remark)
+	assert.Equal(t, password, user.Password)
+	assert.EqualValues(t, 1, user.AuthVersion)
+	input := contract.SelfUpdateRequest{ProfileInput: contract.ProfileInput{Password: "NewPassword123"}}
+	_, err = f.service.UpdateSelf(t.Context(), user.Id, input, &currentIdentity)
+	require.ErrorIs(t, err, identity.ErrOriginalPassword)
+	input.OriginalPassword = "CurrentPassword123"
+	_, err = f.service.UpdateSelf(t.Context(), user.Id, input, nil)
+	require.ErrorIs(t, err, identity.ErrSessionRequired)
+	passwordless := seedManagedUser(t, f, "self-passwordless", common.RoleCommonUser)
+	require.NoError(t, f.db.Model(passwordless).Update("password", "").Error)
+	_, err = f.service.UpdateSelf(t.Context(), passwordless.Id, input, nil)
+	require.ErrorIs(t, err, identity.ErrPasswordUnset)
+	changed := selfRequest(t, f, first.AccessToken, http.MethodPut, "/self", map[string]any{"password": "NewPassword123", "original_password": "CurrentPassword123"})
+	require.True(t, changed.Success, changed.Message)
+	var rotated contract.AuthBundle
+	require.NoError(t, common.Unmarshal(changed.Data, &rotated))
+	assert.Equal(t, first.Session.SID, rotated.Session.SID)
+	assert.True(t, rotated.Session.Current)
+	assert.NotEmpty(t, rotated.AccessToken)
+	assert.NotContains(t, string(changed.Data), "refresh_token")
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.True(t, common.ValidatePasswordAndHash("NewPassword123", user.Password))
+	assert.EqualValues(t, 2, user.AuthVersion)
+	oldIdentity, err := service.ParseAccessToken(first.AccessToken)
+	require.NoError(t, err)
+	_, _, err = service.ValidateLoginSession(oldIdentity)
+	require.Error(t, err)
+	replacement, err := service.ParseAccessToken(rotated.AccessToken)
+	require.NoError(t, err)
+	_, _, err = service.ValidateLoginSession(replacement)
+	require.NoError(t, err)
+	var other model.UserSession
+	require.NoError(t, f.db.First(&other, "sid = ?", second.Session.SID).Error)
+	assert.Equal(t, model.UserSessionStatusRevoked, other.Status)
+	assert.Equal(t, "password_changed", other.RevokedReason)
+	// A previously validated request cannot change the password after its session version is obsolete.
+	input.OriginalPassword = "NewPassword123"
+	input.Password = "AnotherPassword123"
+	_, err = f.service.UpdateSelf(t.Context(), user.Id, input, &currentIdentity)
+	require.ErrorIs(t, err, identity.ErrSessionRevoked)
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.EqualValues(t, 2, user.AuthVersion)
+	assert.True(t, common.ValidatePasswordAndHash("NewPassword123", user.Password))
+}
+
+func TestSelfPreferencesMergeOwnedFieldsAndPreservePrivilegeBoundaries(t *testing.T) {
+	f := newUserFixture(t)
+	user := seedManagedUser(t, f, "self-settings", common.RoleCommonUser)
+	user.SetSetting(dto.UserSetting{NotifyType: dto.NotifyTypeWebhook, QuotaWarningThreshold: 1, WebhookUrl: "https://example.test/old", WebhookSecret: "old-secret", Language: "zh", SidebarModules: `{"chat":true}`, BillingPreference: "subscription_first", UpstreamModelUpdateNotifyEnabled: true})
+	require.NoError(t, f.db.Model(user).Update("setting", user.Setting).Error)
+	login, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "settings-browser")
+	require.NoError(t, err)
+	ignored := selfRequest(t, f, login.AccessToken, http.MethodPut, "/self", map[string]any{"sidebar_modules": nil, "language": "ignored", "username": "ignored", "password": "ignored"})
+	require.True(t, ignored.Success, ignored.Message)
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.Equal(t, "zh", user.GetSetting().Language)
+	assert.Equal(t, "self-settings", user.Username)
+	threshold := contract.NotificationSettingsRequest{QuotaWarningType: dto.NotifyTypeEmail, QuotaWarningThreshold: 2, NotificationEmail: "alerts@example.test", UpstreamModelUpdateNotifyEnabled: common.GetPointer(false), RecordIpLog: true}
+	saved := selfRequest(t, f, login.AccessToken, http.MethodPut, "/self/notifications", threshold)
+	require.True(t, saved.Success, saved.Message)
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	settings := user.GetSetting()
+	assert.Equal(t, "zh", settings.Language)
+	assert.Equal(t, `{"chat":true}`, settings.SidebarModules)
+	assert.Equal(t, "subscription_first", settings.BillingPreference)
+	assert.True(t, settings.UpstreamModelUpdateNotifyEnabled)
+	assert.Equal(t, "alerts@example.test", settings.NotificationEmail)
+	assert.Empty(t, settings.WebhookUrl)
+	assert.Empty(t, settings.WebhookSecret)
+	assert.True(t, settings.RecordIpLog)
+	// Two independent settings edits must both survive regardless of transaction order.
+	start := make(chan struct{})
+	outcomes := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := f.service.UpdateSelf(t.Context(), user.Id, contract.SelfUpdateRequest{Preference: "language", PreferenceValue: common.GetPointer("en")}, nil)
+		outcomes <- err
+	}()
+	go func() {
+		<-start
+		outcomes <- f.service.UpdateNotificationSettings(t.Context(), user.Id, contract.NotificationSettingsRequest{QuotaWarningType: dto.NotifyTypeGotify, QuotaWarningThreshold: 3, GotifyUrl: "https://example.test", GotifyToken: "token", GotifyPriority: 99})
+	}()
+	close(start)
+	require.NoError(t, <-outcomes)
+	require.NoError(t, <-outcomes)
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	settings = user.GetSetting()
+	assert.Equal(t, "en", settings.Language)
+	assert.Equal(t, 3.0, settings.QuotaWarningThreshold)
+	assert.Equal(t, 5, settings.GotifyPriority)
+	assert.Equal(t, "subscription_first", settings.BillingPreference)
+	assert.Equal(t, `{"chat":true}`, settings.SidebarModules)
+	assert.EqualValues(t, 1, user.AuthVersion)
+	for _, request := range []contract.NotificationSettingsRequest{
+		{QuotaWarningType: "invalid", QuotaWarningThreshold: 1},
+		{QuotaWarningType: dto.NotifyTypeEmail, QuotaWarningThreshold: 0},
+		{QuotaWarningType: dto.NotifyTypeEmail, QuotaWarningThreshold: math.NaN()},
+		{QuotaWarningType: dto.NotifyTypeEmail, QuotaWarningThreshold: math.Inf(1)},
+		{QuotaWarningType: dto.NotifyTypeEmail, QuotaWarningThreshold: 1, NotificationEmail: "invalid"},
+		{QuotaWarningType: dto.NotifyTypeWebhook, QuotaWarningThreshold: 1, WebhookUrl: "invalid"},
+		{QuotaWarningType: dto.NotifyTypeBark, QuotaWarningThreshold: 1, BarkUrl: "ftp://example.test"},
+		{QuotaWarningType: dto.NotifyTypeGotify, QuotaWarningThreshold: 1, GotifyUrl: "https://example.test"},
+	} {
+		require.Error(t, f.service.UpdateNotificationSettings(t.Context(), user.Id, request))
+	}
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.Equal(t, settings, user.GetSetting())
+}
+
+func TestSelfPersonalTokenEmailAndDeletionRespectOwnership(t *testing.T) {
+	f := newUserFixture(t)
+	user := seedManagedUser(t, f, "self-account", common.RoleCommonUser)
+	before := *user
+	key, err := f.service.RotatePersonalAccessToken(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(key), 28)
+	assert.LessOrEqual(t, len(key), 32)
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.Equal(t, key, user.GetAccessToken())
+	assert.Equal(t, before.Quota, user.Quota)
+	assert.Equal(t, before.Role, user.Role)
+	assert.Equal(t, before.Password, user.Password)
+	assert.Equal(t, before.AuthVersion, user.AuthVersion)
+	next, err := f.service.RotatePersonalAccessToken(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.NotEqual(t, key, next)
+	previous, err := model.ValidateAccessToken(key)
+	require.NoError(t, err)
+	assert.Nil(t, previous)
+	authorized, err := model.ValidateAccessToken(next)
+	require.NoError(t, err)
+	require.NotNil(t, authorized)
+	assert.Equal(t, user.Id, authorized.Id)
+	require.Error(t, f.service.BindEmail(t.Context(), user.Id, contract.BindEmailRequest{Email: "bound@example.test", Code: "wrong"}))
+	require.NoError(t, f.service.BindEmail(t.Context(), user.Id, contract.BindEmailRequest{Email: " BOUND@Example.Test ", Code: "valid"}))
+	require.NoError(t, f.db.First(user, user.Id).Error)
+	assert.Equal(t, "bound@example.test", user.Email)
+	assert.Equal(t, before.Role, user.Role)
+	assert.Equal(t, before.Quota, user.Quota)
+	foreign := seedManagedUser(t, f, "self-foreign", common.RoleCommonUser)
+	require.Error(t, f.db.Model(foreign).Update("access_token", next).Error)
+	require.Error(t, f.service.BindEmail(t.Context(), foreign.Id, contract.BindEmailRequest{Email: "BOUND@EXAMPLE.TEST", Code: "valid"}))
+	require.NoError(t, f.db.First(foreign, foreign.Id).Error)
+	assert.Empty(t, foreign.Email)
+	// Affiliation code generation is limited to its own column and stays stable across reads.
+	require.NoError(t, f.db.Model(user).Update("aff_code", "").Error)
+	code, err := f.service.AffiliationCode(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.Len(t, code, 4)
+	again, err := f.service.AffiliationCode(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, code, again)
+	seedManagedSession(t, f, user, "self-delete-session")
+	require.NoError(t, f.service.DeleteSelf(t.Context(), user.Id))
+	var deleted model.User
+	require.NoError(t, f.db.Unscoped().First(&deleted, user.Id).Error)
+	assert.True(t, deleted.DeletedAt.Valid)
+	assert.EqualValues(t, 2, deleted.AuthVersion)
+	assert.Equal(t, []string{"user_deleted"}, f.revocations)
+	_, err = f.service.RotatePersonalAccessToken(t.Context(), user.Id)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	var revoked model.UserSession
+	require.NoError(t, f.db.First(&revoked, "sid = ?", "self-delete-session").Error)
+	assert.Equal(t, model.UserSessionStatusRevoked, revoked.Status)
+	root := seedManagedUser(t, f, "self-root", common.RoleRootUser)
+	require.Error(t, f.service.DeleteSelf(t.Context(), root.Id))
+	require.NoError(t, f.db.First(root, root.Id).Error)
+	assert.EqualValues(t, 1, root.AuthVersion)
+}
+
+func selfRequest(t *testing.T, f *userFixture, accessToken, method, path string, body any) tokenAPIResponse {
+	t.Helper()
+	data, err := common.Marshal(body)
+	require.NoError(t, err)
+	request := httptest.NewRequest(method, path, strings.NewReader(string(data)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
 	recorder := httptest.NewRecorder()
 	f.router.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	identitycontract "github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -32,14 +33,7 @@ var (
 	ErrProofMethod      = errors.New("security proof method mismatch")
 )
 
-// AuthIdentity is the server-validated identity attached to dashboard requests.
-// Role, status and group are deliberately loaded from the user cache instead of JWT claims.
-type AuthIdentity struct {
-	UserID          int
-	SessionID       string
-	UserAuthVersion int64
-	SessionVersion  int64
-}
+type AuthIdentity = identitycontract.AuthIdentity
 
 type authClaims struct {
 	TokenUse        string   `json:"token_use"`

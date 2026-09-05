@@ -13,7 +13,8 @@ import (
 )
 
 type ManagementHooks struct {
-	Audit func(*gin.Context, int, string, map[string]any)
+	SessionIdentity func(*gin.Context) (contract.AuthIdentity, bool)
+	Audit           func(*gin.Context, int, string, map[string]any)
 }
 
 func (h *Handler) ListUsers(c *gin.Context)   { h.listUsers(c, false) }
@@ -130,6 +131,14 @@ func (h *Handler) userMutation(c *gin.Context, result *contract.UserMutation, me
 }
 
 func userError(c *gin.Context, err error) {
+	if errors.Is(err, identity.ErrPasswordUnset) {
+		common.ApiErrorI18n(c, i18n.MsgUserPasswordUnset)
+		return
+	}
+	if errors.Is(err, identity.ErrOriginalPassword) {
+		common.ApiErrorI18n(c, i18n.MsgUserOriginalPasswordError)
+		return
+	}
 	var validation *identity.UserValidationError
 	if !errors.As(err, &validation) {
 		common.ApiError(c, err)
@@ -163,6 +172,40 @@ func userError(c *gin.Context, err error) {
 		key = i18n.MsgUserAlreadyCommon
 	case "quota_change_zero":
 		key = i18n.MsgUserQuotaChangeZero
+	case "generate_failed":
+		key = i18n.MsgGenerateFailed
+	case "uuid_duplicate":
+		key = i18n.MsgUuidDuplicate
+	case "invalid_input":
+		key = i18n.MsgInvalidInput
+	case "verification_code":
+		key = i18n.MsgUserVerificationCodeError
+	case "email_taken":
+		key = i18n.MsgUserEmailAlreadyTaken
+	case "update_failed":
+		key = i18n.MsgUpdateFailed
+	case "SettingInvalidType":
+		key = i18n.MsgSettingInvalidType
+	case "QuotaThresholdGtZero":
+		key = i18n.MsgQuotaThresholdGtZero
+	case "SettingWebhookEmpty":
+		key = i18n.MsgSettingWebhookEmpty
+	case "SettingWebhookInvalid":
+		key = i18n.MsgSettingWebhookInvalid
+	case "SettingEmailInvalid":
+		key = i18n.MsgSettingEmailInvalid
+	case "SettingBarkUrlEmpty":
+		key = i18n.MsgSettingBarkUrlEmpty
+	case "SettingBarkUrlInvalid":
+		key = i18n.MsgSettingBarkUrlInvalid
+	case "SettingUrlMustHttp":
+		key = i18n.MsgSettingUrlMustHttp
+	case "SettingGotifyUrlEmpty":
+		key = i18n.MsgSettingGotifyUrlEmpty
+	case "SettingGotifyTokenEmpty":
+		key = i18n.MsgSettingGotifyTokenEmpty
+	case "SettingGotifyUrlInvalid":
+		key = i18n.MsgSettingGotifyUrlInvalid
 	default:
 		common.ApiError(c, err)
 		return

@@ -120,3 +120,33 @@ func (r *Users) TokenKeys(userID int) ([]string, error) {
 	err := r.db.Unscoped().Model(&entity.Token{}).Where("user_id = ?", userID).Pluck(`"key"`, &keys).Error
 	return keys, err
 }
+
+func (r *Users) AccessTokenExists(ctx context.Context, token string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&entity.User{}).Where("access_token = ?", token).Count(&count).Error
+	return count > 0, err
+}
+func (r *Users) SetAccessToken(ctx context.Context, id int, token string) error {
+	result := r.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Update("access_token", token)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+func (r *Users) LockEmail(email string) error {
+	if email == "" {
+		return nil
+	}
+	return r.db.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", email).Error
+}
+func (r *Users) EmailTaken(email string, exceptID int) (bool, error) {
+	if email == "" {
+		return false, nil
+	}
+	var count int64
+	err := r.db.Unscoped().Model(&entity.User{}).Where("LOWER(email) = ? AND id <> ?", email, exceptID).Count(&count).Error
+	return count > 0, err
+}

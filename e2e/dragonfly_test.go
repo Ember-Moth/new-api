@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -224,6 +225,49 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.Error(t, err)
 		_, err = model.GetUserSessionCached(session.SID)
 		require.Error(t, err)
+	})
+
+	t.Run("self password rotation preserves the current cached session", func(t *testing.T) {
+		previousSecret := common.SessionSecret
+		common.SessionSecret = "dragonfly-self-password-secret"
+		t.Cleanup(func() { common.SessionSecret = previousSecret })
+		password, err := common.Password2Hash("CurrentPassword123")
+		require.NoError(t, err)
+		user := model.User{Username: "dragonfly-self", AffCode: "dragonfly-self", Password: password, Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 100, Setting: `{"language":"zh","billing_preference":"subscription_first","sidebar_modules":"saved"}`}
+		require.NoError(t, database.Create(&user).Error)
+		first, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "first-browser")
+		require.NoError(t, err)
+		second, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "second-browser")
+		require.NoError(t, err)
+		_, err = model.GetUserSessionCached(first.Session.SID)
+		require.NoError(t, err)
+		_, err = model.GetUserSessionCached(second.Session.SID)
+		require.NoError(t, err)
+		identityBefore, err := service.ParseAccessToken(first.AccessToken)
+		require.NoError(t, err)
+		management := identity.New(identity.Dependencies{DB: database, UserSecurity: identity.UserSecurity{
+			AdvanceVersion: model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
+			AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
+		}})
+		bundle, err := management.UpdateSelf(t.Context(), user.Id, contract.SelfUpdateRequest{ProfileInput: contract.ProfileInput{Password: "NewPassword123", OriginalPassword: "CurrentPassword123"}}, &identityBefore)
+		require.NoError(t, err)
+		assert.Equal(t, first.Session.SID, bundle.Session.SID)
+		_, _, err = service.ValidateLoginSession(identityBefore)
+		require.Error(t, err)
+		identityAfter, err := service.ParseAccessToken(bundle.AccessToken)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(identityAfter)
+		require.NoError(t, err)
+		_, err = model.GetUserSessionCached(second.Session.SID)
+		require.ErrorIs(t, err, model.ErrUserSessionInactive)
+		require.NoError(t, management.UpdateNotificationSettings(t.Context(), user.Id, contract.NotificationSettingsRequest{QuotaWarningType: "email", QuotaWarningThreshold: 2, NotificationEmail: "alerts@example.test"}))
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 100, cached.Quota)
+		assert.EqualValues(t, 2, cached.AuthVersion)
+		assert.Contains(t, cached.Setting, `"language":"zh"`)
+		assert.Contains(t, cached.Setting, `"billing_preference":"subscription_first"`)
+		assert.Contains(t, cached.Setting, `"notification_email":"alerts@example.test"`)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

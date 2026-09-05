@@ -747,7 +747,7 @@ CREATE TABLE users (
     oidc_id text,
     wechat_id text,
     telegram_id text,
-    access_token character(32),
+    access_token character varying(32),
     quota bigint DEFAULT 0,
     used_quota bigint DEFAULT 0,
     request_count bigint DEFAULT 0,

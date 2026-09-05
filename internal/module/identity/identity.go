@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 
+	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/repo"
 	"gorm.io/gorm"
@@ -23,6 +24,7 @@ type TokenPolicy struct {
 }
 
 type UserSecurity struct {
+	AdvanceCurrentSession  func(contract.AuthIdentity, string) (*contract.AuthBundle, error)
 	AdvanceVersion         func(*gorm.DB, int) (int64, error)
 	PublishAuth            func(int) error
 	PublishDeletedVersion  func(int, int64) error
@@ -45,6 +47,7 @@ type UserWallet interface {
 }
 
 type Dependencies struct {
+	VerifyEmail          func(string, string) bool
 	UserSecurity         UserSecurity
 	UserAuthorization    UserAuthorization
 	UserWallet           UserWallet
@@ -57,6 +60,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	verifyEmail       func(string, string) bool
 	users             *repo.Users
 	userSecurity      UserSecurity
 	userAuthorization UserAuthorization
@@ -71,7 +75,8 @@ type Service struct {
 
 func New(deps Dependencies) *Service {
 	return &Service{
-		users: repo.NewUsers(deps.DB), userSecurity: deps.UserSecurity, userAuthorization: deps.UserAuthorization,
+		verifyEmail: deps.VerifyEmail,
+		users:       repo.NewUsers(deps.DB), userSecurity: deps.UserSecurity, userAuthorization: deps.UserAuthorization,
 		userWallet: deps.UserWallet, welcomeQuota: deps.WelcomeQuota, welcomeGrant: deps.WelcomeGrant,
 		tokens:      repo.NewTokens(deps.DB, deps.InvalidateTokenCache),
 		tokenPolicy: deps.TokenPolicy,

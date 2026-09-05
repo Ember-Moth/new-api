@@ -51,7 +51,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
-按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已完成 identity 的 OAuth 提供商配置、令牌和管理员用户管理、subscription 的套餐配置和 billing 的兑换码管理，后续继续自助账户、安全凭据和系统管理等控制面功能。整体模块化目标不变。
+按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已完成 identity 的 OAuth 提供商配置、令牌和管理员用户管理、subscription 的套餐配置和 billing 的兑换码管理，自助账户管理也已迁入 identity；后续继续安全凭据和系统管理等控制面功能。整体模块化目标不变。
 
 已完成的第一批改动：
 
@@ -106,6 +106,14 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 认证版本推进、缓存发布、会话撤销和凭据清理通过显式安全运行时端口协作，保留事务前屏障与提交后失效顺序。硬删除在同一事务清理认证数据，降权清除权限并只调用一次会话撤销。创建用户时默认侧栏配置进入初始事务；管理响应显式投影，避免返回密码散列和个人访问令牌。根 model.User 暂保留对模块实体的命名视图及尚未迁移的登录/注册/记账方法。
 
 管理员钱包命令归 billing；加减仍通过现有账务运行时端口，绝对覆盖由模块仓储锁定旧余额后更新，提供准确的审计起始金额。减额度也校验钱包上限，防止越界参数进入记账。缓存、会话、外部身份和权限运行时的过渡端口仍待后续移入对应模块，不能据此认为 identity 或 billing 已完整迁移。
+
+第十一批将自助资料、语言/侧栏偏好、通知设置、个人访问令牌轮换、邀请码读取、邮箱绑定和注销迁入 identity。登录、刷新及 self 共用模块的安全响应契约，认证身份和会话响应类型由模块拥有，尚未迁移的 service 保留类型别名。
+
+改密在锁定用户后核对当前密码与请求认证版本；事务内推进认证版本，提交后发布缓存并推进当前会话，其他会话失效。个人信息更新只写允许的字段，邮箱绑定沿用规范化邮箱的事务级锁与唯一性检查；账户注销保护 root 用户并撤销会话。
+
+设置更新按所属字段合并：通知保存不再清空语言、侧栏或扣费偏好；语言和通知并发更新通过行锁保留彼此结果。非管理员无法覆盖上游模型通知开关，切换通知方式会清除不再使用的凭据。
+
+新部署 schema 的个人访问令牌列改为 `VARCHAR(32)`，与生成器实际输出的 28/32 位长度匹配，避免 `CHAR(32)` 补空格；唯一约束保留。没有添加历史数据兼容路径。
 
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
@@ -250,3 +258,22 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1
 原用户目录/管理测试合并至 identity 的 SQL 集成测试，覆盖排序后分页、软删除筛选、脱敏、角色边界、权限失败回滚、密码保留/更改、会话只撤销一次、删除失败回滚、认证数据清理、绑定声明释放和钱包上限。真实 DragonflyDB 覆盖预热会话与 API 令牌后禁用立即阻断访问、认证版本只增一次、硬删除使缓存读取失效。
 
 输出：`/tmp/new-api-user-crud-tests.log`、`/tmp/new-api-user-crud-dragonfly.log`、`/tmp/new-api-user-crud-initial-tests.log`、`/tmp/new-api-user-crud-full-tests.log`、`/tmp/new-api-user-crud-vet.log`、`/tmp/new-api-user-crud-startup.log`。
+
+## 第十一批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归，以及第一批三种日志配置的新库初始化和两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./controller ./service ./model \
+  -run 'TestModular|TestSelf|TestUser|TestSetupLogin|TestRefresh|TestAdvanceCurrent|TestUpdateUserAccessToken' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonfly -count=1
+```
+
+在 SQL 迁移初始化两次的独立 schema 中验证：真实认证中间件下的 self 脱敏和字段白名单、原密码校验、无密码账户保护、过期认证版本拒绝、当前会话续签及其他会话撤销、设置并发合并、通知校验、个人令牌原样读取/轮换/唯一约束、邮箱规范化与冲突、邀请码稳定性和注销。DragonflyDB 覆盖预热缓存后的改密会话转换及通知更新保留额度和其他偏好。
+
+输出：`/tmp/new-api-self-crud-tests.log`、`/tmp/new-api-self-crud-dragonfly.log`、`/tmp/new-api-self-crud-full-tests.log`、`/tmp/new-api-self-crud-vet.log`、`/tmp/new-api-self-crud-startup.log`。

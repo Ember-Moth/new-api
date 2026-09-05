@@ -56,6 +56,7 @@ func (userAuthorization) Reload() error { return authz.ReloadPolicy() }
 
 func userSecurity() identity.UserSecurity {
 	return identity.UserSecurity{
+		AdvanceCurrentSession:  service.AdvanceCurrentSessionToUserVersion,
 		AdvanceVersion:         model.IncrementUserAuthVersionWithTx,
 		PublishAuth:            model.PublishUserAuthCache,
 		PublishDeletedVersion:  model.PublishCommittedUserAuthVersion,
