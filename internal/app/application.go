@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	"github.com/QuantumNous/new-api/internal/module/identity"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	httpserver "github.com/QuantumNous/new-api/internal/transport/http/server"
 	tasktransport "github.com/QuantumNous/new-api/internal/transport/task"
@@ -158,7 +159,7 @@ func Run(assets router.WebAssets) {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
 
-	server, err := httpserver.New(assets, router.Dependencies{Channel: model.ChannelService(), ChannelHooks: channelhttp.ManagementHooks{
+	server, err := httpserver.New(assets, router.Dependencies{Identity: identity.New(identity.Dependencies{DB: model.DB, Providers: providerRegistry{}}), Channel: model.ChannelService(), ChannelHooks: channelhttp.ManagementHooks{
 		Can: func(userID, role int, resource, action string) bool {
 			return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})
 		},

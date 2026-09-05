@@ -51,6 +51,8 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
+按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已开始 identity 的 OAuth 提供商配置管理，后续继续套餐、兑换码、用户/令牌和系统管理等控制面功能。整体模块化目标不变。
+
 已完成的第一批改动：
 
 - 程序入口迁移到 `cmd/new-api`；`internal/app` 组装资源并管理服务启动/关闭，HTTP 服务构建与分析脚本注入归 `internal/transport/http/server`。
@@ -83,7 +85,9 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 上游模型巡检改由 `internal/transport/task` 注册并直接调用渠道服务；手动检测的入队与冲突响应由应用层连接现有任务框架。共享 OpenAI 账单响应类型归独立 RelayKit DTO。原 `controller/channel.go`、`channel-billing.go`、`channel_upstream_update.go` 已移除。
 
-后续继续处理渠道健康测试、亲和性和剩余跨模块调用，并逐步移除桥接层。identity、gateway、billing、subscription、usage、system、配置及全局状态拆分均仍在完整目标内。按用户要求，工作在 `main` 上进行，每批完成验证后提交，不再创建分支。
+第六批按控制面优先顺序，迁移 OAuth 提供商配置的列表、详情、创建、更新、删除与 Discovery 配置读取。identity 模块拥有请求/响应契约、配置校验、实体及私有仓储，注册表更新通过应用层注入。管理响应不包含 client_secret，空密钥更新保留已有密钥，显式空值及禁用状态继续生效；Slug 归一化后检查唯一性和内置提供商冲突，有绑定的提供商拒绝删除，写库失败不会更新注册表。
+
+认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
 
@@ -150,3 +154,11 @@ GOWORK=off make test
 回归覆盖：普通/高级自定义模型列表、请求头覆盖优先级、多 Key 选择、显式清空预览配置、URL/密钥脱敏、失败探测不生成全量删除、更新通知抑制、手动任务去重；新增真实协议适配器和 PostgreSQL 的余额测试，确认未识别的余额响应只返回原始 JSON、不覆盖已有数值。
 
 输出：`/tmp/new-api-channel-providers-tests.log`、`/tmp/new-api-channel-providers-full-tests.log`、`/tmp/new-api-channel-providers-startup.log`。
+
+## 第六批验证（2026-09-05）
+
+使用 Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。执行第四批的完整后端命令、主模块 build/vet、RelayKit 独立 build/vet，以及第一批的新库与重复启动验证。
+
+OAuth CRUD 专项测试使用 SQL 迁移初始化的独立 schema，覆盖密钥隐藏与保留、可选字段清空、Slug/内置名称冲突、访问策略校验、绑定删除保护以及注入写入失败后的数据库/注册表一致性。
+
+输出：`/tmp/new-api-control-crud-tests.log`、`/tmp/new-api-control-crud-full-tests.log`、`/tmp/new-api-control-crud-startup.log`。

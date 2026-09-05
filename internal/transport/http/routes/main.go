@@ -9,12 +9,14 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Dependencies struct {
+	Identity     *identity.Service
 	Channel      *channel.Service
 	ChannelHooks channelhttp.ManagementHooks
 }

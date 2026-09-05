@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/QuantumNous/new-api/controller"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/service/authz"
 
@@ -15,6 +16,7 @@ import (
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
 	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
+	identityHandler := identityhttp.New(deps.Identity)
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
@@ -212,12 +214,12 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())
 		{
-			customOAuthRoute.POST("/discovery", controller.FetchCustomOAuthDiscovery)
-			customOAuthRoute.GET("/", controller.GetCustomOAuthProviders)
-			customOAuthRoute.GET("/:id", controller.GetCustomOAuthProvider)
-			customOAuthRoute.POST("/", controller.CreateCustomOAuthProvider)
-			customOAuthRoute.PUT("/:id", controller.UpdateCustomOAuthProvider)
-			customOAuthRoute.DELETE("/:id", controller.DeleteCustomOAuthProvider)
+			customOAuthRoute.POST("/discovery", identityHandler.DiscoverProvider)
+			customOAuthRoute.GET("/", identityHandler.ListProviders)
+			customOAuthRoute.GET("/:id", identityHandler.GetProvider)
+			customOAuthRoute.POST("/", identityHandler.CreateProvider)
+			customOAuthRoute.PUT("/:id", identityHandler.UpdateProvider)
+			customOAuthRoute.DELETE("/:id", identityHandler.DeleteProvider)
 		}
 		performanceRoute := apiRouter.Group("/performance")
 		performanceRoute.Use(middleware.RootAuth())
