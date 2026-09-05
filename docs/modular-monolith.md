@@ -161,6 +161,12 @@ Passkey 登录通过应用注入的完成回调连接剩余登录传输层，并
 
 旧 service/auth_token.go 只保留调用适配；service/auth_session.go 保留存储接口适配与 Cookie 输出。底层 model/user_session.go 和用户缓存仍是后续迁移项，这些过渡依赖不能视为身份模块完成。
 
+第二十批将会话创建、查询、刷新轮换、认证版本推进、撤销、清理及缓存脚本迁入 identity 的私有 sessions 实现。认证编排直接持有会话仓储，删除了上一批逐个注入会话操作的适配接口；model/user_session.go 仅保留旧调用方的转发。
+
+保留短缓存窗口、绝对回填截止时间、撤销墓碑、刷新重用检测和分批清理语义。原会话存储测试随实现迁入模块并改用正式 SQL 初始化的隔离 schema；其中用户资料/密码更新相关测试归回既有 user_update 测试，避免依赖错误层级。
+
+会话仓储已不依赖旧 model/service。共享缓存客户端配置、用户缓存和剩余登录传输适配仍待后续消减，整体身份模块尚未完成。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -459,3 +465,19 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1
 保留 JWT 篡改、用途隔离、安全证明范围及认证身份绑定测试，新增真实认证中间件下的会话列表、刷新 Cookie、安全响应、撤销其他会话和退出流程。DragonflyDB 验证刷新令牌轮换、并发窗口中恢复同一后继令牌及退出后的访问拒绝。
 
 输出：`/tmp/new-api-auth-runtime-tests.log`、`/tmp/new-api-auth-runtime-dragonfly.log`、`/tmp/new-api-auth-runtime-full-tests.log`、`/tmp/new-api-auth-runtime-vet.log`、`/tmp/new-api-auth-runtime-startup.log`。
+
+## 第二十批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归和第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./model ./controller ./service \
+  -run 'TestModular|TestUserSession|TestRotateUserSession|TestRevoke|TestCleanup|TestLoginSession|TestSession|TestAuth|TestUserBase|TestUserUpdate|TestPasswordReset' -count=1
+```
+
+验证短 TTL、延迟回填不能恢复已撤销会话、数据库失败下的撤销边界、刷新竞争/重用、会话列表限制、分批撤销、到期与审计保留期清理，以及密码变更后的失效。完整回归中的真实 DragonflyDB 场景继续覆盖会话刷新、撤销和安全配置变更。
+
+输出：`/tmp/new-api-session-store-tests.log`、`/tmp/new-api-session-store-full-tests.log`、`/tmp/new-api-session-store-vet.log`、`/tmp/new-api-session-store-startup.log`。

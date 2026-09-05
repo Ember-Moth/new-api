@@ -1,4 +1,4 @@
-package model
+package sessions
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
@@ -41,10 +43,14 @@ func (setMiniRedisTimeOnEvalHook) AfterProcessPipeline(context.Context, []redis.
 	return nil
 }
 
-func setupUserSessionTest(t *testing.T) {
+func setupUserSessionTest(t *testing.T) *Store {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&User{}, &UserSession{}))
-	require.NoError(t, DB.Exec("DELETE FROM user_sessions").Error)
+	db, err := testdb.Open(t, &gorm.Config{})
+	require.NoError(t, err)
+	pool, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool, schema.Main))
 	oldRedisEnabled := common.RedisEnabled
 	oldActiveLimit := common.UserSessionActiveLimit
 	oldIssuanceLimit := common.UserSessionIssuanceLimit
@@ -62,9 +68,10 @@ func setupUserSessionTest(t *testing.T) {
 		common.UserSessionIssuanceWindowSeconds = oldIssuanceWindow
 		common.UserSessionRevokedRetentionDays = oldRevokedRetention
 	})
+	return New(db)
 }
 
-func createUserSessionTestUser(t *testing.T, userID int, authVersion int64) {
+func createUserSessionTestUser(t *testing.T, store *Store, userID int, authVersion int64) {
 	t.Helper()
 	user := User{
 		Id:          userID,
@@ -76,8 +83,8 @@ func createUserSessionTestUser(t *testing.T, userID int, authVersion int64) {
 		AffCode:     fmt.Sprintf("session-aff-%d", userID),
 		AuthVersion: authVersion,
 	}
-	require.NoError(t, DB.Create(&user).Error)
-	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, userID).Error })
+	require.NoError(t, store.db.Create(&user).Error)
+	t.Cleanup(func() { _ = store.db.Unscoped().Delete(&User{}, userID).Error })
 }
 
 func newTestUserSession(sid string, userID int, now int64) *UserSession {
@@ -98,8 +105,8 @@ func newTestUserSession(sid string, userID int, now int64) *UserSession {
 }
 
 func TestUserSessionCacheTTLUsesShortCacheWindow(t *testing.T) {
-	setupUserSessionTest(t)
-	server := useUserCacheMiniRedis(t)
+	store := setupUserSessionTest(t)
+	server := useSessionMiniRedis(t)
 	now := time.Now().Unix()
 	tests := []struct {
 		name       string
@@ -115,7 +122,7 @@ func TestUserSessionCacheTTLUsesShortCacheWindow(t *testing.T) {
 
 	for index, test := range tests {
 		sid := fmt.Sprintf("short-cache-ttl-%d", index)
-		entry := newTestUserSession(sid, 1100+index, now).cacheEntry()
+		entry := sessionCacheEntry(newTestUserSession(sid, 1100+index, now))
 		entry.Status = test.status
 		entry.ExpiresAt = test.expiresAt
 		if test.status != UserSessionStatusActive {
@@ -126,7 +133,7 @@ func TestUserSessionCacheTTLUsesShortCacheWindow(t *testing.T) {
 		if test.status == UserSessionStatusActive {
 			cacheDeadline = userSessionCacheDeadline()
 		}
-		require.NoError(t, writeUserSessionCache(entry, cacheDeadline), test.name)
+		require.NoError(t, store.writeUserSessionCache(entry, cacheDeadline), test.name)
 		ttl := server.TTL(userSessionCacheKey(sid))
 		assert.Positive(t, ttl, test.name)
 		assert.LessOrEqual(t, ttl, test.wantMaxTTL, test.name)
@@ -134,156 +141,156 @@ func TestUserSessionCacheTTLUsesShortCacheWindow(t *testing.T) {
 
 	initialTTL := server.TTL(userSessionCacheKey("short-cache-ttl-0"))
 	server.FastForward(time.Second)
-	_, err := getUserSessionCache("short-cache-ttl-0")
+	_, err := store.getUserSessionCache("short-cache-ttl-0")
 	require.NoError(t, err)
 	remainingTTL := server.TTL(userSessionCacheKey("short-cache-ttl-0"))
 	assert.Positive(t, remainingTTL)
 	assert.LessOrEqual(t, remainingTTL, initialTTL-time.Second, "cache reads must not renew the bounded TTL")
 
 	common.SyncFrequency = 10
-	nearExpiry := newTestUserSession("short-cache-ttl-near-expiry", 1199, now).cacheEntry()
+	nearExpiry := sessionCacheEntry(newTestUserSession("short-cache-ttl-near-expiry", 1199, now))
 	nearExpiry.ExpiresAt = time.Now().Add(2 * time.Second).Unix()
 	nearExpiryDeadline := userSessionCacheDeadline()
 	remainingLifetime := time.Until(time.Unix(nearExpiry.ExpiresAt, 0))
-	require.NoError(t, writeUserSessionCache(nearExpiry, nearExpiryDeadline))
+	require.NoError(t, store.writeUserSessionCache(nearExpiry, nearExpiryDeadline))
 	nearExpiryTTL := server.TTL(userSessionCacheKey(nearExpiry.SID))
 	assert.Positive(t, nearExpiryTTL)
 	assert.LessOrEqual(t, nearExpiryTTL, remainingLifetime, "cache TTL must not exceed the Session remaining lifetime")
 
 	common.SyncFrequency = 0
-	fallback := newTestUserSession("short-cache-ttl-fallback", 1200, now).cacheEntry()
+	fallback := sessionCacheEntry(newTestUserSession("short-cache-ttl-fallback", 1200, now))
 	fallback.ExpiresAt = now + 300
-	require.NoError(t, writeUserSessionCache(fallback, userSessionCacheDeadline()))
+	require.NoError(t, store.writeUserSessionCache(fallback, userSessionCacheDeadline()))
 	fallbackTTL := server.TTL(userSessionCacheKey(fallback.SID))
 	assert.Greater(t, fallbackTTL, 59*time.Second)
 	assert.LessOrEqual(t, fallbackTTL, 60*time.Second, "non-positive cache frequency must use the existing 60-second fallback")
 }
 
 func TestStaleActiveSessionCacheFillCannotRestartWindowAfterDenyExpires(t *testing.T) {
-	setupUserSessionTest(t)
-	server := useUserCacheMiniRedis(t)
+	store := setupUserSessionTest(t)
+	server := useSessionMiniRedis(t)
 	now := time.Now().Unix()
-	active := newTestUserSession("stale-active-cache-fill", 1201, now).cacheEntry()
+	active := sessionCacheEntry(newTestUserSession("stale-active-cache-fill", 1201, now))
 	denied := *active
 	denied.Status = UserSessionStatusRevoked
 	denied.RevokedAt = now
 	denied.RevokedReason = "test-revoke"
 
-	require.NoError(t, writeUserSessionCache(&denied, time.Time{}))
+	require.NoError(t, store.writeUserSessionCache(&denied, time.Time{}))
 	cacheKey := userSessionCacheKey(active.SID)
 	assert.True(t, server.Exists(cacheKey))
 	server.FastForward(3 * time.Second)
 	assert.False(t, server.Exists(cacheKey), "the short deny tombstone must have expired in this race setup")
 
-	err := writeUserSessionCache(active, time.Now().Add(-time.Millisecond))
+	err := store.writeUserSessionCache(active, time.Now().Add(-time.Millisecond))
 	assert.ErrorIs(t, err, errUserSessionCacheObservationStale)
 	assert.False(t, server.Exists(cacheKey), "a delayed pre-revoke active snapshot must not restart a fresh cache window")
 }
 
 func TestActiveSessionCacheFillUsesRemainingObservationWindow(t *testing.T) {
-	setupUserSessionTest(t)
-	server := useUserCacheMiniRedis(t)
+	store := setupUserSessionTest(t)
+	server := useSessionMiniRedis(t)
 	now := time.Now().Unix()
-	entry := newTestUserSession("bounded-active-cache-fill", 1202, now).cacheEntry()
+	entry := sessionCacheEntry(newTestUserSession("bounded-active-cache-fill", 1202, now))
 	deadline := time.Now().Add(1500 * time.Millisecond)
 
-	require.NoError(t, writeUserSessionCache(entry, deadline))
+	require.NoError(t, store.writeUserSessionCache(entry, deadline))
 	ttl := server.TTL(userSessionCacheKey(entry.SID))
 	assert.Positive(t, ttl)
 	assert.LessOrEqual(t, ttl, 1500*time.Millisecond, "a delayed fill must inherit only the unused observation window")
 }
 
 func TestSessionCacheLuaUsesAbsoluteActiveAndRelativeDenyExpiry(t *testing.T) {
-	setupUserSessionTest(t)
-	server := useUserCacheMiniRedis(t)
+	store := setupUserSessionTest(t)
+	server := useSessionMiniRedis(t)
 	now := time.Now().Unix()
 	deadline := time.Now().Add(10 * time.Second)
 	common.RDB.AddHook(setMiniRedisTimeOnEvalHook{server: server, at: deadline.Add(time.Second)})
 
-	active := newTestUserSession("delayed-active-cache-eval", 1203, now).cacheEntry()
-	require.NoError(t, writeUserSessionCache(active, deadline))
+	active := sessionCacheEntry(newTestUserSession("delayed-active-cache-eval", 1203, now))
+	require.NoError(t, store.writeUserSessionCache(active, deadline))
 	assert.False(t, server.Exists(userSessionCacheKey(active.SID)), "an active fill executed after its absolute deadline must not recreate the cache")
 
-	denied := newTestUserSession("delayed-deny-cache-eval", 1204, now).cacheEntry()
+	denied := sessionCacheEntry(newTestUserSession("delayed-deny-cache-eval", 1204, now))
 	denied.Status = UserSessionStatusRevoked
 	denied.RevokedAt = now
 	denied.RevokedReason = "test-revoke"
-	require.NoError(t, writeUserSessionCache(denied, time.Time{}))
+	require.NoError(t, store.writeUserSessionCache(denied, time.Time{}))
 	denyTTL := server.TTL(userSessionCacheKey(denied.SID))
 	assert.Positive(t, denyTTL)
 	assert.LessOrEqual(t, denyTTL, 2*time.Second, "a delayed deny publication must receive a full relative short TTL at Redis execution")
 }
 
 func TestUserSessionCreateListAndRevokeOne(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
 	user := User{Id: 1001, Username: "session-list-user", Password: "password", AuthVersion: 1}
-	require.NoError(t, DB.Create(&user).Error)
-	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, user.Id).Error })
+	require.NoError(t, store.db.Create(&user).Error)
+	t.Cleanup(func() { _ = store.db.Unscoped().Delete(&User{}, user.Id).Error })
 	first := newTestUserSession("session-one", 1001, now)
 	second := newTestUserSession("session-two", 1001, now+1)
-	require.NoError(t, CreateUserSession(first))
-	require.NoError(t, CreateUserSession(second))
+	require.NoError(t, store.CreateUserSession(first))
+	require.NoError(t, store.CreateUserSession(second))
 
-	sessions, err := ListActiveUserSessions(1001, first.SID, now)
+	sessions, err := store.ListActiveUserSessions(1001, first.SID, now)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
 	assert.Equal(t, first.SID, sessions[0].SID)
 
-	revoked, err := RevokeUserSession(1001, first.SID, "user_revoked")
+	revoked, err := store.RevokeUserSession(1001, first.SID, "user_revoked")
 	require.NoError(t, err)
 	assert.True(t, revoked)
-	revoked, err = RevokeUserSession(1001, first.SID, "duplicate")
+	revoked, err = store.RevokeUserSession(1001, first.SID, "duplicate")
 	require.NoError(t, err)
 	assert.False(t, revoked)
 
-	_, err = GetUserSessionCached(first.SID)
+	_, err = store.GetUserSessionCached(first.SID)
 	assert.ErrorIs(t, err, ErrUserSessionInactive)
-	active, err := GetUserSessionCached(second.SID)
+	active, err := store.GetUserSessionCached(second.SID)
 	require.NoError(t, err)
 	assert.Equal(t, second.SID, active.SID)
 }
 
 func TestRotateUserSessionRefreshRaceAndReuse(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1002, 1)
+	createUserSessionTestUser(t, store, 1002, 1)
 	session := newTestUserSession("rotate-session", 1002, now)
-	require.NoError(t, CreateUserSession(session))
+	require.NoError(t, store.CreateUserSession(session))
 
-	rotated, err := RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", now+10, 30*time.Second)
+	rotated, err := store.RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", now+10, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", rotated.RefreshHash)
 	assert.Equal(t, session.RefreshHash, rotated.PreviousRefreshHash)
 	assert.Equal(t, now+40, rotated.PreviousValidUntil)
 
-	_, err = RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+20, 30*time.Second)
+	_, err = store.RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+20, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshRace)
-	_, err = RotateUserSessionRefresh(1002, session.SID, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+20, 30*time.Second)
+	_, err = store.RotateUserSessionRefresh(1002, session.SID, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+20, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshInvalid)
-	stored, getErr := GetUserSessionBySID(session.SID)
+	stored, getErr := store.GetUserSessionBySID(session.SID)
 	require.NoError(t, getErr)
 	assert.Equal(t, UserSessionStatusActive, stored.Status)
 
-	_, err = RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+41, 30*time.Second)
+	_, err = store.RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+41, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshReuse)
-	stored, getErr = GetUserSessionBySID(session.SID)
+	stored, getErr = store.GetUserSessionBySID(session.SID)
 	require.NoError(t, getErr)
 	assert.Equal(t, UserSessionStatusRevoked, stored.Status)
 	assert.Equal(t, "refresh_reuse", stored.RevokedReason)
 }
 
 func TestUserSessionPreviousRefreshHashNormalizesLegacyPadding(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1010, 1)
+	createUserSessionTestUser(t, store, 1010, 1)
 	digest := strings.Repeat("a", 64)
 
 	blank := newTestUserSession("legacy-blank-previous-hash", 1010, now)
 	blank.PreviousRefreshHash = strings.Repeat(" ", 64)
 	blank.PreviousValidUntil = now + 60
-	require.NoError(t, DB.Create(blank).Error)
-	loadedBlank, err := GetUserSessionBySID(blank.SID)
+	require.NoError(t, store.db.Create(blank).Error)
+	loadedBlank, err := store.GetUserSessionBySID(blank.SID)
 	require.NoError(t, err)
 	assert.Empty(t, loadedBlank.PreviousRefreshHash)
 
@@ -291,32 +298,32 @@ func TestUserSessionPreviousRefreshHashNormalizesLegacyPadding(t *testing.T) {
 	valid.RefreshHash = strings.Repeat("b", 64)
 	valid.PreviousRefreshHash = digest
 	valid.PreviousValidUntil = now + 60
-	require.NoError(t, DB.Create(valid).Error)
-	loadedValid, err := GetUserSessionBySID(valid.SID)
+	require.NoError(t, store.db.Create(valid).Error)
+	loadedValid, err := store.GetUserSessionBySID(valid.SID)
 	require.NoError(t, err)
 	assert.Equal(t, digest, loadedValid.PreviousRefreshHash)
 
-	require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", valid.SID).
+	require.NoError(t, store.db.Model(&UserSession{}).Where("sid = ?", valid.SID).
 		Updates(map[string]any{
 			"previous_refresh_hash": digest + "   ",
 			"previous_valid_until":  now + 60,
 		}).Error)
-	_, err = RotateUserSessionRefresh(valid.UserID, valid.SID, digest, strings.Repeat("c", 64), now+1, 30*time.Second)
+	_, err = store.RotateUserSessionRefresh(valid.UserID, valid.SID, digest, strings.Repeat("c", 64), now+1, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshRace)
 
-	revoked, err := RevokeUserSessionByRefreshHash(valid.SID, digest, "legacy-padded-refresh-logout")
+	revoked, err := store.RevokeUserSessionByRefreshHash(valid.SID, digest, "legacy-padded-refresh-logout")
 	require.NoError(t, err)
 	assert.True(t, revoked, "refresh-cookie logout must accept a legacy CHAR-padded previous digest inside its grace window")
 }
 
 func TestUserSessionCacheExcludesRefreshDigests(t *testing.T) {
-	setupUserSessionTest(t)
-	useUserCacheMiniRedis(t)
+	store := setupUserSessionTest(t)
+	useSessionMiniRedis(t)
 	now := time.Now().Unix()
 	session := newTestUserSession("cache-without-refresh-digests", 1011, now)
 	session.PreviousRefreshHash = strings.Repeat("a", 64)
 	session.PreviousValidUntil = now + 30
-	require.NoError(t, writeUserSessionCache(session.cacheEntry(), userSessionCacheDeadline()))
+	require.NoError(t, store.writeUserSessionCache(sessionCacheEntry(session), userSessionCacheDeadline()))
 
 	cacheKey := userSessionCacheKey(session.SID)
 	fields, err := common.RDB.HGetAll(context.Background(), cacheKey).Result()
@@ -330,7 +337,7 @@ func TestUserSessionCacheExcludesRefreshDigests(t *testing.T) {
 		"PreviousRefreshHash", strings.Repeat("c", 64)+"   ",
 		"PreviousValidUntil", now+30,
 	).Err())
-	entry, err := getUserSessionCache(session.SID)
+	entry, err := store.getUserSessionCache(session.SID)
 	require.NoError(t, err)
 	cachedSession := entry.session()
 	assert.Empty(t, cachedSession.RefreshHash)
@@ -339,61 +346,61 @@ func TestUserSessionCacheExcludesRefreshDigests(t *testing.T) {
 }
 
 func TestRevokeOtherUserSessionsKeepsCurrent(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1003, 1)
-	createUserSessionTestUser(t, 1004, 1)
+	createUserSessionTestUser(t, store, 1003, 1)
+	createUserSessionTestUser(t, store, 1004, 1)
 	for _, sid := range []string{"current-session", "other-one", "other-two"} {
 		session := newTestUserSession(sid, 1003, now)
 		if sid == "other-one" {
 			session.UserAuthVersion = 99
 		}
-		require.NoError(t, CreateUserSession(session))
+		require.NoError(t, store.CreateUserSession(session))
 	}
-	require.NoError(t, CreateUserSession(newTestUserSession("different-user", 1004, now)))
+	require.NoError(t, store.CreateUserSession(newTestUserSession("different-user", 1004, now)))
 
-	count, err := RevokeOtherUserSessions(1003, "current-session", "revoke_others")
+	count, err := store.RevokeOtherUserSessions(1003, "current-session", "revoke_others")
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
-	current, err := GetUserSessionCached("current-session")
+	current, err := store.GetUserSessionCached("current-session")
 	require.NoError(t, err)
 	assert.Equal(t, UserSessionStatusActive, current.Status)
-	_, err = GetUserSessionCached("other-one")
+	_, err = store.GetUserSessionCached("other-one")
 	assert.True(t, errors.Is(err, ErrUserSessionInactive))
-	stale, err := GetUserSessionBySID("other-one")
+	stale, err := store.GetUserSessionBySID("other-one")
 	require.NoError(t, err)
 	assert.Equal(t, UserSessionStatusRevoked, stale.Status, "revocation must include active sessions from stale auth versions")
-	different, err := GetUserSessionCached("different-user")
+	different, err := store.GetUserSessionCached("different-user")
 	require.NoError(t, err)
 	assert.Equal(t, 1004, different.UserID)
 }
 
 func TestRevokeUserSessionByRefreshHashRequiresSecret(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1005, 1)
+	createUserSessionTestUser(t, store, 1005, 1)
 	session := newTestUserSession("refresh-logout-session", 1005, now)
-	require.NoError(t, CreateUserSession(session))
+	require.NoError(t, store.CreateUserSession(session))
 
-	revoked, err := RevokeUserSessionByRefreshHash(session.SID, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "logout")
+	revoked, err := store.RevokeUserSessionByRefreshHash(session.SID, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "logout")
 	require.NoError(t, err)
 	assert.False(t, revoked)
-	active, err := GetUserSessionCached(session.SID)
+	active, err := store.GetUserSessionCached(session.SID)
 	require.NoError(t, err)
 	assert.Equal(t, UserSessionStatusActive, active.Status)
 
-	revoked, err = RevokeUserSessionByRefreshHash(session.SID, session.RefreshHash, "logout")
+	revoked, err = store.RevokeUserSessionByRefreshHash(session.SID, session.RefreshHash, "logout")
 	require.NoError(t, err)
 	assert.True(t, revoked)
-	_, err = GetUserSessionCached(session.SID)
+	_, err = store.GetUserSessionCached(session.SID)
 	assert.ErrorIs(t, err, ErrUserSessionInactive)
 }
 
 func TestUserSessionGrowthCountsUseBroadActiveAndStrictIssuancePredicates(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1006, 7)
+	createUserSessionTestUser(t, store, 1006, 7)
 	rows := []UserSession{
 		*newTestUserSession("count-current-version", 1006, now-10),
 		*newTestUserSession("count-stale-version", 1006, now-9),
@@ -411,24 +418,24 @@ func TestUserSessionGrowthCountsUseBroadActiveAndStrictIssuancePredicates(t *tes
 	rows[4].UserAuthVersion = 7
 	rows[4].CreatedAt = now - 3600
 	rows[4].ExpiresAt = now
-	require.NoError(t, DB.Create(&rows).Error)
+	require.NoError(t, store.db.Create(&rows).Error)
 
-	activeCount, err := CountActiveUserSessions(1006, now)
+	activeCount, err := store.CountActiveUserSessions(1006, now)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), activeCount, "active count includes stale auth versions but excludes expired and revoked rows")
 
-	issuedCount, err := CountUserSessionsCreatedSince(1006, now-3600)
+	issuedCount, err := store.CountUserSessionsCreatedSince(1006, now-3600)
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), issuedCount, "issuance count includes every status and uses a strict cutoff")
-	globalCount, err := CountUserSessionsCreatedSince(0, now-3600)
+	globalCount, err := store.CountUserSessionsCreatedSince(0, now-3600)
 	require.NoError(t, err)
 	assert.Equal(t, issuedCount, globalCount)
 }
 
 func TestListActiveUserSessionsKeepsCurrentAndBoundsOtherSessions(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1007, 7)
+	createUserSessionTestUser(t, store, 1007, 7)
 	current := newTestUserSession("list-current", 1007, now-1000)
 	current.UserAuthVersion = 7
 	rows := make([]UserSession, 0, 107)
@@ -441,9 +448,9 @@ func TestListActiveUserSessionsKeepsCurrentAndBoundsOtherSessions(t *testing.T) 
 	stale := newTestUserSession("list-stale-auth-version", 1007, now+1)
 	stale.UserAuthVersion = 6
 	rows = append(rows, *stale)
-	require.NoError(t, DB.CreateInBatches(rows, 100).Error)
+	require.NoError(t, store.db.CreateInBatches(rows, 100).Error)
 
-	sessions, err := ListActiveUserSessions(1007, current.SID, now)
+	sessions, err := store.ListActiveUserSessions(1007, current.SID, now)
 	require.NoError(t, err)
 	require.Len(t, sessions, 100)
 	assert.Equal(t, current.SID, sessions[0].SID)
@@ -452,26 +459,26 @@ func TestListActiveUserSessionsKeepsCurrentAndBoundsOtherSessions(t *testing.T) 
 		assert.NotEqual(t, stale.SID, session.SID)
 	}
 
-	sessionsWithoutCurrent, err := ListActiveUserSessions(1007, "missing-current", now)
+	sessionsWithoutCurrent, err := store.ListActiveUserSessions(1007, "missing-current", now)
 	require.NoError(t, err)
 	assert.Len(t, sessionsWithoutCurrent, userSessionListLimit, "a missing current SID must not reduce the total list limit")
 }
 
 func TestRevokeUserSessionsReturnsCumulativeProgressAndSupportsRetry(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
-	createUserSessionTestUser(t, 1008, 1)
+	createUserSessionTestUser(t, store, 1008, 1)
 	rows := make([]UserSession, 0, userSessionRevokeBatchSize+1)
 	for i := 0; i < userSessionRevokeBatchSize+1; i++ {
 		rows = append(rows, *newTestUserSession(fmt.Sprintf("batch-revoke-%03d", i), 1008, now))
 	}
-	require.NoError(t, DB.CreateInBatches(rows, 100).Error)
+	require.NoError(t, store.db.CreateInBatches(rows, 100).Error)
 
 	forcedErr := errors.New("forced second revoke batch failure")
 	callbackName := "test:fail_second_user_session_revoke_batch"
 	updateCalls := 0
 	callbackRegistered := true
-	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+	require.NoError(t, store.db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "user_sessions" {
 			updateCalls++
 			if updateCalls == 2 {
@@ -481,26 +488,26 @@ func TestRevokeUserSessionsReturnsCumulativeProgressAndSupportsRetry(t *testing.
 	}))
 	t.Cleanup(func() {
 		if callbackRegistered {
-			_ = DB.Callback().Update().Remove(callbackName)
+			_ = store.db.Callback().Update().Remove(callbackName)
 		}
 	})
 
-	affected, err := RevokeAllUserSessions(1008, "batch-test")
+	affected, err := store.RevokeAllUserSessions(1008, "batch-test")
 	assert.ErrorIs(t, err, forcedErr)
 	assert.Equal(t, int64(userSessionRevokeBatchSize), affected)
-	require.NoError(t, DB.Callback().Update().Remove(callbackName))
+	require.NoError(t, store.db.Callback().Update().Remove(callbackName))
 	callbackRegistered = false
 
-	retried, err := RevokeAllUserSessions(1008, "batch-test-retry")
+	retried, err := store.RevokeAllUserSessions(1008, "batch-test-retry")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), retried)
 	var activeCount int64
-	require.NoError(t, DB.Model(&UserSession{}).Where("user_id = ? AND status = ?", 1008, UserSessionStatusActive).Count(&activeCount).Error)
+	require.NoError(t, store.db.Model(&UserSession{}).Where("user_id = ? AND status = ?", 1008, UserSessionStatusActive).Count(&activeCount).Error)
 	assert.Zero(t, activeCount)
 }
 
 func TestDeleteExpiredUserSessionsLoopsInChunksAndRechecksPredicate(t *testing.T) {
-	setupUserSessionTest(t)
+	store := setupUserSessionTest(t)
 	now := time.Now().Unix()
 	common.UserSessionRevokedRetentionDays = 7
 	common.UserSessionIssuanceWindowSeconds = 3600
@@ -541,12 +548,12 @@ func TestDeleteExpiredUserSessionsLoopsInChunksAndRechecksPredicate(t *testing.T
 	rows = append(rows, *revokedBoundary)
 	live := newTestUserSession("cleanup-live", 1009, now-8)
 	rows = append(rows, *live)
-	require.NoError(t, DB.CreateInBatches(rows, 100).Error)
+	require.NoError(t, store.db.CreateInBatches(rows, 100).Error)
 
 	callbackName := "test:recheck_user_session_cleanup_predicate"
 	deleteCalls := 0
 	mutated := false
-	require.NoError(t, DB.Callback().Delete().Before("gorm:delete").Register(callbackName, func(tx *gorm.DB) {
+	require.NoError(t, store.db.Callback().Delete().Before("gorm:delete").Register(callbackName, func(tx *gorm.DB) {
 		if tx.Statement == nil || tx.Statement.Table != "user_sessions" {
 			return
 		}
@@ -556,13 +563,13 @@ func TestDeleteExpiredUserSessionsLoopsInChunksAndRechecksPredicate(t *testing.T
 			tx.Exec("UPDATE user_sessions SET expires_at = ? WHERE sid = ?", now+3600, race.SID)
 		}
 	}))
-	t.Cleanup(func() { _ = DB.Callback().Delete().Remove(callbackName) })
+	t.Cleanup(func() { _ = store.db.Callback().Delete().Remove(callbackName) })
 
-	require.NoError(t, DeleteExpiredUserSessions(now))
-	require.NoError(t, DeleteOldRevokedUserSessions(now))
+	require.NoError(t, store.DeleteExpiredUserSessions(now))
+	require.NoError(t, store.DeleteOldRevokedUserSessions(now))
 	assert.Equal(t, 4, deleteCalls, "expired and retained-revoked scans each delete in bounded chunks")
 	var remaining []UserSession
-	require.NoError(t, DB.Order("sid").Find(&remaining).Error)
+	require.NoError(t, store.db.Order("sid").Find(&remaining).Error)
 	require.Len(t, remaining, 6)
 	remainingSIDs := make([]string, 0, len(remaining))
 	for _, session := range remaining {
@@ -579,78 +586,22 @@ func TestDeleteExpiredUserSessionsLoopsInChunksAndRechecksPredicate(t *testing.T
 }
 
 func TestUserSessionGrowthQueryIndexesExist(t *testing.T) {
-	setupUserSessionTest(t)
-	migrator := DB.Migrator()
+	store := setupUserSessionTest(t)
+	migrator := store.db.Migrator()
 	assert.True(t, migrator.HasIndex(&UserSession{}, "idx_user_sessions_expires_at"))
 	assert.True(t, migrator.HasIndex(&UserSession{}, "idx_user_sessions_user_created"))
 	assert.True(t, migrator.HasIndex(&UserSession{}, "idx_user_sessions_status_revoked"))
 }
 
-func TestUserBaseIncludesAuthorizationFields(t *testing.T) {
-	user := User{
-		Id:          42,
-		Username:    "cache-user",
-		Role:        common.RoleAdminUser,
-		Status:      common.UserStatusEnabled,
-		Group:       "vip",
-		Quota:       123,
-		AuthVersion: 7,
-	}
-	base := user.ToBaseUser()
-	assert.Equal(t, user.Role, base.Role)
-	assert.Equal(t, user.AuthVersion, base.AuthVersion)
-	assert.Equal(t, userCacheSchemaVersion, base.CacheSchema)
-	assert.Equal(t, user.Quota, base.Quota)
-}
-
-func TestUserUpdateBumpsAuthVersionOnlyForAuthorizationChanges(t *testing.T) {
-	setupUserSessionTest(t)
-	user := &User{
-		Username: "auth-version-user",
-		Password: "hashed-placeholder",
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusEnabled,
-		Group:    "default",
-	}
-	require.NoError(t, DB.Create(user).Error)
-	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, user.Id).Error })
-	assert.Equal(t, int64(1), user.AuthVersion)
-
-	user.DisplayName = "profile-only"
-	require.NoError(t, user.Update(false))
-	assert.Equal(t, int64(1), user.AuthVersion)
-
-	user.Group = "vip"
-	require.NoError(t, user.Update(false))
-	assert.Equal(t, int64(2), user.AuthVersion)
-
-	user.Role = common.RoleAdminUser
-	require.NoError(t, user.Update(false))
-	assert.Equal(t, int64(3), user.AuthVersion)
-}
-
-func TestPasswordResetBumpsAuthVersionAndRevokesSessions(t *testing.T) {
-	setupUserSessionTest(t)
-	now := time.Now().Unix()
-	user := &User{
-		Username: "password-reset-user",
-		Password: "old-hash",
-		Email:    "password-reset@example.com",
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusEnabled,
-		Group:    "default",
-	}
-	require.NoError(t, DB.Create(user).Error)
-	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, user.Id).Error })
-	session := newTestUserSession("password-reset-session", user.Id, now)
-	require.NoError(t, CreateUserSession(session))
-
-	require.NoError(t, ResetUserPasswordByEmail(user.Email, "new-password"))
-	var stored User
-	require.NoError(t, DB.First(&stored, user.Id).Error)
-	assert.Equal(t, int64(2), stored.AuthVersion)
-	storedSession, err := GetUserSessionBySID(session.SID)
-	require.NoError(t, err)
-	assert.Equal(t, UserSessionStatusRevoked, storedSession.Status)
-	assert.Equal(t, "password_reset", storedSession.RevokedReason)
+func useSessionMiniRedis(t *testing.T) *miniredis.Miniredis {
+	t.Helper()
+	server := miniredis.RunT(t)
+	previous, enabled, syncFrequency := common.RDB, common.RedisEnabled, common.SyncFrequency
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.RDB, common.RedisEnabled, common.SyncFrequency = client, true, 2
+	t.Cleanup(func() {
+		require.NoError(t, client.Close())
+		common.RDB, common.RedisEnabled, common.SyncFrequency = previous, enabled, syncFrequency
+	})
+	return server
 }

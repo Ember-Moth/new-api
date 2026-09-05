@@ -57,14 +57,14 @@ func (r *Runtime) createLoginSession(userID int, expectedAuthVersion int64, logi
 		return nil, ErrLoginSessionRevoked
 	}
 	now := time.Now().Unix()
-	activeCount, err := r.deps.CountActiveUserSessions(userID, now)
+	activeCount, err := r.deps.Sessions.CountActiveUserSessions(userID, now)
 	if err != nil {
 		return nil, err
 	}
 	if activeCount >= int64(common.UserSessionActiveLimit) {
 		return nil, identitycontract.ErrUserSessionLimit
 	}
-	issuanceCount, err := r.deps.CountUserSessionsCreatedSince(userID, now-common.UserSessionIssuanceWindowSeconds)
+	issuanceCount, err := r.deps.Sessions.CountUserSessionsCreatedSince(userID, now-common.UserSessionIssuanceWindowSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -92,19 +92,19 @@ func (r *Runtime) createLoginSession(userID int, expectedAuthVersion int64, logi
 	if session.LoginMethod == "" {
 		session.LoginMethod = "unknown"
 	}
-	if err := r.deps.CreateUserSession(session); err != nil {
+	if err := r.deps.Sessions.CreateUserSession(session); err != nil {
 		return nil, err
 	}
 	bundle, err := issueAuthBundle(session, session.SID+"."+refreshSecret, true)
 	if err != nil {
-		_, _ = r.deps.RevokeUserSession(userID, session.SID, "token_issue_failed")
+		_, _ = r.deps.Sessions.RevokeUserSession(userID, session.SID, "token_issue_failed")
 		return nil, err
 	}
 	return bundle, nil
 }
 
 func (r *Runtime) ValidateLoginSession(identity AuthIdentity) (*entity.UserSession, *entity.UserBase, error) {
-	session, err := r.deps.GetUserSessionCached(identity.SessionID)
+	session, err := r.deps.Sessions.GetUserSessionCached(identity.SessionID)
 	if err != nil {
 		if errors.Is(err, identitycontract.ErrUserSessionInactive) {
 			return nil, nil, ErrLoginSessionRevoked
@@ -131,7 +131,7 @@ func (r *Runtime) ValidateSessionReference(userID int, sid string) (AuthIdentity
 	if userID <= 0 || strings.TrimSpace(sid) == "" {
 		return AuthIdentity{}, ErrLoginSessionInvalid
 	}
-	session, err := r.deps.GetUserSessionCached(sid)
+	session, err := r.deps.Sessions.GetUserSessionCached(sid)
 	if err != nil {
 		return AuthIdentity{}, err
 	}
@@ -174,7 +174,7 @@ func (r *Runtime) AdvanceCurrentSessionToUserVersion(identity AuthIdentity, reas
 }
 
 func (r *Runtime) advanceCurrentSessionToVersion(identity AuthIdentity, nextUserAuthVersion int64, reason string) (*AuthBundle, error) {
-	session, err := r.deps.AdvanceUserSessionAuthVersion(
+	session, err := r.deps.Sessions.AdvanceUserSessionAuthVersion(
 		identity.UserID,
 		identity.SessionID,
 		identity.SessionVersion,
@@ -184,7 +184,7 @@ func (r *Runtime) advanceCurrentSessionToVersion(identity AuthIdentity, nextUser
 	if err != nil {
 		return nil, err
 	}
-	if _, err := r.deps.RevokeOtherUserSessions(identity.UserID, identity.SessionID, reason); err != nil {
+	if _, err := r.deps.Sessions.RevokeOtherUserSessions(identity.UserID, identity.SessionID, reason); err != nil {
 		return nil, err
 	}
 	return issueAuthBundle(session, "", true)
@@ -198,7 +198,7 @@ func (r *Runtime) RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgen
 	if expectedSID = strings.TrimSpace(expectedSID); expectedSID != "" && expectedSID != sid {
 		return nil, nil, ErrLoginSessionMismatch
 	}
-	session, err := r.deps.GetUserSessionCached(sid)
+	session, err := r.deps.Sessions.GetUserSessionCached(sid)
 	if err != nil {
 		if errors.Is(err, identitycontract.ErrUserSessionInactive) {
 			return nil, nil, ErrLoginSessionRevoked
@@ -218,11 +218,11 @@ func (r *Runtime) RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgen
 	}
 	if userCache.Status != common.UserStatusEnabled || userCache.AuthVersion != session.UserAuthVersion ||
 		currentUser.Status != common.UserStatusEnabled || currentUser.AuthVersion != session.UserAuthVersion {
-		_, _ = r.deps.RevokeUserSession(session.UserID, session.SID, "user_security_changed")
+		_, _ = r.deps.Sessions.RevokeUserSession(session.UserID, session.SID, "user_security_changed")
 		return nil, nil, ErrLoginSessionRevoked
 	}
 	nextSecret := deriveNextRefreshSecret(sid, secret)
-	rotated, err := r.deps.RotateUserSessionRefresh(session.UserID, sid, hashRefreshSecret(secret), hashRefreshSecret(nextSecret), time.Now().Unix(), RefreshReplayWindow)
+	rotated, err := r.deps.Sessions.RotateUserSessionRefresh(session.UserID, sid, hashRefreshSecret(secret), hashRefreshSecret(nextSecret), time.Now().Unix(), RefreshReplayWindow)
 	if err != nil {
 		if errors.Is(err, identitycontract.ErrUserSessionRefreshRace) && rotated != nil &&
 			hashRefreshSecret(nextSecret) == rotated.RefreshHash {
@@ -260,7 +260,7 @@ func (r *Runtime) RevokeByRefreshToken(rawRefreshToken, expectedSID, reason stri
 	if expectedSID = strings.TrimSpace(expectedSID); expectedSID != "" && expectedSID != sid {
 		return ErrLoginSessionMismatch
 	}
-	_, err := r.deps.RevokeUserSessionByRefreshHash(sid, hashRefreshSecret(secret), reason)
+	_, err := r.deps.Sessions.RevokeUserSessionByRefreshHash(sid, hashRefreshSecret(secret), reason)
 	return err
 }
 
@@ -270,7 +270,7 @@ func RefreshTokenSID(rawRefreshToken string) (string, bool) {
 }
 
 func (r *Runtime) ListLoginSessions(userID int, currentSID string) ([]LoginSessionView, error) {
-	sessions, err := r.deps.ListActiveUserSessions(userID, currentSID, time.Now().Unix())
+	sessions, err := r.deps.Sessions.ListActiveUserSessions(userID, currentSID, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -374,9 +374,9 @@ func FormatAuthError(err error) string {
 }
 
 func (r *Runtime) RevokeSession(userID int, sid, reason string) (bool, error) {
-	return r.deps.RevokeUserSession(userID, sid, reason)
+	return r.deps.Sessions.RevokeUserSession(userID, sid, reason)
 }
 
 func (r *Runtime) RevokeOtherSessions(userID int, sid, reason string) (int64, error) {
-	return r.deps.RevokeOtherUserSessions(userID, sid, reason)
+	return r.deps.Sessions.RevokeOtherUserSessions(userID, sid, reason)
 }

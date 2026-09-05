@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/identity/authn"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/sessions"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -37,33 +38,8 @@ func AuthenticationRuntime() *authn.Runtime {
 			user, err := model.GetUserById(id, all)
 			return (*entity.User)(user), err
 		},
-		BumpUserAuthVersion:           model.BumpUserAuthVersion,
-		CountActiveUserSessions:       model.CountActiveUserSessions,
-		CountUserSessionsCreatedSince: model.CountUserSessionsCreatedSince,
-		CreateUserSession:             func(session *entity.UserSession) error { return model.CreateUserSession((*model.UserSession)(session)) },
-		GetUserSessionCached: func(sid string) (*entity.UserSession, error) {
-			session, err := model.GetUserSessionCached(sid)
-			return (*entity.UserSession)(session), err
-		},
-		RevokeUserSession: model.RevokeUserSession,
-		AdvanceUserSessionAuthVersion: func(id int, sid string, sv, uv, next int64) (*entity.UserSession, error) {
-			session, err := model.AdvanceUserSessionAuthVersion(id, sid, sv, uv, next)
-			return (*entity.UserSession)(session), err
-		},
-		RevokeOtherUserSessions: model.RevokeOtherUserSessions,
-		RotateUserSessionRefresh: func(id int, sid, current, next string, now int64, grace time.Duration) (*entity.UserSession, error) {
-			session, err := model.RotateUserSessionRefresh(id, sid, current, next, now, grace)
-			return (*entity.UserSession)(session), err
-		},
-		RevokeUserSessionByRefreshHash: model.RevokeUserSessionByRefreshHash,
-		ListActiveUserSessions: func(id int, sid string, now int64) ([]entity.UserSession, error) {
-			rows, err := model.ListActiveUserSessions(id, sid, now)
-			result := make([]entity.UserSession, len(rows))
-			for i := range rows {
-				result[i] = entity.UserSession(rows[i])
-			}
-			return result, err
-		},
+		BumpUserAuthVersion: model.BumpUserAuthVersion,
+		Sessions:            sessions.New(model.DB),
 	})
 }
 func CreateLoginSession(userID int, loginMethod, ip, userAgent string) (*AuthBundle, error) {

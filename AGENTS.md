@@ -28,7 +28,7 @@ internal/transport/http/server/ — HTTP server and dashboard delivery
 internal/transport/task/ — Background task adapters for channel updates, health tests and provider polling
 internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
 internal/module/channel/ — Channel management, provider operations, catalog/discovery, persistence and routing; health testing and remaining callers are still being migrated
-internal/module/identity/ — Account CRUD, OAuth bindings, external identity ownership, two-factor/Passkey management, authentication challenges, JWT/session orchestration and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; password/OAuth login transport and session storage/cache are still being migrated
+internal/module/identity/ — Account CRUD, OAuth bindings, external identity ownership, two-factor/Passkey management, authentication challenges, JWT/session orchestration, session storage/cache and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; password/OAuth login transport, user-cache ownership and legacy call adapters are still being migrated
 internal/module/billing/ — Redemption CRUD and administrative wallet commands; wallet credit/debit runtime, pricing and settlement are still being migrated
 internal/module/system/ — Tasks, nodes and generic settings management/storage; common.OptionMap and legacy business configuration consumers remain transitional dependencies
 internal/module/subscription/ — Plan configuration CRUD, validation, contracts and storage; purchases and user subscriptions are still being migrated

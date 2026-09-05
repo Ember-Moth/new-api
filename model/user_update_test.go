@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -397,4 +398,74 @@ func TestResetUserPasswordByEmailRequiresSingleActiveMatch(t *testing.T) {
 
 	err = ResetUserPasswordByEmail("missing@example.com", "NewPassword123")
 	require.True(t, errors.Is(err, ErrEmailNotFound))
+}
+
+func TestUserBaseIncludesAuthorizationFields(t *testing.T) {
+	user := User{
+		Id:          42,
+		Username:    "cache-user",
+		Role:        common.RoleAdminUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "vip",
+		Quota:       123,
+		AuthVersion: 7,
+	}
+	base := user.ToBaseUser()
+	assert.Equal(t, user.Role, base.Role)
+	assert.Equal(t, user.AuthVersion, base.AuthVersion)
+	assert.Equal(t, userCacheSchemaVersion, base.CacheSchema)
+	assert.Equal(t, user.Quota, base.Quota)
+}
+
+func TestUserUpdateBumpsAuthVersionOnlyForAuthorizationChanges(t *testing.T) {
+	setupUserUpdateTestState(t)
+	user := &User{
+		Username: "auth-version-user",
+		Password: "hashed-placeholder",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, DB.Create(user).Error)
+	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, user.Id).Error })
+	assert.Equal(t, int64(1), user.AuthVersion)
+
+	user.DisplayName = "profile-only"
+	require.NoError(t, user.Update(false))
+	assert.Equal(t, int64(1), user.AuthVersion)
+
+	user.Group = "vip"
+	require.NoError(t, user.Update(false))
+	assert.Equal(t, int64(2), user.AuthVersion)
+
+	user.Role = common.RoleAdminUser
+	require.NoError(t, user.Update(false))
+	assert.Equal(t, int64(3), user.AuthVersion)
+}
+
+func TestPasswordResetBumpsAuthVersionAndRevokesSessions(t *testing.T) {
+	setupUserUpdateTestState(t)
+	now := time.Now().Unix()
+	user := &User{
+		Username: "password-reset-user",
+		Password: "old-hash",
+		Email:    "password-reset@example.com",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, DB.Create(user).Error)
+	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, user.Id).Error })
+	require.NoError(t, DB.AutoMigrate(&UserSession{}))
+	session := &UserSession{SID: "password-reset-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: UserSessionStatusActive, RefreshHash: "password-reset-refresh-hash", LoginMethod: "password", CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600}
+	require.NoError(t, CreateUserSession(session))
+
+	require.NoError(t, ResetUserPasswordByEmail(user.Email, "new-password"))
+	var stored User
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	assert.Equal(t, int64(2), stored.AuthVersion)
+	storedSession, err := GetUserSessionBySID(session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, UserSessionStatusRevoked, storedSession.Status)
+	assert.Equal(t, "password_reset", storedSession.RevokedReason)
 }
