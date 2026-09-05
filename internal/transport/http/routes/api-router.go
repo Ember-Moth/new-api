@@ -128,11 +128,11 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				selfRoute.PUT("/setting", identityHandler.UpdateNotificationSettings)
 
 				// 2FA routes
-				selfRoute.GET("/2fa/status", controller.Get2FAStatus)
-				selfRoute.POST("/2fa/setup", middleware.DisableCache(), controller.Setup2FA)
-				selfRoute.POST("/2fa/enable", middleware.DisableCache(), controller.Enable2FA)
-				selfRoute.POST("/2fa/disable", middleware.DisableCache(), controller.Disable2FA)
-				selfRoute.POST("/2fa/backup_codes", middleware.DisableCache(), controller.RegenerateBackupCodes)
+				selfRoute.GET("/2fa/status", identityHandler.TwoFAStatus)
+				selfRoute.POST("/2fa/setup", middleware.DisableCache(), identityHandler.SetupTwoFA)
+				selfRoute.POST("/2fa/enable", middleware.DisableCache(), identityHandler.EnableTwoFA)
+				selfRoute.POST("/2fa/disable", middleware.DisableCache(), identityHandler.DisableTwoFA)
+				selfRoute.POST("/2fa/backup_codes", middleware.DisableCache(), identityHandler.RegenerateTwoFABackupCodes)
 
 				// Check-in routes
 				selfRoute.GET("/checkin", controller.GetCheckinStatus)
@@ -161,8 +161,8 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				adminRoute.DELETE("/:id/reset_passkey", controller.AdminResetPasskey)
 
 				// Admin 2FA routes
-				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)
-				adminRoute.DELETE("/:id/2fa", controller.AdminDisable2FA)
+				adminRoute.GET("/2fa/stats", identityHandler.TwoFAStats)
+				adminRoute.DELETE("/:id/2fa", identityHandler.AdminDisableTwoFA)
 			}
 		}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -268,6 +269,57 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.Contains(t, cached.Setting, `"language":"zh"`)
 		assert.Contains(t, cached.Setting, `"billing_preference":"subscription_first"`)
 		assert.Contains(t, cached.Setting, `"notification_email":"alerts@example.test"`)
+	})
+
+	t.Run("two factor changes rotate cached authentication state", func(t *testing.T) {
+		previousSecret := common.SessionSecret
+		common.SessionSecret = "dragonfly-twofa-secret"
+		t.Cleanup(func() { common.SessionSecret = previousSecret })
+		user := model.User{Username: "dragonfly-twofa", AffCode: "dragonfly-twofa", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 100, AuthVersion: 1}
+		require.NoError(t, database.Create(&user).Error)
+		management := identity.New(identity.Dependencies{DB: database, UserSecurity: identity.UserSecurity{
+			AdvanceVersion: model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
+			AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
+		}})
+		browser, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "twofa-browser")
+		require.NoError(t, err)
+		other, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "other-twofa-browser")
+		require.NoError(t, err)
+		_, err = model.GetUserSessionCached(browser.Session.SID)
+		require.NoError(t, err)
+		_, err = model.GetUserSessionCached(other.Session.SID)
+		require.NoError(t, err)
+		before, err := service.ParseAccessToken(browser.AccessToken)
+		require.NoError(t, err)
+		setup, err := management.SetupTwoFA(t.Context(), user.Id)
+		require.NoError(t, err)
+		code, err := totp.GenerateCode(setup.Secret, time.Now())
+		require.NoError(t, err)
+		active, err := management.EnableTwoFA(t.Context(), user.Id, code, &before)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(before)
+		require.Error(t, err)
+		_, err = model.GetUserSessionCached(other.Session.SID)
+		require.ErrorIs(t, err, model.ErrUserSessionInactive)
+		enabledIdentity, err := service.ParseAccessToken(active.AccessToken)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(enabledIdentity)
+		require.NoError(t, err)
+		disabled, err := management.DisableTwoFA(t.Context(), user.Id, setup.BackupCodes[0], &enabledIdentity)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(enabledIdentity)
+		require.Error(t, err)
+		finalIdentity, err := service.ParseAccessToken(disabled.AccessToken)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(finalIdentity)
+		require.NoError(t, err)
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.EqualValues(t, 3, cached.AuthVersion)
+		assert.Equal(t, 100, cached.Quota)
+		status, err := management.TwoFAStatus(t.Context(), user.Id)
+		require.NoError(t, err)
+		assert.False(t, status.Enabled)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

@@ -1,6 +1,10 @@
 package model
 
-import "errors"
+import (
+	"errors"
+
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
+)
 
 // Common errors
 var (
@@ -26,5 +30,5 @@ var (
 var ErrRedeemFailed = errors.New("redeem.failed")
 
 // 2FA errors
-var ErrTwoFANotEnabled = errors.New("2fa not enabled")
-var ErrTwoFAAlreadyEnabled = errors.New("2fa already enabled")
+var ErrTwoFANotEnabled = identityentity.ErrTwoFANotEnabled
+var ErrTwoFAAlreadyEnabled = identityentity.ErrTwoFAAlreadyEnabled

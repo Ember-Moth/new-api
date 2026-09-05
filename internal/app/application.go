@@ -210,7 +210,7 @@ func Run(assets router.WebAssets) {
 			},
 			InvalidatePlan: model.InvalidateSubscriptionPlanCache,
 		}),
-		Identity: identity.New(identity.Dependencies{VerifyEmail: func(email, code string) bool {
+		Identity: identity.New(identity.Dependencies{TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 			return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
 		Channel: model.ChannelService(),

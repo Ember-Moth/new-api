@@ -143,6 +143,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 原 controller/custom_oauth.go 已移除，model 中的绑定与占用函数仅保留认证运行时的过渡适配。模块内部清除 Telegram 绑定直接操作自有仓储，不再需要应用层释放身份回调；缓存发布和尚未迁移的登录流程保持原有边界。
 
+第十七批将双重验证初始化、启停、状态、备用码重建和管理员重置迁入 identity，TOTP 与备用码实体和存储归模块私有 twofa 实现。model/twofa.go 仅保留登录挑战、安全验证及既有调用方的过渡接口；controller/twofa.go 仅剩登录挑战入口。
+
+待验证密钥和备用码现在在同一事务替换，任一步写入失败都会保留原来的待验证配置。生命周期写入先锁用户再锁验证器，和账户删除保持一致；管理员角色与当前认证版本在变更锁内复核。启停与备用码更新继续原子推进认证版本，提交后发布缓存并续签当前会话，管理员重置撤销全部会话。
+
+既有失败计数、锁定和备用码单次使用逻辑随存储迁入模块；无浏览器会话的请求在消费验证材料之前被拒绝。操作日志通过明确回调连接尚未迁移的日志模块。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -384,3 +390,22 @@ GOWORK=off go test ./internal/arch ./internal/module/identity/... ./controller .
 SQL 集成测试覆盖绑定响应与所有权隔离、管理员权限、自助解绑、注册回滚、并发绑定只有一个所有者、替换绑定保留创建时间、提供商删除与绑定竞态、外部身份重复声明/冲突/释放。既有 Telegram 和用户硬删除回归继续通过。
 
 输出：`/tmp/new-api-bindings-module-tests.log`、`/tmp/new-api-bindings-module-full-tests.log`、`/tmp/new-api-bindings-module-vet.log`、`/tmp/new-api-bindings-module-startup.log`。
+
+## 第十七批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归和第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./model ./controller \
+  -run 'TestModular|TestTwoFA|TestPendingTwoFA|TestValidateBackupCode|TestIncrementFailedAttempts|TestSecurityFactor|TestHardDelete|TestPasskey' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonfly -count=1
+```
+
+SQL 集成覆盖完整启停、备用码散列与重建、初始化失败回滚、状态响应不含密钥、管理员同级保护、认证版本推进与会话撤销；原并发备用码、失败次数和账户删除回归继续通过。真实 DragonflyDB 覆盖预热会话后的启停，确认旧令牌失效、当前会话续签和额度保留。
+
+输出：`/tmp/new-api-twofa-module-tests.log`、`/tmp/new-api-twofa-module-dragonfly.log`、`/tmp/new-api-twofa-module-full-tests.log`、`/tmp/new-api-twofa-module-vet.log`、`/tmp/new-api-twofa-module-startup.log`。

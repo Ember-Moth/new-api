@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/repo"
+	"github.com/QuantumNous/new-api/internal/module/identity/internal/twofa"
 	"gorm.io/gorm"
 )
 
@@ -46,6 +47,7 @@ type UserWallet interface {
 }
 
 type Dependencies struct {
+	TwoFAEvent           func(int, string)
 	VerifyEmail          func(string, string) bool
 	UserSecurity         UserSecurity
 	UserAuthorization    UserAuthorization
@@ -59,6 +61,8 @@ type Dependencies struct {
 }
 
 type Service struct {
+	factors           *twofa.Store
+	twoFAEvent        func(int, string)
 	bindings          *repo.Bindings
 	verifyEmail       func(string, string) bool
 	users             *repo.Users
@@ -75,6 +79,7 @@ type Service struct {
 
 func New(deps Dependencies) *Service {
 	return &Service{
+		factors: twofa.New(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), twoFAEvent: deps.TwoFAEvent,
 		bindings:    repo.NewBindings(deps.DB),
 		verifyEmail: deps.VerifyEmail,
 		users:       repo.NewUsers(deps.DB), userSecurity: deps.UserSecurity, userAuthorization: deps.UserAuthorization,
