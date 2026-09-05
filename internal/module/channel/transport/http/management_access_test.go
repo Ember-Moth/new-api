@@ -1,4 +1,4 @@
-package controller
+package channelhttp
 
 import (
 	"bytes"
@@ -9,7 +9,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/internal/infra/database/value"
+	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,19 +19,19 @@ import (
 func TestChannelHasSensitiveChanges(t *testing.T) {
 	baseURL := "https://api.example.com"
 	headerOverride := `{"Authorization":"Bearer {api_key}"}`
-	origin := &model.Channel{
+	origin := &channelmodule.Channel{
 		Type:           1,
 		Key:            "old-key",
 		BaseURL:        &baseURL,
 		HeaderOverride: &headerOverride,
-		Models:         model.StringList{"gpt-4o"},
-		Group:          model.StringList{"default"},
+		Models:         value.StringList{"gpt-4o"},
+		Group:          value.StringList{"default"},
 	}
 
 	t.Run("non-sensitive routing fields", func(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
-		updated.Models = model.StringList{"gpt-4o", "gpt-4o-mini"}
-		updated.Group = model.StringList{"vip"}
+		updated.Models = value.StringList{"gpt-4o", "gpt-4o-mini"}
+		updated.Group = value.StringList{"vip"}
 
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
 			"models": updated.Models,
@@ -97,15 +98,15 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 }
 
 func TestClearChannelReadOnlyFields(t *testing.T) {
-	channel := PatchChannel{Channel: model.Channel{
+	channel := PatchChannel{Channel: channelmodule.Channel{
 		CreatedTime:        11,
 		TestTime:           22,
 		ResponseTime:       33,
 		Balance:            44.5,
 		BalanceUpdatedTime: 55,
 		UsedQuota:          66,
-		Models:             model.StringList{"gpt-4o"},
-		Group:              model.StringList{"default"},
+		Models:             value.StringList{"gpt-4o"},
+		Group:              value.StringList{"default"},
 	}}
 
 	clearChannelReadOnlyFields(&channel, map[string]any{
@@ -125,8 +126,8 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 	assert.Zero(t, channel.Balance)
 	assert.Zero(t, channel.BalanceUpdatedTime)
 	assert.Zero(t, channel.UsedQuota)
-	assert.Equal(t, model.StringList{"gpt-4o"}, channel.Models)
-	assert.Equal(t, model.StringList{"default"}, channel.Group)
+	assert.Equal(t, value.StringList{"gpt-4o"}, channel.Models)
+	assert.Equal(t, value.StringList{"default"}, channel.Group)
 }
 
 func TestUpdateChannelRejectsStatusField(t *testing.T) {
@@ -140,7 +141,7 @@ func TestUpdateChannelRejectsStatusField(t *testing.T) {
 	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
-	UpdateChannel(ctx)
+	New(nil, ManagementHooks{}).UpdateChannel(ctx)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var response struct {
@@ -159,7 +160,7 @@ func TestChannelStatusValidation(t *testing.T) {
 }
 
 // TestChannelFieldsAreClassified guards the fail-closed sensitivity check: every
-// JSON field of PatchChannel (including the embedded model.Channel) must be listed
+// JSON field of PatchChannel (including the embedded channelmodule.Channel) must be listed
 // in channelSensitiveFields, channelNonSensitiveFields, or
 // channelOperationalFields. A newly added field that is left unclassified will
 // fail this test, forcing a conscious permission decision instead of silently

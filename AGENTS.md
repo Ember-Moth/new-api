@@ -26,7 +26,7 @@ internal/transport/http/routes/ — HTTP route composition
 internal/transport/http/middleware/ — Shared inbound HTTP middleware
 internal/transport/http/server/ — HTTP server and dashboard delivery
 internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
-internal/module/channel/ — Channel entities/persistence, routing/cache/key state, catalog and upstream sync; legacy HTTP callers are still being migrated
+internal/module/channel/ — Channel management HTTP handlers, validation, entities/persistence, routing/cache/key state, catalog and upstream sync; provider-specific operations are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules
 controller/    — Request handlers awaiting migration to their modules

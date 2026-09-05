@@ -90,7 +90,7 @@ func markAuditLogged(c *gin.Context) {
 
 // recordManageAudit 记录一条由操作者本人归属的管理/高危审计日志（资源类操作：
 // 渠道 / 系统设置 / 兑换码等）。content 由 action+params 自动渲染。
-func recordManageAudit(c *gin.Context, action string, params map[string]interface{}) {
+func RecordManageAudit(c *gin.Context, action string, params map[string]interface{}) {
 	recordManageAuditFor(c, c.GetInt("id"), action, params)
 }
 

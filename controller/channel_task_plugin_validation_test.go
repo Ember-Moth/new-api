@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
+
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -24,18 +26,18 @@ export function parseTaskResult() { return {}; }
 	baseURL := "https://example.com"
 
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, BaseURL: &baseURL}
-	require.ErrorContains(t, validateChannel(channel, false), "task plugin key is required")
+	require.ErrorContains(t, channelmodule.ValidateConfiguration(channel, false), "task plugin key is required")
 
 	missing := `{"task_plugin_key":"missing"}`
 	channel.Setting = &missing
-	require.ErrorContains(t, validateChannel(channel, false), "is not registered")
+	require.ErrorContains(t, channelmodule.ValidateConfiguration(channel, false), "is not registered")
 
 	longKey := `{"task_plugin_key":"` + strings.Repeat("x", 31) + `"}`
 	channel.Setting = &longKey
-	require.ErrorContains(t, validateChannel(channel, false), "must not exceed 30")
+	require.ErrorContains(t, channelmodule.ValidateConfiguration(channel, false), "must not exceed 30")
 
 	valid := `{"task_plugin_key":"channel-validation"}`
 	channel.Setting = &valid
 	channel.BaseURL = nil
-	require.ErrorContains(t, validateChannel(channel, false), "base URL is required")
+	require.ErrorContains(t, channelmodule.ValidateConfiguration(channel, false), "base URL is required")
 }

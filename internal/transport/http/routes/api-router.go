@@ -14,7 +14,7 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
-	channelHandler := channelhttp.New(deps.Channel)
+	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
@@ -252,7 +252,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 			taskPluginRoute.DELETE("/:key/versions/:version", controller.DeleteTaskPluginVersion)
 		}
 		apiRouter.GET("/task_plugin_options", middleware.AdminAuth(), middleware.RequirePermission(authz.TaskPluginBind), controller.GetTaskPluginOptions)
-		registerChannelRoutes(apiRouter)
+		registerChannelRoutes(apiRouter, channelHandler)
 		registerAuthzRoutes(apiRouter)
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

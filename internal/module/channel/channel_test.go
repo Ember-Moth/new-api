@@ -99,7 +99,7 @@ func newChannelTestRouter(t *testing.T, pricing channel.CatalogPricing) (*gin.En
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool, schema.Main))
 	service := channel.New(channel.Dependencies{DB: db, Pricing: pricing})
-	handler := channelhttp.New(service)
+	handler := channelhttp.New(service, channelhttp.ManagementHooks{})
 	router := gin.New()
 	router.GET("/groups", handler.GetPrefillGroups)
 	router.POST("/groups", handler.CreatePrefillGroup)

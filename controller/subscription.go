@@ -498,7 +498,7 @@ func AdminResetPlanSubscriptions(c *gin.Context) {
 	recordSubscriptionResetUserLogs(result, auditOperatorInfo(c))
 	common.SysLog(fmt.Sprintf("admin reset subscription plan %d quota: reset_count=%d user_count=%d advance_reset_time=%t",
 		result.PlanId, result.ResetCount, result.UserCount, result.AdvanceResetTime))
-	recordManageAudit(c, "subscription.plan_reset", map[string]interface{}{
+	RecordManageAudit(c, "subscription.plan_reset", map[string]interface{}{
 		"plan_id":            result.PlanId,
 		"plan_title":         result.PlanTitle,
 		"reset_count":        result.ResetCount,

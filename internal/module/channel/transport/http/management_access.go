@@ -1,8 +1,8 @@
-package controller
+package channelhttp
 
-import "github.com/QuantumNous/new-api/model"
+import channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 
-func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, requestData map[string]any) bool {
+func channelHasSensitiveChanges(channel *PatchChannel, origin *channelmodule.Channel, requestData map[string]any) bool {
 	if _, ok := requestData["type"]; ok && channel.Type != origin.Type {
 		return true
 	}
@@ -113,7 +113,7 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 
 // channelNonSensitiveFields lists routing / server-managed channel
 // fields a ChannelWrite admin may edit without ChannelSensitiveWrite. When a new
-// field is added to model.Channel it must be added to either this set or
+// field is added to channelmodule.Channel it must be added to either this set or
 // channelSensitiveFields or channelOperationalFields; otherwise it falls through
 // to the fail-closed branch and is treated as sensitive. The
 // TestChannelFieldsAreClassified guard test enforces this.

@@ -13,6 +13,7 @@ type Ability = entity.Ability
 type AbilityWithChannel = entity.AbilityWithChannel
 type ChannelSortOptions = routing.ChannelSortOptions
 type TaskAliasTarget = routing.TaskAliasTarget
+type ListFilter = routing.ListFilter
 
 func NewChannelSortOptions(sortBy string, sortOrder string, idSort bool) ChannelSortOptions {
 	return routing.NewChannelSortOptions(sortBy, sortOrder, idSort)

@@ -75,7 +75,9 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 - PostgreSQL 数组值类型移入共享数据库基础设施，令牌和渠道继续使用同一 SQL/缓存编码。
 - 原渠道 model 实现已移走；`model/channel_bridge.go` 暂时为尚未迁移的调用者提供转发和类型别名。这个桥接文件是待删除的迁移工作，不是最终模块边界。
 
-后续继续迁移渠道 HTTP 管理流程与后台渠道任务，使调用者直接接收模块依赖并移除桥接层。identity、gateway、billing、subscription、usage、system、配置及全局状态拆分均仍在完整目标内。按用户要求，后续工作在 `main` 上进行，每批完成验证后提交，不再创建分支。
+第四批已迁移渠道 HTTP 管理流程：列表与搜索、增删改、复制、标签批处理、状态切换、密钥查看及多 Key 管理。handler 直接持有渠道服务，授权和审计由应用组装注入；新 handler 不再导入旧 model/service/controller，也不再构造数据库查询。分页、标签及类型统计使用模块查询接口，渠道配置校验由模块公开能力负责。
+
+现有权限/审计集成测试继续调用真实模块 handler；敏感字段分类测试已随实现迁移。原 controller 只保留尚未迁移的提供商专属探测、凭证刷新和 Ollama 操作等渠道功能。后续继续处理这些适配与后台渠道任务，并逐步移除桥接层。identity、gateway、billing、subscription、usage、system、配置及全局状态拆分均仍在完整目标内。按用户要求，工作在 `main` 上进行，每批完成验证后提交，不再创建分支。
 
 ## 第一批验证（2026-09-05）
 
@@ -121,3 +123,16 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1 -v
 ```
 
 DragonflyDB 结果位于 `/tmp/new-api-channel-runtime-dragonfly.log`。
+
+## 第四批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。专项渠道/权限回归、主模块 build/vet、RelayKit 独立 build/vet 和完整后端回归通过；完整回归命令如下：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+```
+
+构建与启动命令沿用第一批记录。输出为 `/tmp/new-api-channel-management-tests.log`、`/tmp/new-api-management-full-tests.log`、`/tmp/new-api-management-startup.log`。

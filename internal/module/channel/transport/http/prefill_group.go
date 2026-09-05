@@ -11,10 +11,29 @@ import (
 
 type Handler struct {
 	channel *channel.Service
+	hooks   ManagementHooks
 }
 
-func New(service *channel.Service) *Handler {
-	return &Handler{channel: service}
+// ManagementHooks supplies request-scoped authorization and audit integration.
+// Catalog handlers do not need these hooks; sensitive-field permission checks fail closed
+// when no authorization evaluator has been supplied.
+type ManagementHooks struct {
+	Can   func(userID, role int, resource, action string) bool
+	Audit func(*gin.Context, string, map[string]any)
+}
+
+func New(service *channel.Service, hooks ManagementHooks) *Handler {
+	return &Handler{channel: service, hooks: hooks}
+}
+
+func (h *Handler) can(userID, role int, resource, action string) bool {
+	return h.hooks.Can != nil && h.hooks.Can(userID, role, resource, action)
+}
+
+func (h *Handler) recordAudit(c *gin.Context, action string, details map[string]any) {
+	if h.hooks.Audit != nil {
+		h.hooks.Audit(c, action, details)
+	}
 }
 
 func (h *Handler) GetPrefillGroups(c *gin.Context) {

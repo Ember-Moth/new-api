@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	httpserver "github.com/QuantumNous/new-api/internal/transport/http/server"
 	"github.com/QuantumNous/new-api/logger"
@@ -152,7 +153,12 @@ func Run(assets router.WebAssets) {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
 
-	server, err := httpserver.New(assets, router.Dependencies{Channel: model.ChannelService()})
+	server, err := httpserver.New(assets, router.Dependencies{Channel: model.ChannelService(), ChannelHooks: channelhttp.ManagementHooks{
+		Can: func(userID, role int, resource, action string) bool {
+			return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})
+		},
+		Audit: controller.RecordManageAudit,
+	}})
 	if err != nil {
 		common.FatalLog("failed to configure HTTP server: " + err.Error())
 		return
