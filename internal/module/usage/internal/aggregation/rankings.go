@@ -18,7 +18,7 @@ func (s *Store) GetRankingQuotaTotals(ctx context.Context, startTime int64, endT
 		Where("model_name <> ''").
 		Group("model_name").
 		Having("sum(token_used) > 0").
-		Order("total_tokens DESC")
+		Order("total_tokens DESC, model_name ASC")
 	query = applyRankingQuotaTimeRange(query, startTime, endTime)
 	err := query.Find(&rows).Error
 	return rows, err
@@ -28,7 +28,7 @@ func (s *Store) GetRankingQuotaBuckets(ctx context.Context, startTime int64, end
 	if bucketSize <= 0 {
 		bucketSize = 3600
 	}
-	bucketExpr := rankingBucketExpr(bucketSize)
+	bucketExpr := fmt.Sprintf("(created_at / %d) * %d", bucketSize, bucketSize)
 	var rows []RankingQuotaBucket
 	query := s.db.WithContext(ctx).Table("quota_data").
 		Select(fmt.Sprintf("model_name, %s as bucket, sum(token_used) as tokens", bucketExpr)).
@@ -39,10 +39,6 @@ func (s *Store) GetRankingQuotaBuckets(ctx context.Context, startTime int64, end
 	query = applyRankingQuotaTimeRange(query, startTime, endTime)
 	err := query.Find(&rows).Error
 	return rows, err
-}
-
-func rankingBucketExpr(bucketSize int64) string {
-	return fmt.Sprintf("(created_at / %d) * %d", bucketSize, bucketSize)
 }
 
 func applyRankingQuotaTimeRange(query *gorm.DB, startTime int64, endTime int64) *gorm.DB {

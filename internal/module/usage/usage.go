@@ -2,6 +2,10 @@ package usage
 
 import (
 	"context"
+	"time"
+
+	"github.com/QuantumNous/new-api/internal/module/usage/contract"
+	"github.com/QuantumNous/new-api/internal/module/usage/internal/rankings"
 
 	"github.com/QuantumNous/new-api/internal/module/usage/aggregation"
 
@@ -12,6 +16,7 @@ import (
 )
 
 type Service struct {
+	*rankings.Reader
 	Aggregates *aggregation.Store
 	*implementation.Store
 	*implementation.Writer
@@ -19,11 +24,12 @@ type Service struct {
 
 type WriterPolicy = implementation.WriterPolicy
 type Dependencies struct {
-	Aggregates   *aggregation.Store
-	DB           *gorm.DB
-	Kind         common.DatabaseType
-	ChannelNames func(context.Context, []int) (map[int]string, error)
-	Writer       WriterPolicy
+	RankingMetadata func(context.Context) map[string]contract.RankingModelMetadata
+	Aggregates      *aggregation.Store
+	DB              *gorm.DB
+	Kind            common.DatabaseType
+	ChannelNames    func(context.Context, []int) (map[int]string, error)
+	Writer          WriterPolicy
 }
 
 type Log = entity.Log
@@ -34,7 +40,7 @@ var ErrInvalidLogCursor = implementation.ErrInvalidLogCursor
 
 func New(deps Dependencies) *Service {
 	store := implementation.New(implementation.Dependencies{DB: deps.DB, Kind: deps.Kind, ChannelNames: deps.ChannelNames})
-	return &Service{Aggregates: deps.Aggregates, Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
+	return &Service{Reader: rankings.New(deps.Aggregates, deps.RankingMetadata, time.Now), Aggregates: deps.Aggregates, Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
 }
 
 func FormatAdminLogs(logs []*Log) { implementation.FormatAdminLogs(logs) }

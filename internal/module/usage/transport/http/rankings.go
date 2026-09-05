@@ -1,14 +1,13 @@
-package controller
+package usagehttp
 
 import (
 	"net/http"
 
-	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
-func GetRankings(c *gin.Context) {
-	result, err := service.GetRankingsSnapshot(c.DefaultQuery("period", "week"))
+func (h *Handler) GetRankings(c *gin.Context) {
+	result, err := h.service.GetRankingsSnapshot(c.Request.Context(), c.DefaultQuery("period", "week"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
