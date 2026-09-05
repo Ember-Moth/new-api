@@ -92,7 +92,7 @@ TEST_POSTGRES_OLD_DSN='postgres://postgres@127.0.0.1:55432/new_api_test?sslmode=
 TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
 TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' make test
 
-go build -o /tmp/new-api-final-bin .
+go build -o /tmp/new-api-final-bin ./cmd/new-api
 go vet ./...
 (cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
 (cd web && bun run typecheck)

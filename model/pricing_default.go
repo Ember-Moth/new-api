@@ -1,7 +1,11 @@
 package model
 
 import (
+	"context"
 	"strings"
+
+	"github.com/QuantumNous/new-api/internal/module/channel"
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 )
 
 // 简化的供应商映射规则
@@ -69,7 +73,7 @@ var defaultVendorIcons = map[string]string{
 }
 
 // initDefaultVendorMapping 简化的默认供应商映射
-func initDefaultVendorMapping(metaMap map[string]*Model, vendorMap map[int]*Vendor, enableAbilities []AbilityWithChannel) {
+func initDefaultVendorMapping(metaMap map[string]*contract.Model, vendorMap map[int]*contract.Vendor, enableAbilities []AbilityWithChannel) {
 	for _, ability := range enableAbilities {
 		modelName := ability.Model
 		if _, exists := metaMap[modelName]; exists {
@@ -87,17 +91,17 @@ func initDefaultVendorMapping(metaMap map[string]*Model, vendorMap map[int]*Vend
 		}
 
 		// 创建模型元数据
-		metaMap[modelName] = &Model{
+		metaMap[modelName] = &contract.Model{
 			ModelName: modelName,
 			VendorID:  vendorID,
 			Status:    1,
-			NameRule:  NameRuleExact,
+			NameRule:  contract.NameRuleExact,
 		}
 	}
 }
 
 // 查找或创建供应商
-func getOrCreateVendor(vendorName string, vendorMap map[int]*Vendor) int {
+func getOrCreateVendor(vendorName string, vendorMap map[int]*contract.Vendor) int {
 	// 查找现有供应商
 	for id, vendor := range vendorMap {
 		if vendor.Name == vendorName {
@@ -106,13 +110,13 @@ func getOrCreateVendor(vendorName string, vendorMap map[int]*Vendor) int {
 	}
 
 	// 创建新供应商
-	newVendor := &Vendor{
+	newVendor := &contract.Vendor{
 		Name:   vendorName,
 		Status: 1,
 		Icon:   getDefaultVendorIcon(vendorName),
 	}
 
-	if err := newVendor.Insert(); err != nil {
+	if err := channel.New(channel.Dependencies{DB: DB}).CreateVendor(context.Background(), newVendor); err != nil {
 		return 0
 	}
 

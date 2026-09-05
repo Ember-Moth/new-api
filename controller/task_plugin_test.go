@@ -80,7 +80,7 @@ func TestDeleteThirdPartyPluginReportsAssociatedChannelsAndInFlightTasks(t *test
 	baseURL := "https://example.com"
 	setting := `{"task_plugin_key":"lifecycle-only"}`
 	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked", Models: model.StringList{"doc"}, Group: model.StringList{"default"}, BaseURL: &baseURL, Setting: &setting}
-	require.NoError(t, channel.Insert())
+	require.NoError(t, model.ChannelService().InsertChannel(&(channel)))
 	require.NoError(t, model.DB.Create(&model.Task{Platform: "lifecycle-only", Status: model.TaskStatusInProgress}).Error)
 
 	recorder := httptest.NewRecorder()
@@ -102,7 +102,7 @@ func TestDisableThirdPartyPluginSupportsCascadeAndForce(t *testing.T) {
 	baseURL := "https://example.com"
 	setting := `{"task_plugin_key":"lifecycle-only"}`
 	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked", Models: model.StringList{"doc"}, Group: model.StringList{"default"}, BaseURL: &baseURL, Setting: &setting}
-	require.NoError(t, channel.Insert())
+	require.NoError(t, model.ChannelService().InsertChannel(&(channel)))
 	require.NoError(t, model.DB.Create(&model.Task{Platform: "lifecycle-only", Status: model.TaskStatusSubmitted}).Error)
 
 	recorder := httptest.NewRecorder()
@@ -238,7 +238,7 @@ func TestDisableFactoryPluginRespectsInUseGuard(t *testing.T) {
 	baseURL := "https://example.com"
 	channelSetting := `{"task_plugin_key":"kling"}`
 	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked-factory", Models: model.StringList{"doc"}, Group: model.StringList{"default"}, BaseURL: &baseURL, Setting: &channelSetting}
-	require.NoError(t, channel.Insert())
+	require.NoError(t, model.ChannelService().InsertChannel(&(channel)))
 
 	recorder := postTaskPluginStatus(t, key, "", `{"enabled":false}`)
 	assert.Contains(t, recorder.Body.String(), `"success":false`)

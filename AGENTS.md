@@ -17,16 +17,23 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ## Architecture
 
-Layered architecture: Router -> Controller -> Service -> Model
+The application is being organized as a modular monolith. See `docs/modular-monolith.md` for the full target, dependency rules, and completion checklist. The remaining root-level business packages are migration work, not the final architecture.
 
 ```
-router/        — HTTP routing (API, relay, dashboard, web)
-controller/    — Request handlers
-service/       — Business logic
-model/         — Data models and DB access (GORM)
+cmd/new-api/    — Executable and CLI entrypoint
+internal/app/  — Application composition, startup, and shutdown
+internal/transport/http/routes/ — HTTP route composition
+internal/transport/http/middleware/ — Shared inbound HTTP middleware
+internal/transport/http/server/ — HTTP server and dashboard delivery
+internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
+internal/module/channel/ — Channel entities/persistence, routing/cache/key state, catalog and upstream sync; legacy HTTP callers are still being migrated
+internal/migration/schema/ — Versioned production SQL schema
+internal/arch/  — Executable dependency boundary rules
+controller/    — Request handlers awaiting migration to their modules
+service/       — Business logic awaiting migration to its modules
+model/         — Data and business operations awaiting module ownership
 relay/         — AI API relay/proxy with provider adapters
   relay/channel/ — Provider-specific adapters (openai/, claude/, gemini/, aws/, etc.)
-middleware/    — Auth, rate limiting, CORS, logging, distribution
 setting/       — Configuration management (ratio, model, operation, system, performance)
 common/        — Shared utilities (JSON, crypto, cache client, env, rate-limit, etc.)
 dto/           — Data transfer objects (request/response structs)
@@ -38,6 +45,12 @@ pkg/           — Internal packages (cachex, ionet)
 web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
   src/i18n/    — Frontend internationalization (i18next, en/zh/zh-TW/fr/ru/ja/vi)
 ```
+
+- Only command entrypoints may import `internal/app` to assemble the runtime.
+- New module implementations must not import the legacy `controller`, `service`, or `model` packages. Pass the required dependencies through constructors.
+- Module core code uses `context.Context` and owned contracts; Gin handlers belong in the module's `transport/http` package.
+- Infrastructure must not depend on business modules or inbound transport. Keep module implementation under its own nested `internal/` directory.
+- Build the executable with `go build ./cmd/new-api`; `web/assets.go` embeds the built `web/dist` resources.
 
 ## Internationalization (i18n)
 

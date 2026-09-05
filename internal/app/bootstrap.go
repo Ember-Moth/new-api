@@ -1,0 +1,109 @@
+package app
+
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/module/channel"
+	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/oauth"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
+	_ "github.com/QuantumNous/new-api/setting/performance_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/joho/godotenv"
+)
+
+func initResources() error {
+	err := godotenv.Load(".env")
+	if err != nil {
+		if common.DebugEnabled {
+			common.SysLog("No .env file found, using default environment variables. If needed, please create a .env file and set the relevant variables.")
+		}
+	}
+
+	// 加载环境变量
+	common.InitEnv()
+
+	logger.SetupLogger()
+
+	// Initialize model settings
+	ratio_setting.InitRatioSettings()
+
+	httpclient.InitHttpClient()
+
+	service.InitTokenEncoders()
+
+	// Initialize SQL Database
+	err = model.InitDB()
+	if err != nil {
+		common.FatalLog("failed to initialize database: " + err.Error())
+		return err
+	}
+	channelDeps := model.ChannelDependencies()
+	channelDeps.Pricing = channelPricing{}
+	model.ConfigureChannelService(channel.New(channelDeps))
+	if err = authz.Init(model.DB); err != nil {
+		common.FatalLog("failed to initialize authorization: " + err.Error())
+		return err
+	}
+	if common.PasswordLoginEncryptionEnabled {
+		if err = model.InitPasswordEncryption(); err != nil {
+			common.FatalLog("failed to initialize password encryption: " + err.Error())
+			return err
+		}
+	}
+
+	model.CheckSetup()
+
+	// Initialize options, should after model.InitDB()
+
+	model.InitOptionMap()
+
+	// 清理旧的磁盘缓存文件
+	common.CleanupOldCacheFiles()
+
+	// Initialize SQL Database
+	err = model.InitLogDB()
+	if err != nil {
+		return err
+	}
+
+	// Initialize Redis
+	err = common.InitRedisClient()
+	if err != nil {
+		return err
+	}
+
+	perfmetrics.Init()
+
+	// 启动系统监控
+	common.StartSystemMonitor()
+
+	// Initialize i18n
+	err = i18n.Init()
+	if err != nil {
+		common.SysError("failed to initialize i18n: " + err.Error())
+		// Don't return error, i18n is not critical
+	} else {
+		common.SysLog("i18n initialized with languages: " + strings.Join(i18n.SupportedLanguages(), ", "))
+	}
+	// Register user language loader for lazy loading
+	i18n.SetUserLangLoader(model.GetUserLanguage)
+
+	// Load custom OAuth providers from database
+	err = oauth.LoadCustomProviders()
+	if err != nil {
+		common.SysError("failed to load custom OAuth providers: " + err.Error())
+		// Don't return error, custom OAuth is not critical
+	}
+
+	service.StartAuthArtifactCleanup()
+
+	return nil
+}

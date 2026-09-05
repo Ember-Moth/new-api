@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -582,7 +584,7 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 	for name, value := range descriptor.Headers {
 		req.Header.Set(name, value)
 	}
-	client, err := service.GetHttpClientWithProxy(proxy)
+	client, err := httpclient.GetHttpClientWithProxy(proxy)
 	if err != nil {
 		return nil, err
 	}

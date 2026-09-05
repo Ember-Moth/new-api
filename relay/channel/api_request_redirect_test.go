@@ -9,17 +9,18 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDoRequestReturnsUpstreamRedirectWithoutFollowing(t *testing.T) {
-	service.InitHttpClient()
+	httpclient.InitHttpClient()
 	gin.SetMode(gin.TestMode)
-	sharedClient := service.GetHttpClient()
+	sharedClient := httpclient.GetHttpClient()
 	require.NotNil(t, sharedClient)
 	require.NotNil(t, sharedClient.CheckRedirect)
 	originalRedirectPolicy := reflect.ValueOf(sharedClient.CheckRedirect).Pointer()

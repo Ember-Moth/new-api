@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
@@ -119,7 +121,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("mj-api-secret", midjourneyChannel.Key)
-		resp, err := service.GetHttpClient().Do(req)
+		resp, err := httpclient.GetHttpClient().Do(req)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
 			cancel()

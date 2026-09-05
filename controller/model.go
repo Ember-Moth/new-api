@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/QuantumNous/new-api/internal/module/channel"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -139,7 +142,7 @@ func channelOwnerName(channelType int) string {
 }
 
 func getPreferredModelOwners(modelNames []string, groups []string) map[string]string {
-	channelTypes, err := model.GetPreferredModelOwnerChannelTypes(modelNames, groups)
+	channelTypes, err := channel.New(channel.Dependencies{DB: model.DB}).PreferredModelOwnerChannelTypes(context.Background(), modelNames, groups)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("GetPreferredModelOwnerChannelTypes error: %v", err))
 		return map[string]string{}

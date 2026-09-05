@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
@@ -751,16 +753,16 @@ func DeleteChannel(c *gin.Context) {
 		channelLookupFailed = true
 	}
 	channel := model.Channel{Id: id}
-	err := channel.Delete()
+	err := model.ChannelService().DeleteChannel(&(channel))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
 	if channelLookupFailed {
-		service.ResetProxyClientCache()
+		httpclient.ResetProxyClientCache()
 	} else {
-		service.InvalidateProxyClient(channelProxy)
+		httpclient.InvalidateProxyClient(channelProxy)
 	}
 	recordManageAudit(c, "channel.delete", map[string]interface{}{
 		"id":   id,
@@ -781,7 +783,7 @@ func DeleteDisabledChannel(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	if rows > 0 {
-		service.ResetProxyClientCache()
+		httpclient.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.delete_disabled", map[string]interface{}{
 		"count": rows,
@@ -940,7 +942,7 @@ func DeleteChannelBatch(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	if deletedCount > 0 {
-		service.ResetProxyClientCache()
+		httpclient.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.delete_batch", map[string]interface{}{
 		"count": deletedCount,
@@ -1019,8 +1021,8 @@ func UpdateChannel(c *gin.Context) {
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	if _, settingProvided := requestData["setting"]; settingProvided {
-		newProxy, _ := service.NormalizeProxyURL(channel.GetSetting().Proxy)
-		normalizedOriginProxy, originProxyErr := service.NormalizeProxyURL(originProxy)
+		newProxy, _ := httpclient.NormalizeProxyURL(channel.GetSetting().Proxy)
+		normalizedOriginProxy, originProxyErr := httpclient.NormalizeProxyURL(originProxy)
 		proxyChanged = originProxyErr != nil || normalizedOriginProxy != newProxy
 	}
 
@@ -1118,14 +1120,14 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
-	err = channel.Update()
+	err = model.ChannelService().UpdateChannel(&channel.Channel)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
 	if proxyChanged {
-		service.InvalidateProxyClient(originProxy)
+		httpclient.InvalidateProxyClient(originProxy)
 	}
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
@@ -1477,7 +1479,7 @@ func CopyChannel(c *gin.Context) {
 	}
 
 	// insert
-	if err := clone.Insert(); err != nil {
+	if err := model.ChannelService().InsertChannel(&(clone)); err != nil {
 		common.SysError("failed to clone channel: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
 		return
@@ -1713,7 +1715,7 @@ func ManageMultiKeys(c *gin.Context) {
 
 		channel.ChannelInfo.MultiKeyStatusList[keyIndex] = 2 // disabled
 
-		err = channel.Update()
+		err = model.ChannelService().UpdateChannel(channel)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1755,7 +1757,7 @@ func ManageMultiKeys(c *gin.Context) {
 			delete(channel.ChannelInfo.MultiKeyDisabledReason, keyIndex)
 		}
 
-		err = channel.Update()
+		err = model.ChannelService().UpdateChannel(channel)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1779,7 +1781,7 @@ func ManageMultiKeys(c *gin.Context) {
 		channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
 		channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
 
-		err = channel.Update()
+		err = model.ChannelService().UpdateChannel(channel)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1826,7 +1828,7 @@ func ManageMultiKeys(c *gin.Context) {
 			return
 		}
 
-		err = channel.Update()
+		err = model.ChannelService().UpdateChannel(channel)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1906,7 +1908,7 @@ func ManageMultiKeys(c *gin.Context) {
 		channel.ChannelInfo.MultiKeyDisabledTime = newDisabledTime
 		channel.ChannelInfo.MultiKeyDisabledReason = newDisabledReason
 
-		err = channel.Update()
+		err = model.ChannelService().UpdateChannel(channel)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1974,7 +1976,7 @@ func ManageMultiKeys(c *gin.Context) {
 		channel.ChannelInfo.MultiKeyDisabledTime = newDisabledTime
 		channel.ChannelInfo.MultiKeyDisabledReason = newDisabledReason
 
-		err = channel.Update()
+		err = model.ChannelService().UpdateChannel(channel)
 		if err != nil {
 			common.ApiError(c, err)
 			return

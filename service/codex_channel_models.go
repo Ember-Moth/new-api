@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 )
@@ -19,7 +21,7 @@ func FetchCodexChannelModels(channel *model.Channel) ([]string, error) {
 		return nil, fmt.Errorf("codex channel does not support multi-key model discovery")
 	}
 
-	client, err := NewProxyHttpClient(channel.GetSetting().Proxy)
+	client, err := httpclient.NewProxyHttpClient(channel.GetSetting().Proxy)
 	if err != nil {
 		return nil, err
 	}

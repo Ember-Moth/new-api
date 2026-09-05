@@ -9,13 +9,14 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -167,11 +168,11 @@ func TestCopyChannelRejectsInvalidLegacyProxySettings(t *testing.T) {
 func TestDeleteChannelResetsProxyCacheWhenPreReadFails(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Log{}))
-	service.ResetProxyClientCache()
-	t.Cleanup(service.ResetProxyClientCache)
+	httpclient.ResetProxyClientCache()
+	t.Cleanup(httpclient.ResetProxyClientCache)
 
 	proxyURL := "http://proxy.example:8080"
-	beforeDelete, err := service.GetHttpClientWithProxy(proxyURL)
+	beforeDelete, err := httpclient.GetHttpClientWithProxy(proxyURL)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
@@ -182,7 +183,7 @@ func TestDeleteChannelResetsProxyCacheWhenPreReadFails(t *testing.T) {
 	DeleteChannel(ctx)
 
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
-	afterDelete, err := service.GetHttpClientWithProxy(proxyURL)
+	afterDelete, err := httpclient.GetHttpClientWithProxy(proxyURL)
 	require.NoError(t, err)
 	assert.NotSame(t, beforeDelete, afterDelete)
 }

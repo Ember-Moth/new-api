@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
+
+	"github.com/QuantumNous/new-api/internal/module/channel/entity"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -15,7 +19,7 @@ func resetPricingEndpointTestTables(t *testing.T) {
 	t.Helper()
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	common.MemoryCacheEnabled = true
-	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}, &Model{}, &Vendor{}))
+	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}, &entity.Model{}, &entity.Vendor{}))
 	for _, table := range []string{"abilities", "channels", "models", "vendors"} {
 		require.NoError(t, DB.Exec("DELETE FROM "+table).Error)
 	}
@@ -119,13 +123,13 @@ func TestPricingModelMetadataEndpointsMergeWithAdvancedCustomInference(t *testin
 		},
 	))
 	insertPricingEndpointAbility(t, 103, "gemini-2.5-flash")
-	require.NoError(t, DB.Create(&Model{
+	require.NoError(t, DB.Create(&entity.Model{
 		ModelName: "gemini-2.5-flash",
 		Endpoints: `{
 			"openai": "/v1/chat/completions"
 		}`,
 		Status:   1,
-		NameRule: NameRuleExact,
+		NameRule: contract.NameRuleExact,
 	}).Error)
 
 	byModel := pricingEndpointTypesByModel(t)
@@ -148,13 +152,13 @@ func TestPricingModelMetadataEndpointsCanProvideEndpointWithoutChannelInference(
 		},
 	))
 	insertPricingEndpointAbility(t, 104, "metadata-only-model")
-	require.NoError(t, DB.Create(&Model{
+	require.NoError(t, DB.Create(&entity.Model{
 		ModelName: "metadata-only-model",
 		Endpoints: `{
 			"openai": "/v1/chat/completions"
 		}`,
 		Status:   1,
-		NameRule: NameRuleExact,
+		NameRule: contract.NameRuleExact,
 	}).Error)
 
 	byModel := pricingEndpointTypesByModel(t)
@@ -275,8 +279,8 @@ func TestCacheUpdateChannelSyncsAdvancedCustomConfig(t *testing.T) {
 	}))
 	CacheUpdateChannel(channel)
 
-	require.NotNil(t, channel2advancedCustomConfig[401])
-	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIResponse}, channel2advancedCustomConfig[401].SupportedEndpointTypesForModel("gemini-3.5-flash"))
+	require.NotNil(t, ChannelService().AdvancedConfigs([]int{401})[401])
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIResponse}, ChannelService().AdvancedConfigs([]int{401})[401].SupportedEndpointTypesForModel("gemini-3.5-flash"))
 
 	channel.SetOtherSettings(pricingEndpointAdvancedCustomConfig(dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",
@@ -284,11 +288,11 @@ func TestCacheUpdateChannelSyncsAdvancedCustomConfig(t *testing.T) {
 	}))
 	CacheUpdateChannel(channel)
 
-	require.NotNil(t, channel2advancedCustomConfig[401])
-	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAI}, channel2advancedCustomConfig[401].SupportedEndpointTypesForModel("gemini-3.5-flash"))
+	require.NotNil(t, ChannelService().AdvancedConfigs([]int{401})[401])
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAI}, ChannelService().AdvancedConfigs([]int{401})[401].SupportedEndpointTypesForModel("gemini-3.5-flash"))
 
 	channel.Type = constant.ChannelTypeOpenAI
 	CacheUpdateChannel(channel)
 
-	assert.Nil(t, channel2advancedCustomConfig[401])
+	assert.Nil(t, ChannelService().AdvancedConfigs([]int{401})[401])
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,8 +34,8 @@ func TestJSONColumnValuersReturnString(t *testing.T) {
 			want:   `{"key":"k"}`,
 		},
 		{
-			name:   "JSONValue",
-			valuer: JSONValue(`[{"k":"v"}]`),
+			name:   "entity.JSONValue",
+			valuer: entity.JSONValue(`[{"k":"v"}]`),
 			want:   `[{"k":"v"}]`,
 		},
 	}
@@ -53,9 +54,9 @@ func TestJSONColumnValuersReturnString(t *testing.T) {
 // 空值仍返回 nil,保持列的 NULL 语义。
 func TestJSONColumnValuersZeroValueIsNil(t *testing.T) {
 	for name, valuer := range map[string]driver.Valuer{
-		"Properties":      Properties{},
-		"TaskPrivateData": TaskPrivateData{},
-		"JSONValue":       JSONValue(nil),
+		"Properties":       Properties{},
+		"TaskPrivateData":  TaskPrivateData{},
+		"entity.JSONValue": entity.JSONValue(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			value, err := valuer.Value()

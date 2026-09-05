@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -153,7 +155,7 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 		}
 	} else {
 		// SSRF防护：验证Bark URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(finalURL); err != nil {
+		if err := httpclient.ValidateSSRFProtectedFetchURL(finalURL); err != nil {
 			return fmt.Errorf("request reject: %v", err)
 		}
 
@@ -167,7 +169,7 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 		req.Header.Set("User-Agent", "OneAPI-Bark-Notify/1.0")
 
 		// 发送请求
-		client := GetSSRFProtectedHTTPClient()
+		client := httpclient.GetSSRFProtectedHTTPClient()
 		resp, err = client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to send bark request: %v", err)
@@ -246,7 +248,7 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 		}
 	} else {
 		// SSRF防护：验证Gotify URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(finalURL); err != nil {
+		if err := httpclient.ValidateSSRFProtectedFetchURL(finalURL); err != nil {
 			return fmt.Errorf("request reject: %v", err)
 		}
 
@@ -261,7 +263,7 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 		req.Header.Set("User-Agent", "NewAPI-Gotify-Notify/1.0")
 
 		// 发送请求
-		client := GetSSRFProtectedHTTPClient()
+		client := httpclient.GetSSRFProtectedHTTPClient()
 		resp, err = client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to send gotify request: %v", err)

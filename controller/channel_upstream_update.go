@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
@@ -346,7 +348,7 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 			request.Host = headers.Get(name)
 		}
 	}
-	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
+	client, err := httpclient.NewProxyHttpClient(channel.GetSetting().Proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +388,7 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 	}
 
 	if channel.Type == constant.ChannelTypeGemini {
-		key, _, apiErr := channel.GetNextEnabledKey()
+		key, _, apiErr := model.ChannelService().GetNextEnabledKey(channel)
 		if apiErr != nil {
 			return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
 		}
@@ -432,7 +434,7 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		url = fmt.Sprintf("%s/v1/models", baseURL)
 	}
 
-	key, _, apiErr := channel.GetNextEnabledKey()
+	key, _, apiErr := model.ChannelService().GetNextEnabledKey(channel)
 	if apiErr != nil {
 		return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
 	}
@@ -462,7 +464,7 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 }
 
 func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string) ([]string, error) {
-	key, _, apiErr := channel.GetNextEnabledKey()
+	key, _, apiErr := model.ChannelService().GetNextEnabledKey(channel)
 	if apiErr != nil {
 		return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
 	}
@@ -549,7 +551,7 @@ func checkAndPersistChannelUpstreamModelUpdates(
 		return false, autoAdded, err
 	}
 	if modelsChanged {
-		if err = channel.UpdateAbilities(nil); err != nil {
+		if err = model.ChannelService().UpdateAbilities(channel, nil); err != nil {
 			return true, autoAdded, err
 		}
 	}
@@ -995,7 +997,7 @@ func applyChannelUpstreamModelUpdates(
 	}
 
 	if modelsChanged {
-		if err := channel.UpdateAbilities(nil); err != nil {
+		if err := model.ChannelService().UpdateAbilities(channel, nil); err != nil {
 			return addModels, removeModels, remainingModels, remainingRemoveModels, true, err
 		}
 	}

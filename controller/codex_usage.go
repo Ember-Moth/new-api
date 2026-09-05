@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
@@ -99,7 +101,7 @@ func fetchCodexChannelWhamData(
 		return
 	}
 
-	client, err := service.GetHttpClientWithProxy(ch.GetSetting().Proxy)
+	client, err := httpclient.GetHttpClientWithProxy(ch.GetSetting().Proxy)
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -1,9 +1,13 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"strings"
+
+	"github.com/QuantumNous/new-api/internal/module/channel"
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 
 	"sync"
 	"time"
@@ -121,14 +125,9 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 	return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
 }
 
-// loadPricingAdvancedCustomConfigs runs inside updatePricing while
-// updatePricingLock is held, and nests channelSyncLock.RLock. This defines the
-// global lock order updatePricingLock -> channelSyncLock: any code path holding
-// channelSyncLock must release it before touching the pricing cache (see
-// InitChannelCache / CacheUpdateChannel), otherwise it deadlocks.
-// The returned configs are pointers shared with the channel cache; they are
-// replaced wholesale on update and never mutated in place, so reading them after
-// RUnlock is safe.
+// loadPricingAdvancedCustomConfigs reads the channel module's parsed routing
+// snapshot. Routing invalidation runs after the channel module releases its
+// snapshot lock, so pricing and routing never acquire their locks in reverse.
 func loadPricingAdvancedCustomConfigs(enableAbilities []AbilityWithChannel) map[int]*dto.AdvancedCustomConfig {
 	channelIDs := make([]int, 0)
 	seen := make(map[int]struct{})
@@ -148,14 +147,7 @@ func loadPricingAdvancedCustomConfigs(enableAbilities []AbilityWithChannel) map[
 
 	configs := make(map[int]*dto.AdvancedCustomConfig, len(channelIDs))
 	if common.MemoryCacheEnabled {
-		channelSyncLock.RLock()
-		defer channelSyncLock.RUnlock()
-		for _, channelID := range channelIDs {
-			if config := channel2advancedCustomConfig[channelID]; config != nil {
-				configs[channelID] = config
-			}
-		}
-		return configs
+		return ChannelService().AdvancedConfigs(channelIDs)
 	}
 
 	for _, channelID := range channelIDs {
@@ -189,23 +181,22 @@ func updatePricing() {
 		return
 	}
 	// 预加载模型元数据与供应商一次，避免循环查询
-	var allMeta []Model
-	_ = DB.Find(&allMeta).Error
-	metaMap := make(map[string]*Model)
-	prefixList := make([]*Model, 0)
-	suffixList := make([]*Model, 0)
-	containsList := make([]*Model, 0)
+	allMeta, _ := channel.New(channel.Dependencies{DB: DB}).AllModelMetadata(context.Background())
+	metaMap := make(map[string]*contract.Model)
+	prefixList := make([]*contract.Model, 0)
+	suffixList := make([]*contract.Model, 0)
+	containsList := make([]*contract.Model, 0)
 	for i := range allMeta {
-		m := &allMeta[i]
-		if m.NameRule == NameRuleExact {
+		m := allMeta[i]
+		if m.NameRule == contract.NameRuleExact {
 			metaMap[m.ModelName] = m
 		} else {
 			switch m.NameRule {
-			case NameRulePrefix:
+			case contract.NameRulePrefix:
 				prefixList = append(prefixList, m)
-			case NameRuleSuffix:
+			case contract.NameRuleSuffix:
 				suffixList = append(suffixList, m)
-			case NameRuleContains:
+			case contract.NameRuleContains:
 				containsList = append(containsList, m)
 			}
 		}
@@ -241,11 +232,10 @@ func updatePricing() {
 	}
 
 	// 预加载供应商
-	var vendors []Vendor
-	_ = DB.Find(&vendors).Error
-	vendorMap := make(map[int]*Vendor)
+	vendors, _, _ := channel.New(channel.Dependencies{DB: DB}).ListVendors(context.Background(), 0, -1)
+	vendorMap := make(map[int]*contract.Vendor)
 	for i := range vendors {
-		vendorMap[vendors[i].Id] = &vendors[i]
+		vendorMap[vendors[i].Id] = vendors[i]
 	}
 
 	// 初始化默认供应商映射

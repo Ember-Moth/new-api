@@ -8,11 +8,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
@@ -37,7 +39,7 @@ export function buildContentRequest(ctx){const item=(ctx.data.artifacts||[]).fin
 `
 
 func TestDocumentPluginRunsGenericBatchArtifactChain(t *testing.T) {
-	service.InitHttpClient()
+	httpclient.InitHttpClient()
 	originalDB := model.DB
 	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)

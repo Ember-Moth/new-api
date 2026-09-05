@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
@@ -157,7 +159,7 @@ func GetResponseBody(method, url string, channel *model.Channel, headers http.He
 	for k := range headers {
 		req.Header.Add(k, headers.Get(k))
 	}
-	client, err := service.GetHttpClientWithProxy(channel.GetSetting().Proxy)
+	client, err := httpclient.GetHttpClientWithProxy(channel.GetSetting().Proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +193,7 @@ func updateChannelCloseAIBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(response.TotalAvailable)
+	model.ChannelService().UpdateChannelBalance(channel, response.TotalAvailable)
 	return response.TotalAvailable, nil
 }
 
@@ -213,7 +215,7 @@ func updateChannelOpenAISBBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(balance)
+	model.ChannelService().UpdateChannelBalance(channel, balance)
 	return balance, nil
 }
 
@@ -233,7 +235,7 @@ func updateChannelAIProxyBalance(channel *model.Channel) (float64, error) {
 	if !response.Success {
 		return 0, fmt.Errorf("code: %d, message: %s", response.ErrorCode, response.Message)
 	}
-	channel.UpdateBalance(response.Data.TotalPoints)
+	model.ChannelService().UpdateChannelBalance(channel, response.Data.TotalPoints)
 	return response.Data.TotalPoints, nil
 }
 
@@ -249,7 +251,7 @@ func updateChannelAPI2GPTBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(response.TotalRemaining)
+	model.ChannelService().UpdateChannelBalance(channel, response.TotalRemaining)
 	return response.TotalRemaining, nil
 }
 
@@ -271,7 +273,7 @@ func updateChannelSiliconFlowBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(balance)
+	model.ChannelService().UpdateChannelBalance(channel, balance)
 	return balance, nil
 }
 
@@ -300,7 +302,7 @@ func updateChannelDeepSeekBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(balance)
+	model.ChannelService().UpdateChannelBalance(channel, balance)
 	return balance, nil
 }
 
@@ -315,7 +317,7 @@ func updateChannelAIGC2DBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	channel.UpdateBalance(response.TotalAvailable)
+	model.ChannelService().UpdateChannelBalance(channel, response.TotalAvailable)
 	return response.TotalAvailable, nil
 }
 
@@ -331,7 +333,7 @@ func updateChannelOpenRouterBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := response.Data.TotalCredits - response.Data.TotalUsage
-	channel.UpdateBalance(balance)
+	model.ChannelService().UpdateChannelBalance(channel, balance)
 	return balance, nil
 }
 
@@ -365,7 +367,7 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	}
 	availableBalanceCny := response.Data.AvailableBalance
 	availableBalanceUsd := decimal.NewFromFloat(availableBalanceCny).Div(decimal.NewFromFloat(operation_setting.Price)).InexactFloat64()
-	channel.UpdateBalance(availableBalanceUsd)
+	model.ChannelService().UpdateChannelBalance(channel, availableBalanceUsd)
 	return availableBalanceUsd, nil
 }
 
@@ -402,7 +404,7 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 			request.Host = headers.Get(name)
 		}
 	}
-	client, err := service.GetHttpClientWithProxy(channel.GetSetting().Proxy)
+	client, err := httpclient.GetHttpClientWithProxy(channel.GetSetting().Proxy)
 	if err != nil {
 		return channelBalanceResult{}, sanitizeFetchModelsError(err, key)
 	}
@@ -441,7 +443,7 @@ func fetchAdvancedCustomBalance(channel *model.Channel) (channelBalanceResult, e
 				balance >= 0 &&
 				!math.IsNaN(balance) &&
 				!math.IsInf(balance, 0) {
-				channel.UpdateBalance(balance)
+				model.ChannelService().UpdateChannelBalance(channel, balance)
 				return channelBalanceResult{Balance: balance}, nil
 			}
 		}
@@ -523,7 +525,7 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := subscription.HardLimitUSD - usage.TotalUsage/100
-	channel.UpdateBalance(balance)
+	model.ChannelService().UpdateChannelBalance(channel, balance)
 	return balance, nil
 }
 

@@ -9,10 +9,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
@@ -65,7 +67,7 @@ func (b *nativeRouteBilling) Reserve(quota int) error {
 
 func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	service.InitHttpClient()
+	httpclient.InitHttpClient()
 
 	previousDB := model.DB
 	previousLogDB := model.LOG_DB

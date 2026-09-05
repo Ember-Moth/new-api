@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -40,7 +42,7 @@ func RelayMidjourneyImage(c *gin.Context) {
 	if channel, err := model.CacheGetChannel(midjourneyTask.ChannelId); err == nil {
 		proxy = channel.GetSetting().Proxy
 		if proxy != "" {
-			if httpClient, err = service.GetHttpClientWithProxy(proxy); err != nil {
+			if httpClient, err = httpclient.GetHttpClientWithProxy(proxy); err != nil {
 				c.JSON(400, gin.H{
 					"error": "proxy_url_invalid",
 				})
@@ -49,11 +51,11 @@ func RelayMidjourneyImage(c *gin.Context) {
 		}
 	}
 	if httpClient == nil {
-		httpClient = service.GetSSRFProtectedHTTPClient()
+		httpClient = httpclient.GetSSRFProtectedHTTPClient()
 	}
 	var validateErr error
 	if proxy == "" {
-		validateErr = service.ValidateSSRFProtectedFetchURL(midjourneyTask.ImageUrl)
+		validateErr = httpclient.ValidateSSRFProtectedFetchURL(midjourneyTask.ImageUrl)
 	} else {
 		// 渠道代理路径的连接由代理侧建立，无法做拨号时逐 IP 校验，
 		// 因此保留请求前的一次性 SSRF 校验。

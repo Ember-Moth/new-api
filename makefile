@@ -20,7 +20,7 @@ build-all-web: build-web
 
 start-api:
 	@echo "Starting api dev server..."
-	@cd $(API_DIR) && go run main.go &
+	@cd $(API_DIR) && go run ./cmd/new-api &
 
 dev-api:
 	@echo "Starting api services (docker)..."
@@ -38,11 +38,11 @@ dev-web:
 
 dev: dev-api dev-web
 
-# The main package embeds the ignored web/dist output and is covered after build-web.
+# The executable and web asset package require web/dist; CI builds them after preparing the assets.
 test:
 	@echo "Testing root Go module..."
 	@root_module=$$(GOWORK=off go list -m); \
-		root_packages=$$(GOWORK=off go list -e ./... | grep -vxF "$$root_module"); \
+		root_packages=$$(GOWORK=off go list -e ./... | grep -vxF "$$root_module/cmd/new-api" | grep -vxF "$$root_module/web"); \
 		GOWORK=off go test $$root_packages
 	@echo "Testing relaykit Go module..."
 	@cd relaykit && GOWORK=off go test ./...

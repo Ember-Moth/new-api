@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	rootconstant "github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -191,7 +192,7 @@ func TestAliImageHandlerHonorsRequestResponseFormat(t *testing.T) {
 	t.Cleanup(func() {
 		rootconstant.MaxFileDownloadMB = originalMaxFileDownloadMB
 	})
-	service.InitHttpClient()
+	httpclient.InitHttpClient()
 
 	tests := []struct {
 		name           string

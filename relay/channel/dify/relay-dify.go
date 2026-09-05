@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -98,7 +100,7 @@ func uploadDifyFile(c *gin.Context, info *relaycommon.RelayInfo, user string, me
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", info.ApiKey))
 
 		// Send request
-		client := service.GetHttpClient()
+		client := httpclient.GetHttpClient()
 		resp, err := client.Do(req)
 		if err != nil {
 			common.SysLog("failed to send request: " + err.Error())

@@ -16,7 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relay"
@@ -889,7 +889,7 @@ func TestChannel(c *gin.Context) {
 	}
 	tok := time.Now()
 	milliseconds := tok.Sub(tik).Milliseconds()
-	go channel.UpdateResponseTime(milliseconds)
+	go model.ChannelService().UpdateChannelResponseTime(channel, milliseconds)
 	consumedTime := float64(milliseconds) / 1000.0
 	if result.newAPIError != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -959,7 +959,7 @@ func testChannelForHealthCheck(ctx context.Context, channel *model.Channel, test
 		summary.Enabled++
 	}
 
-	channel.UpdateResponseTime(milliseconds)
+	model.ChannelService().UpdateChannelResponseTime(channel, milliseconds)
 	return summary
 }
 

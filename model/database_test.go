@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
+	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
@@ -138,11 +139,11 @@ func TestPostgreSQLStartupPreservesDataAndIndexesAcrossRestarts(t *testing.T) {
 			assert.Equal(t, originalIndexes, indexes)
 			assert.Equal(t, originalLogIndexes, logIndexes)
 			assert.Error(t, DB.Create(&Token{UserId: user.Id, Key: token.Key}).Error)
-			group := PrefillGroup{Name: "reusable-name", Type: "model", Items: JSONValue(`[]`)}
+			group := entity.PrefillGroup{Name: "reusable-name", Type: "model", Items: entity.JSONValue(`[]`)}
 			require.NoError(t, DB.Create(&group).Error)
-			assert.Error(t, DB.Create(&PrefillGroup{Name: group.Name, Type: group.Type}).Error)
+			assert.Error(t, DB.Create(&entity.PrefillGroup{Name: group.Name, Type: group.Type}).Error)
 			require.NoError(t, DB.Delete(&group).Error)
-			require.NoError(t, DB.Create(&PrefillGroup{Name: group.Name, Type: group.Type}).Error)
+			require.NoError(t, DB.Create(&entity.PrefillGroup{Name: group.Name, Type: group.Type}).Error)
 			assert.Equal(t, common.DatabaseTypePostgreSQL, common.MainDatabaseType())
 			assert.Equal(t, common.DatabaseTypePostgreSQL, common.LogDatabaseType())
 		})

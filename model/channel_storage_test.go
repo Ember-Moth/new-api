@@ -68,14 +68,14 @@ func TestChannelArraysPreserveMembershipAndSurvivePartialUpdates(t *testing.T) {
 	require.NoError(t, db.First(&updated, updated.Id).Error)
 	assert.JSONEq(t, `{}`, updated.GetModelMapping())
 	assert.Equal(t, StringList{"gpt-one", "gpt-two"}, updated.Models)
-	require.NoError(t, updated.AddAbilities(nil))
+	require.NoError(t, ChannelService().AddAbilities(&(updated), nil))
 	require.NoError(t, db.Exec(`CREATE FUNCTION fail_routing_update() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'injected routing relation failure'; END;
 $$;
 CREATE TRIGGER fail_routing_update BEFORE INSERT ON abilities FOR EACH ROW EXECUTE FUNCTION fail_routing_update();`).Error)
 	changed := updated
 	changed.Models = StringList{"replacement"}
-	require.Error(t, changed.Update())
+	require.Error(t, ChannelService().UpdateChannel(&(changed)))
 	require.NoError(t, db.First(&updated, updated.Id).Error)
 	assert.Equal(t, StringList{"gpt-one", "gpt-two"}, updated.Models)
 	var count int64

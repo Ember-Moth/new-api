@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/module/channel"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/stretchr/testify/require"
@@ -128,7 +130,7 @@ func TestGetPreferredModelOwnerChannelTypes(t *testing.T) {
 			clearPreferredOwnerTables(t)
 			tt.setup(t)
 
-			owners, err := GetPreferredModelOwnerChannelTypes([]string{modelName}, tt.groups)
+			owners, err := channel.New(channel.Dependencies{DB: DB}).PreferredModelOwnerChannelTypes(t.Context(), []string{modelName}, tt.groups)
 			require.NoError(t, err)
 
 			got, ok := owners[modelName]

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -223,7 +225,7 @@ func getBaiduAccessTokenHelper(apiKey string) (*BaiduAccessToken, error) {
 	}
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Accept", "application/json")
-	res, err := service.GetHttpClient().Do(req)
+	res, err := httpclient.GetHttpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}

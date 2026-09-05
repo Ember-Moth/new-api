@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/infra/httpclient"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -88,7 +90,7 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 		}
 	} else {
 		// SSRF防护：验证Webhook URL（非Worker模式）
-		if err := ValidateSSRFProtectedFetchURL(webhookURL); err != nil {
+		if err := httpclient.ValidateSSRFProtectedFetchURL(webhookURL); err != nil {
 			return fmt.Errorf("request reject: %v", err)
 		}
 
@@ -107,7 +109,7 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 		}
 
 		// 发送请求
-		client := GetSSRFProtectedHTTPClient()
+		client := httpclient.GetSSRFProtectedHTTPClient()
 		resp, err = client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to send webhook request: %v", err)

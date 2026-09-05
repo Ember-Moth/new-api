@@ -112,7 +112,7 @@ export function parseTaskResult() { return {}; }
 		BaseURL: &baseURL,
 		Setting: &setting,
 	}
-	require.NoError(t, channel.Insert())
+	require.NoError(t, model.ChannelService().InsertChannel(&(channel)))
 
 	payload := fmt.Sprintf(
 		`{"id":%d,"type":61,"name":"existing-plugin","key":"sk","models":["doc"],"group":["default"],"base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind-update\"}"}`,
