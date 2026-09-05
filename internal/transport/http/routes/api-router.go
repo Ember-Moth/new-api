@@ -8,6 +8,7 @@ import (
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
 	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
+	usagehttp "github.com/QuantumNous/new-api/internal/module/usage/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
 	// Import oauth package to register providers via init()
@@ -18,6 +19,7 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
+	usageHandler := usagehttp.New(deps.Usage)
 	systemHandler := systemhttp.New(deps.System, deps.SystemHooks)
 	billingHandler := billinghttp.New(deps.Billing, deps.BillingHooks)
 	subscriptionHandler := subscriptionhttp.New(deps.Subscription)
@@ -301,13 +303,13 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 			redemptionRoute.DELETE("/:id", billingHandler.DeleteRedemption)
 		}
 		logRoute := apiRouter.Group("/log")
-		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
-		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
-		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
+		logRoute.GET("/", middleware.AdminAuth(), usageHandler.GetAllLogs)
+		logRoute.GET("/stat", middleware.AdminAuth(), usageHandler.GetLogsStat)
+		logRoute.GET("/self/stat", middleware.UserAuth(), usageHandler.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
-		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
-		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
-		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
+		logRoute.GET("/search", middleware.AdminAuth(), usageHandler.SearchAllLogs)
+		logRoute.GET("/self", middleware.UserAuth(), usageHandler.GetUserLogs)
+		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), usageHandler.SearchUserLogs)
 
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
@@ -334,7 +336,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 
 		logRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
 		{
-			logRoute.GET("/token", middleware.TokenAuthReadOnly(), controller.GetLogByKey)
+			logRoute.GET("/token", middleware.TokenAuthReadOnly(), usageHandler.GetLogByKey)
 		}
 		groupRoute := apiRouter.Group("/group")
 		groupRoute.Use(middleware.AdminAuth())

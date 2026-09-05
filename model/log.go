@@ -2,97 +2,15 @@ package model
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
-	"time"
+
+	"github.com/QuantumNous/new-api/internal/module/usage"
 
 	"github.com/QuantumNous/new-api/common"
-	dbquery "github.com/QuantumNous/new-api/internal/infra/database/query"
 	"github.com/QuantumNous/new-api/logger"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-
-	"gorm.io/gorm"
 )
-
-func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm.DB, error) {
-	if value == "" {
-		return tx, nil
-	}
-	if strings.Contains(value, "%") {
-		condition, pattern, err := buildLogLikeCondition(column, value)
-		if err != nil {
-			return nil, err
-		}
-		return tx.Where(condition, pattern), nil
-	}
-	return tx.Where(column+" = ?", value), nil
-}
-
-func buildLogLikeCondition(column string, value string) (string, string, error) {
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		pattern, err := sanitizeClickHouseLikePattern(value)
-		if err != nil {
-			return "", "", err
-		}
-		return column + " LIKE ?", pattern, nil
-	}
-
-	pattern, err := dbquery.SanitizeLikePattern(value)
-	if err != nil {
-		return "", "", err
-	}
-	return column + " LIKE ? ESCAPE '!'", pattern, nil
-}
-
-func sanitizeClickHouseLikePattern(input string) (string, error) {
-	input = strings.ReplaceAll(input, `\`, `\\`)
-	input = strings.ReplaceAll(input, `_`, `\_`)
-
-	if err := dbquery.ValidateLikePattern(input); err != nil {
-		return "", err
-	}
-	return input, nil
-}
-
-type Log struct {
-	EventID           string `json:"-" gorm:"type:varchar(36);default:''"`
-	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
-	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
-	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
-	Content           string `json:"content"`
-	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
-	TokenName         string `json:"token_name" gorm:"index;default:''"`
-	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
-	Quota             int    `json:"quota" gorm:"default:0"`
-	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
-	UseTime           int    `json:"use_time" gorm:"default:0"`
-	IsStream          bool   `json:"is_stream"`
-	ChannelId         int    `json:"channel" gorm:"index"`
-	ChannelName       string `json:"channel_name" gorm:"->"`
-	TokenId           int    `json:"token_id" gorm:"default:0;index"`
-	Group             string `json:"group" gorm:"index"`
-	Ip                string `json:"ip" gorm:"index;default:''"`
-	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
-	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	Other             string `json:"other"`
-}
-
-func (entry *Log) BeforeCreate(tx *gorm.DB) error {
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) && entry.EventID == "" {
-		id, err := uuid.NewV7()
-		if err != nil {
-			return err
-		}
-		entry.EventID = id.String()
-	}
-	return nil
-}
 
 // don't use iota, avoid change log type value
 const (
@@ -106,60 +24,7 @@ const (
 	LogTypeLogin   = 7
 )
 
-func ensureLogRequestId(log *Log) {
-	if log != nil && log.RequestId == "" {
-		log.RequestId = common.NewRequestId()
-	}
-}
-
-func createLog(log *Log) error {
-	ensureLogRequestId(log)
-	return LOG_DB.Create(log).Error
-}
-
-func clickHouseLogOrder(prefix string) string {
-	return prefix + "created_at desc, " + prefix + "request_id desc"
-}
-
-func assignDisplayLogIds(logs []*Log, startIdx int) {
-	for i := range logs {
-		logs[i].Id = startIdx + i + 1
-	}
-}
-
-func formatUserLogs(logs []*Log, startIdx int) {
-	for i := range logs {
-		logs[i].ChannelName = ""
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
-	}
-	assignDisplayLogIds(logs, startIdx)
-}
-
-// FormatAdminLogs removes root-only diagnostics while retaining operational
-// admin_info. Root callers must not pass their results through this formatter.
-func FormatAdminLogs(logs []*Log) {
-	for i := range logs {
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityAdmin)
-	}
-}
-
-// FormatRootLogs normalizes legacy metadata into the current scoped shape
-// without removing root-only diagnostics.
-func FormatRootLogs(logs []*Log) {
-	for i := range logs {
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityRoot)
-	}
-}
-
-func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
-	order := "id desc"
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		order = clickHouseLogOrder("")
-	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
-	formatUserLogs(logs, 0)
-	return logs, err
-}
+func createLog(log *Log) error { return LogService().Create(context.Background(), log) }
 
 func RecordLog(userId int, logType int, content string) {
 	if logType == LogTypeConsume && !common.LogConsumeEnabled {
@@ -475,283 +340,33 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
+type Log = usage.Log
+type Stat = usage.Stat
+
+func FormatAdminLogs(logs []*Log)            { usage.FormatAdminLogs(logs) }
+func FormatRootLogs(logs []*Log)             { usage.FormatRootLogs(logs) }
+func formatUserLogs(logs []*Log, offset int) { usage.FormatUserLogs(logs, offset) }
+func LogService() *usage.Service {
+	return usage.New(usage.Dependencies{DB: LOG_DB, Kind: common.LogDatabaseType(), ChannelNames: ChannelService().ChannelNames})
+}
+func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
+	return LogService().GetLogByTokenId(context.Background(), tokenId)
+}
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, cursorPages ...*LogCursorPage) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB
-	} else {
-		tx = LOG_DB.Where("logs.type = ?", logType)
-	}
-
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
-		return nil, 0, err
-	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
-		return nil, 0, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
-	}
-	if requestId != "" {
-		tx = tx.Where("logs.request_id = ?", requestId)
-	}
-	if upstreamRequestId != "" {
-		tx = tx.Where("logs.upstream_request_id = ?", upstreamRequestId)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
-	}
-	if channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", channel)
-	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
-	}
-	if len(cursorPages) > 0 && cursorPages[0] != nil {
-		logs, err = selectLogCursorPage(tx, num, cursorPages[0])
-	} else {
-		if err = tx.Model(&Log{}).Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-		order := "logs.created_at desc, logs.id desc"
-		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-			order = clickHouseLogOrder("logs.")
-		}
-		err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		assignDisplayLogIds(logs, startIdx)
-	}
-
-	channelIds := types.NewSet[int]()
-	for _, log := range logs {
-		if log.ChannelId != 0 {
-			channelIds.Add(log.ChannelId)
-		}
-	}
-
-	if channelIds.Len() > 0 {
-		var channels []struct {
-			Id   int    `gorm:"column:id"`
-			Name string `gorm:"column:name"`
-		}
-		if common.MemoryCacheEnabled {
-			// Cache get channel
-			for _, channelId := range channelIds.Items() {
-				if cacheChannel, err := CacheGetChannel(channelId); err == nil {
-					channels = append(channels, struct {
-						Id   int    `gorm:"column:id"`
-						Name string `gorm:"column:name"`
-					}{
-						Id:   channelId,
-						Name: cacheChannel.Name,
-					})
-				}
-			}
-		} else {
-			// Bulk query channels from DB
-			if err = DB.Table("channels").Select("id, name").Where("id IN ?", channelIds.Items()).Find(&channels).Error; err != nil {
-				return logs, total, err
-			}
-		}
-		channelMap := make(map[int]string, len(channels))
-		for _, channel := range channels {
-			channelMap[channel.Id] = channel.Name
-		}
-		for i := range logs {
-			logs[i].ChannelName = channelMap[logs[i].ChannelId]
-		}
-	}
-
-	return logs, total, err
+	return LogService().GetAllLogs(context.Background(), logType, startTimestamp, endTimestamp, modelName, username, tokenName, startIdx, num, channel, group, requestId, upstreamRequestId, cursorPages...)
 }
-
-const logSearchCountLimit = 10000
-
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, cursorPages ...*LogCursorPage) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("logs.user_id = ?", userId)
-	} else {
-		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
-	}
-
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
-		return nil, 0, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
-	}
-	if requestId != "" {
-		tx = tx.Where("logs.request_id = ?", requestId)
-	}
-	if upstreamRequestId != "" {
-		tx = tx.Where("logs.upstream_request_id = ?", upstreamRequestId)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
-	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
-	}
-	if len(cursorPages) > 0 && cursorPages[0] != nil {
-		logs, err = selectLogCursorPage(tx, num, cursorPages[0])
-	} else {
-		if err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-		order := "logs.id desc"
-		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-			order = clickHouseLogOrder("logs.")
-		}
-		err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-
-	formatUserLogs(logs, startIdx)
-	return logs, total, err
+	return LogService().GetUserLogs(context.Background(), userId, logType, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId, cursorPages...)
 }
-
-type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
-}
-
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
-
-	// 为rpm和tpm创建单独的查询
-	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
-
-	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
-		return stat, err
-	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
-		return stat, err
-	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
-	}
-	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
-		return stat, err
-	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", modelName); err != nil {
-		return stat, err
-	}
-	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
-		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
-	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
-	}
-
-	tx = tx.Where("type = ?", LogTypeConsume)
-	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
-
-	// 只统计最近60秒的rpm和tpm
-	rpmTpmQuery = rpmTpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
-
-	// 执行查询
-	if err := tx.Scan(&stat).Error; err != nil {
-		common.SysError("failed to query log stat: " + err.Error())
-		return stat, errors.New("查询统计数据失败")
-	}
-	var rateStat struct {
-		Rpm int
-		Tpm int
-	}
-	if err := rpmTpmQuery.Scan(&rateStat).Error; err != nil {
-		common.SysError("failed to query rpm/tpm stat: " + err.Error())
-		return stat, errors.New("查询统计数据失败")
-	}
-	stat.Rpm = rateStat.Rpm
-	stat.Tpm = rateStat.Tpm
-
-	return stat, nil
+	return LogService().SumUsedQuota(context.Background(), logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
 }
-
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
-	tx := LOG_DB.Table("logs").Select("COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0)")
-	if username != "" {
-		tx = tx.Where("username = ?", username)
-	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
-	}
-	if modelName != "" {
-		tx = tx.Where("model_name = ?", modelName)
-	}
-	tx.Where("type = ?", LogTypeConsume).Scan(&token)
-	return token
+	return LogService().SumUsedToken(context.Background(), logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 }
-
 func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
-	var total int64
-	if err := LOG_DB.WithContext(ctx).Model(&Log{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {
-		return 0, err
-	}
-	return total, nil
+	return LogService().CountOldLog(ctx, targetTimestamp)
 }
-
 func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	if nil != ctx.Err() {
-		return 0, ctx.Err()
-	}
-
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		// ClickHouse DELETE is a heavy mutation that rewrites data parts, so
-		// per-batch mutations would be pathologically slow. Remove all matching
-		// rows in a single synchronous mutation regardless of limit; the reported
-		// count lets the caller's progress loop complete in one pass.
-		total, err := CountOldLog(ctx, targetTimestamp)
-		if err != nil {
-			return 0, err
-		}
-		if total == 0 {
-			return 0, nil
-		}
-		if err := LOG_DB.WithContext(ctx).Exec(
-			"ALTER TABLE logs DELETE WHERE created_at < ? SETTINGS mutations_sync = 1",
-			targetTimestamp,
-		).Error; err != nil {
-			return 0, err
-		}
-		return total, nil
-	}
-
-	result := LOG_DB.WithContext(ctx).Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
-	if nil != result.Error {
-		return 0, result.Error
-	}
-	return result.RowsAffected, nil
+	return LogService().DeleteOldLogBatch(ctx, targetTimestamp, limit)
 }

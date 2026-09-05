@@ -171,6 +171,12 @@ Passkey 登录通过应用注入的完成回调连接剩余登录传输层，并
 
 用户到缓存投影的纯转换归实体，发布元数据不携带余额覆盖。原缓存回归随实现迁移，继续保护回滚屏障超时恢复、已提交版本下限、延迟安全快照拒绝及同版本分组刷新修复。共享缓存客户端配置和旧调用适配仍未清除，整体目标继续推进。
 
+第二十二批建立 usage 模块，迁入日志实体、角色元数据过滤、加密游标、管理端/用户端查询、统计、令牌日志读取和清理。日志仓储绑定明确的数据库类型，PostgreSQL 与 ClickHouse 的排序、转义和清理路径独立；渠道名称通过 channel 模块提供的接口批量获取。
+
+用户统计固定按用户 ID 隔离，避免将用户名当通配符过滤而扩大范围。PostgreSQL 清理使用有限 ID 子查询，真正限制每次删除的批次；ClickHouse 保持一次同步 mutation 删除全部匹配记录。日志写入也经模块仓储补齐请求 ID，保留调用方已提供的请求 ID。
+
+原 controller/log.go 已移除，model 日志查询与存储函数为剩余调用方提供适配。计费、任务结算和审计事件的组装仍留在原调用路径，后续继续按业务归属收拢。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -504,3 +510,20 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1
 真实 DragonflyDB 验证扣减额度后发布元数据仍保留余额，提交禁用与新认证版本后旧快照无法回填；SQL/缓存回归继续覆盖回滚恢复和版本下限单调性。
 
 输出：`/tmp/new-api-usercache-module-tests.log`、`/tmp/new-api-usercache-module-dragonfly.log`、`/tmp/new-api-usercache-module-full-tests.log`、`/tmp/new-api-usercache-module-vet.log`、`/tmp/new-api-usercache-module-startup.log`。
+
+## 第二十二批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归与第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test ./internal/arch ./internal/module/usage/... ./model ./controller ./internal/module/system/... \
+  -run 'TestModular|TestLog|TestFormat|TestTaskPluginLog|TestLegacyLog|TestClickHouse|TestRecord|TestProvider|TestRelayed|TestError' -count=1
+```
+
+在真实 PostgreSQL/ClickHouse 上验证相同时间戳的游标分页、游标身份绑定与篡改拒绝、字符串转义、用户 ID 统计隔离、请求 ID 补齐/保留、展示 ID、敏感元数据过滤和清理批次。原角色分层及大整数元数据回归随实现保留，系统日志清理任务继续通过。
+
+输出：`/tmp/new-api-usage-module-tests.log`、`/tmp/new-api-usage-module-full-tests.log`、`/tmp/new-api-usage-module-vet.log`、`/tmp/new-api-usage-module-startup.log`。
