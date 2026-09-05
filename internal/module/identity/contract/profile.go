@@ -102,6 +102,6 @@ type BillingPreferenceRequest struct {
 
 // CheckoutBuyer is the account projection needed to start a payment session.
 type CheckoutBuyer struct {
-	ID                              int
-	Username, Email, StripeCustomer string
+	ID                                     int
+	Username, Email, StripeCustomer, Group string
 }

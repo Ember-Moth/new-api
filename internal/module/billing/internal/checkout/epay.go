@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
@@ -57,4 +58,25 @@ func (c *Client) VerifyEpay(params map[string]string) (contract.VerifiedPayment,
 		return contract.VerifiedPayment{}, err
 	}
 	return contract.VerifiedPayment{TradeNo: result.ServiceTradeNo, PaymentMethod: result.Type, Paid: result.TradeStatus == epay.StatusTradeSuccess, Payload: string(payload)}, nil
+}
+
+func (c *Client) EpayWallet(ctx context.Context, request contract.CheckoutRequest) (contract.CheckoutSession, error) {
+	if err := ctx.Err(); err != nil {
+		return contract.CheckoutSession{}, err
+	}
+	cfg := c.options.Config()
+	client, err := c.epay(cfg)
+	if err != nil {
+		return contract.CheckoutSession{}, err
+	}
+	notifyURL, err := url.Parse(cfg.CallbackAddress + "/api/user/epay/notify")
+	if err != nil {
+		return contract.CheckoutSession{}, err
+	}
+	returnURL, err := url.Parse(strings.TrimRight(cfg.ServerAddress, "/") + "/usage-logs")
+	if err != nil {
+		return contract.CheckoutSession{}, err
+	}
+	target, params, err := client.Purchase(&epay.PurchaseArgs{Type: request.PaymentMethod, ServiceTradeNo: request.TradeNo, Name: fmt.Sprintf("TUC%d", request.InputAmount), Money: strconv.FormatFloat(request.Price, 'f', 2, 64), Device: epay.PC, NotifyUrl: notifyURL, ReturnUrl: returnURL})
+	return contract.CheckoutSession{EpayURL: target, EpayParams: params}, err
 }

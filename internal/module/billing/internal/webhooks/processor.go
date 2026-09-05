@@ -18,6 +18,7 @@ var ErrSignature = errors.New("invalid payment webhook signature")
 var ErrPayload = errors.New("invalid payment webhook payload")
 
 type Config struct {
+	EpayConfigured                  bool
 	WaffoEnabled                    bool
 	WaffoPrivateKey, WaffoPublicKey string
 	PancakeEnabled                  bool
@@ -31,6 +32,7 @@ type SubscriptionOrders interface {
 	FinishPending(context.Context, string, string, string) error
 }
 type Dependencies struct {
+	EpayVerifier      func(map[string]string) (contract.VerifiedPayment, error)
 	PancakePublicKeys *pancake.WebhookPublicKeys
 	Config            func() Config
 	TopUps            *topups.Store
@@ -46,6 +48,8 @@ func (p *Processor) Enabled(provider string) bool {
 		return false
 	}
 	switch provider {
+	case "epay":
+		return cfg.EpayConfigured
 	case "stripe":
 		return strings.TrimSpace(cfg.StripeSecret) != ""
 	case "creem":

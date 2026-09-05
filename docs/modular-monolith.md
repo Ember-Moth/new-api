@@ -265,6 +265,14 @@ Pancake 绑定路由环境对应的验签公钥，并验证签名载荷 mode、�
 
 Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、报价、Epay 钱包回调、配置适配及普通转发额度运行时仍待继续整理。
 
+第三十五批将钱包支付信息、通用金额/额度换算、Epay 钱包报价/下单/回调迁入 billing。旧 controller/topup.go 与进程内订单锁移除；Stripe/Creem/Waffo 旧结账入口暂时通过薄校验适配复用模块的额度边界校验。
+
+报价一次生成原始数量、持久化整数单位、预计到账额度和价格，下单复用同一配置快照的计算结果。保留 Token 展示模式既有的整数单位截断，转换前检查整数范围、额度上限与非有限配置，避免极端额度单位导致溢出或 decimal 转换异常。用户分组由 identity 的账户投影提供，余额容量仍在报价阶段检查、入账事务中再次验证。
+
+支付信息按原字段返回，但复制支付方式/折扣等集合后组装，避免修改共享配置；钱包下单显式执行支付确认门槛。Epay 钱包先持久化订单，再生成签名支付参数，回调以签名和已配置凭据为准，不依赖当前可选支付方式列表。报价、成功/失败确认和回调地址保持原接口约定。
+
+其余钱包提供商的结账/报价、配置适配、普通转发额度与批量缓存落库仍待继续迁移。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -955,3 +963,31 @@ python3 /tmp/verify-new-api-modular-startup.py
 Pancake 测试覆盖测试/生产公钥隔离、签名时效、签名载荷环境、Store 和买家身份不匹配不入账、数据库故障返回 retry、重复通知只发放一次、订阅与钱包不能互相替代，以及配置缺少 Store 时拒绝回调。完整回归继续验证真实 DragonflyDB 入账缓存和 PostgreSQL/ClickHouse 日志；竞态检查通过。
 
 输出：`/tmp/new-api-waffo-hooks-build.log`、`/tmp/new-api-waffo-hooks-tests.log`、`/tmp/new-api-waffo-hooks-race.log`、`/tmp/new-api-waffo-hooks-full-tests.log`、`/tmp/new-api-waffo-hooks-vet.log`、`/tmp/new-api-waffo-hooks-startup.log`。
+
+## 第三十五批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/billing/... ./internal/module/subscription/... ./controller ./model ./service \
+  -run 'TestModular|TestWallet|TestEpay|TestTopup|TestValidateCredited|TestStripeCredited|TestSubscription|TestRecharge' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing -run 'TestWallet|TestEpay' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+模块测试覆盖货币/Token 展示模式、大整数、持久化单位截断、最大充值提示、非法单位/价格/折扣拒绝、钱包容量检查、支付信息启用条件及集合隔离。真实 PostgreSQL 与 Epay 签名测试将报价、订单和最终入账连通，验证回调地址、重复通知、停用可选支付方式后仍处理有效旧订单，以及支付确认关闭时不创建新订单。原控制器的额度回归迁入模块，其他提供商的校验回归保留。
+
+完整回归继续覆盖真实 DragonflyDB 入账缓存和 PostgreSQL/ClickHouse 日志，竞态检查通过。
+
+输出：`/tmp/new-api-wallet-epay-build.log`、`/tmp/new-api-wallet-epay-tests.log`、`/tmp/new-api-wallet-epay-race.log`、`/tmp/new-api-wallet-epay-full-tests.log`、`/tmp/new-api-wallet-epay-vet.log`、`/tmp/new-api-wallet-epay-startup.log`。

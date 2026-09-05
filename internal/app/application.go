@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	billingpurchases "github.com/QuantumNous/new-api/internal/module/billing/purchases"
+
 	billingwebhooks "github.com/QuantumNous/new-api/internal/module/billing/webhooks"
 
 	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
@@ -146,7 +148,7 @@ func Run(assets router.WebAssets) {
 	service.StartCodexCredentialAutoRefreshTask()
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
-	billingService := billing.New(billing.Dependencies{Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{Config: service.PaymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+	billingService := billing.New(billing.Dependencies{Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{EpayVerifier: service.PaymentCheckoutClient().VerifyEpay, Config: service.PaymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
 		WalletRuntime: billing.WalletRuntime{
 			Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
 			Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
@@ -155,6 +157,7 @@ func Run(assets router.WebAssets) {
 	identityService := identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})
+	billingService.Purchases = billingpurchases.New(billingpurchases.Dependencies{Config: service.WalletConfiguration, Buyer: identityService.CheckoutBuyer, GroupRatio: common.GetTopupGroupRatio, TopUps: model.TopUpStore(), Gateway: service.PaymentCheckoutClient()})
 	subscriptionService := subscription.New(subscription.Dependencies{
 		Gateways: service.PaymentCheckoutClient(), CheckoutBuyer: identityService.CheckoutBuyer,
 		BillingPreference: identityService.BillingPreference,

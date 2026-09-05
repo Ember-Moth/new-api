@@ -13,6 +13,7 @@ type GatewayConfig struct {
 }
 
 type CheckoutRequest struct {
+	InputAmount                                        int64
 	Provider, ProductID, TradeNo, PaymentMethod, Title string
 	Price                                              float64
 	UserID                                             int
