@@ -162,3 +162,11 @@ func (s *Service) UpdateBillingPreference(ctx context.Context, id int, value str
 	}
 	return preference, nil
 }
+
+func (s *Service) CheckoutBuyer(ctx context.Context, id int) (*contract.CheckoutBuyer, error) {
+	user, err := s.users.Get(ctx, id, false)
+	if err != nil {
+		return nil, err
+	}
+	return &contract.CheckoutBuyer{ID: user.Id, Username: user.Username, Email: user.Email, StripeCustomer: user.StripeCustomer}, nil
+}

@@ -233,6 +233,14 @@ PostgreSQL 初始 SQL 为全部汇总维度增加非空和组合唯一约束；�
 
 支付网关传输、其余身份入口、钱包与转发运行时、配置和旧调用适配仍在完整目标内。
 
+第三十一批将 Stripe、Creem、Waffo Pancake 和 Epay 的订阅结账编排及 HTTP 入口迁入 subscription，Epay 通知与浏览器返回入口一并迁移。共用当前套餐、账户投影和购买上限校验，身份模块只输出结账所需的 ID、用户名、邮箱与 Stripe 客户标识；控制器不再持有四份重复的订阅订单创建流程。
+
+billing 的 checkout 客户端封装 Stripe SDK、Creem HTTP、Waffo SDK 和 Epay 签名协议。Creem 与 Waffo 的钱包旧入口复用模块客户端，原配置通过一个薄适配提供。Stripe 使用实例上的请求密钥，不修改 stripe.Key，并按固定版本 SDK 的参数约束移除 subscription 模式不支持的 customer_creation。Creem 请求携带 context，JSON 读写统一使用 common 包装。
+
+所有订阅网关调用前先保存本地 pending 订单，避免 Stripe 快速回调先于本地订单。网关调用失败或超时不猜测远端是否已受理，保留订单供后续经过验证的完成/过期通知处理；已经完成的快速回调不会被请求失败覆盖。Epay 使用模块订单事务处理重复通知，不再依赖进程内订单锁，响应与跳转格式保留。
+
+四个旧订阅支付控制器文件已删除。其余支付渠道与钱包共用的 webhook 分发/验签控制器、配置适配及钱包运行时仍待继续迁移。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -806,3 +814,31 @@ python3 /tmp/verify-new-api-modular-startup.py
 真实 DragonflyDB 测试启用批量额度落库，先产生未落库预扣，再发布扣费偏好，确认缓存余额不被 SQL 中的旧余额覆盖，语言与认证版本保持，最终落库后的余额正确。
 
 输出：`/tmp/new-api-subscription-self-build.log`、`/tmp/new-api-subscription-self-tests.log`、`/tmp/new-api-subscription-self-race.log`、`/tmp/new-api-subscription-self-dragonfly.log`、`/tmp/new-api-subscription-self-full-tests.log`、`/tmp/new-api-subscription-self-vet.log`、`/tmp/new-api-subscription-self-startup.log`。
+
+## 第三十一批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。支付 SDK 保持 **stripe-go v81.4.0**、**waffo-pancake-sdk-go v0.3.1**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/billing/... ./internal/module/subscription/... ./controller ./service ./model \
+  -run 'TestModular|TestStripeSubscription|TestCreemCheckout|TestWaffo|TestEpayCheckout|TestSubscription|TestPayment|TestRecharge' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing ./internal/module/subscription -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+本地 HTTP 服务验证 Stripe SDK 实际发出的表单、两个客户端并发时的密钥隔离、已有/新客户参数及 subscription 模式；Creem 验证元数据、API 密钥头、取消、异常响应和空链接；Waffo SDK 验证两步认证结账、买家身份、商户流水和令牌片段；Epay 验证签名参数、回调签名拒绝和返回 URL。
+
+真实 PostgreSQL 业务测试确认网关调用前订单已保存、四种响应字段和流水前缀保持、用户信息取自身份模块、套餐停用/购买上限/订单写入失败时不调用网关、超时后订单仍能完成，以及回调先完成时请求失败不会撤销订单。Epay HTTP 通知/返回使用真实签名验证和订单事务，重复通知仅发放一次订阅。完整回归继续覆盖真实 DragonflyDB 和 PostgreSQL/ClickHouse 日志；竞态检查通过。
+
+输出：`/tmp/new-api-checkout-build.log`、`/tmp/new-api-checkout-tests.log`、`/tmp/new-api-checkout-race.log`、`/tmp/new-api-checkout-full-tests.log`、`/tmp/new-api-checkout-vet.log`、`/tmp/new-api-checkout-startup.log`。

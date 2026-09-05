@@ -154,6 +154,7 @@ func Run(assets router.WebAssets) {
 		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})
 	subscriptionService := subscription.New(subscription.Dependencies{
+		Gateways: service.PaymentCheckoutClient(), CheckoutBuyer: identityService.CheckoutBuyer,
 		BillingPreference: identityService.BillingPreference,
 		Payments:          model.SubscriptionPayments(),
 		Members:           model.SubscriptionMemberships(),

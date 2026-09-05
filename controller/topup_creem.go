@@ -6,16 +6,18 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -78,7 +80,7 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 
 	// 解析产品列表
 	var products []CreemProduct
-	err := json.Unmarshal([]byte(setting.CreemProducts), &products)
+	err := common.Unmarshal([]byte(setting.CreemProducts), &products)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 产品配置解析失败 user_id=%d error=%q", c.GetInt("id"), err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "产品配置错误"})
@@ -368,100 +370,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	c.Status(http.StatusOK)
 }
 
-type CreemCheckoutRequest struct {
-	ProductId string `json:"product_id"`
-	RequestId string `json:"request_id"`
-	Customer  struct {
-		Email string `json:"email"`
-	} `json:"customer"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-}
-
-type CreemCheckoutResponse struct {
-	CheckoutUrl string `json:"checkout_url"`
-	Id          string `json:"id"`
-}
-
 func genCreemLink(ctx context.Context, referenceId string, product *CreemProduct, email string, username string) (string, error) {
-	if setting.CreemApiKey == "" {
-		return "", fmt.Errorf("未配置Creem API密钥")
-	}
-
-	// 根据测试模式选择 API 端点
-	apiUrl := "https://api.creem.io/v1/checkouts"
-	if setting.CreemTestMode {
-		apiUrl = "https://test-api.creem.io/v1/checkouts"
-		logger.LogInfo(ctx, fmt.Sprintf("Creem 使用测试环境 api_url=%s", apiUrl))
-	}
-
-	// 构建请求数据，确保包含用户邮箱
-	requestData := CreemCheckoutRequest{
-		ProductId: product.ProductId,
-		RequestId: referenceId, // 这个作为订单ID传递给Creem
-		Customer: struct {
-			Email string `json:"email"`
-		}{
-			Email: email, // 用户邮箱会在支付页面预填充
-		},
-		Metadata: map[string]string{
-			"username":     username,
-			"reference_id": referenceId,
-			"product_name": product.Name,
-			"quota":        fmt.Sprintf("%d", product.Quota),
-		},
-	}
-
-	// 序列化请求数据
-	jsonData, err := json.Marshal(requestData)
-	if err != nil {
-		return "", fmt.Errorf("序列化请求数据失败: %v", err)
-	}
-
-	// 创建 HTTP 请求
-	req, err := http.NewRequest("POST", apiUrl, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("创建HTTP请求失败: %v", err)
-	}
-
-	// 设置请求头
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", setting.CreemApiKey)
-
-	logger.LogInfo(ctx, fmt.Sprintf("Creem 支付请求已发送 api_url=%s product_id=%s email=%q trade_no=%s", apiUrl, product.ProductId, email, referenceId))
-
-	// 发送请求
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("发送HTTP请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %v", err)
-	}
-
-	logger.LogInfo(ctx, fmt.Sprintf("Creem API 响应已收到 trade_no=%s status_code=%d body=%q", referenceId, resp.StatusCode, string(body)))
-
-	// 检查响应状态
-	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("Creem API http status %d ", resp.StatusCode)
-	}
-	// 解析响应
-	var checkoutResp CreemCheckoutResponse
-	err = json.Unmarshal(body, &checkoutResp)
-	if err != nil {
-		return "", fmt.Errorf("解析响应失败: %v", err)
-	}
-
-	if checkoutResp.CheckoutUrl == "" {
-		return "", fmt.Errorf("Creem API resp no checkout url ")
-	}
-
-	logger.LogInfo(ctx, fmt.Sprintf("Creem 支付链接创建成功 trade_no=%s response_id=%s checkout_url=%q", referenceId, checkoutResp.Id, checkoutResp.CheckoutUrl))
-	return checkoutResp.CheckoutUrl, nil
+	result, err := service.PaymentCheckoutClient().Creem(ctx, billingcontract.CheckoutRequest{TradeNo: referenceId, ProductID: product.ProductId, Title: product.Name, Email: email, Username: username, Quota: product.Quota})
+	return result.CheckoutURL, err
 }

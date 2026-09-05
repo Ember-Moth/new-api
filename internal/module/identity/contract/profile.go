@@ -99,3 +99,9 @@ type SelfUserResponse struct {
 type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
+
+// CheckoutBuyer is the account projection needed to start a payment session.
+type CheckoutBuyer struct {
+	ID                              int
+	Username, Email, StripeCustomer string
+}

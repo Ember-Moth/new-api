@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	identitycontract "github.com/QuantumNous/new-api/internal/module/identity/contract"
+
 	"github.com/QuantumNous/new-api/internal/module/subscription/payments"
 
 	"github.com/QuantumNous/new-api/internal/module/subscription/quota"
@@ -19,6 +21,8 @@ import (
 var ErrPaymentComplianceRequired = errors.New("payment compliance confirmation required")
 
 type Dependencies struct {
+	Gateways          CheckoutGateways
+	CheckoutBuyer     func(context.Context, int) (*identitycontract.CheckoutBuyer, error)
 	BillingPreference func(context.Context, int) (string, error)
 	Payments          *payments.Store
 	Quota             *quota.Store
@@ -30,6 +34,8 @@ type Dependencies struct {
 }
 
 type Service struct {
+	Gateways          CheckoutGateways
+	checkoutBuyer     func(context.Context, int) (*identitycontract.CheckoutBuyer, error)
 	billingPreference func(context.Context, int) (string, error)
 	Payments          *payments.Store
 	Quota             *quota.Store
@@ -45,7 +51,7 @@ type Service struct {
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{billingPreference: deps.BillingPreference, Payments: deps.Payments, Quota: deps.Quota, Members: deps.Members, plans: repo.NewPlans(deps.DB), paymentAllowed: deps.PaymentAllowed, groupExists: deps.GroupExists, invalidatePlan: deps.InvalidatePlan}
+	return &Service{Gateways: deps.Gateways, checkoutBuyer: deps.CheckoutBuyer, billingPreference: deps.BillingPreference, Payments: deps.Payments, Quota: deps.Quota, Members: deps.Members, plans: repo.NewPlans(deps.DB), paymentAllowed: deps.PaymentAllowed, groupExists: deps.GroupExists, invalidatePlan: deps.InvalidatePlan}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

@@ -5,40 +5,16 @@ import (
 	"fmt"
 	"strings"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting"
 	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
 )
 
 // WaffoPancakePriceSnapshot is the per-session price override sent with checkout.
-type WaffoPancakePriceSnapshot struct {
-	Amount      string
-	TaxCategory string
-}
-
-// WaffoPancakeCreateSessionParams is the input to CreateWaffoPancakeCheckoutSession.
-// BuyerIdentity must be stable per user (see WaffoPancakeBuyerIdentityFromUserID).
-// OrderMerchantExternalID = our trade_no; Pancake echoes it back in webhooks.
-type WaffoPancakeCreateSessionParams struct {
-	ProductID               string
-	BuyerIdentity           string
-	PriceSnapshot           *WaffoPancakePriceSnapshot
-	BuyerEmail              string
-	ExpiresInSeconds        *int
-	OrderMerchantExternalID string
-}
-
-// WaffoPancakeCheckoutSession is the response of CreateWaffoPancakeCheckoutSession.
-// CheckoutURL already carries the `#token=...` fragment; Token / TokenExpiresAt
-// are exposed separately for self-service flows driven from new-api's own UI.
-type WaffoPancakeCheckoutSession struct {
-	SessionID      string
-	CheckoutURL    string
-	ExpiresAt      string
-	OrderID        string
-	Token          string
-	TokenExpiresAt string
-}
+type WaffoPancakePriceSnapshot = billingcontract.WaffoPriceSnapshot
+type WaffoPancakeCreateSessionParams = billingcontract.WaffoCheckoutParams
+type WaffoPancakeCheckoutSession = billingcontract.WaffoCheckoutSession
 
 // WaffoPancakeWebhookEvent mirrors the SDK's WebhookEvent shape using plain
 // strings so controllers don't have to import the SDK package.
@@ -72,17 +48,6 @@ func (e *WaffoPancakeWebhookEvent) NormalizedEventType() string {
 	return e.EventType
 }
 
-// newWaffoPancakeClient builds an SDK client from persisted settings. The
-// runtime checkout / webhook paths use this; configuration endpoints use
-// newWaffoPancakeClientFromCreds so the operator can verify typed-but-not-
-// yet-saved credentials.
-func newWaffoPancakeClient() (*pancake.Client, error) {
-	return pancake.New(pancake.Config{
-		MerchantID: setting.WaffoPancakeMerchantID,
-		PrivateKey: setting.WaffoPancakePrivateKey,
-	})
-}
-
 func newWaffoPancakeClientFromCreds(merchantID, privateKey string) (*pancake.Client, error) {
 	if strings.TrimSpace(merchantID) == "" || strings.TrimSpace(privateKey) == "" {
 		return nil, fmt.Errorf("merchant id and private key are required")
@@ -97,51 +62,11 @@ func newWaffoPancakeClientFromCreds(merchantID, privateKey string) (*pancake.Cli
 // session: the order is bound to BuyerIdentity (stable per user) so it stays
 // attributable even if the buyer edits the email on Waffo's checkout form.
 func CreateWaffoPancakeCheckoutSession(ctx context.Context, params *WaffoPancakeCreateSessionParams) (*WaffoPancakeCheckoutSession, error) {
-	if params == nil {
-		return nil, fmt.Errorf("missing checkout params")
-	}
-	if strings.TrimSpace(params.BuyerIdentity) == "" {
-		return nil, fmt.Errorf("missing buyer identity")
-	}
-	if strings.TrimSpace(params.OrderMerchantExternalID) == "" {
-		return nil, fmt.Errorf("missing order merchant external id")
-	}
-	client, err := newWaffoPancakeClient()
-	if err != nil {
-		return nil, fmt.Errorf("build Waffo Pancake client: %w", err)
-	}
-
-	sdkParams := pancake.AuthenticatedCheckoutParams{
-		CreateCheckoutSessionParams: pancake.CreateCheckoutSessionParams{
-			ProductID:               params.ProductID,
-			Currency:                "USD",
-			BuyerEmail:              optionalString(params.BuyerEmail),
-			ExpiresInSeconds:        params.ExpiresInSeconds,
-			OrderMerchantExternalID: optionalString(params.OrderMerchantExternalID),
-		},
-		BuyerIdentity: params.BuyerIdentity,
-	}
-	if params.PriceSnapshot != nil {
-		sdkParams.PriceSnapshot = &pancake.PriceInfo{
-			Amount:      params.PriceSnapshot.Amount,
-			TaxCategory: pancake.TaxCategory(params.PriceSnapshot.TaxCategory),
-		}
-	}
-
-	session, err := client.Checkout.Authenticated.Create(ctx, sdkParams)
+	result, err := PaymentCheckoutClient().Waffo(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	if session == nil || strings.TrimSpace(session.CheckoutURL) == "" || strings.TrimSpace(session.SessionID) == "" {
-		return nil, fmt.Errorf("Waffo Pancake returned empty checkout session")
-	}
-	return &WaffoPancakeCheckoutSession{
-		SessionID:      session.SessionID,
-		CheckoutURL:    session.CheckoutURL,
-		ExpiresAt:      session.ExpiresAt,
-		Token:          session.Token,
-		TokenExpiresAt: session.TokenExpiresAt,
-	}, nil
+	return &result, nil
 }
 
 func optionalString(s string) *string {
@@ -156,7 +81,7 @@ func optionalString(s string) *string {
 // for checkout. Webhook handlers compare against the value rendered here to
 // reject identity mismatches, so both call sites must use this function.
 func WaffoPancakeBuyerIdentityFromUserID(userID int) string {
-	return fmt.Sprintf("new-api-user-%d", userID)
+	return billingcontract.WaffoBuyerIdentity(userID)
 }
 
 // VerifyConfiguredWaffoPancakeWebhook verifies the signature header. The SDK

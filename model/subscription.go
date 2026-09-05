@@ -35,10 +35,6 @@ type SubscriptionPlan = subscriptionentity.SubscriptionPlan
 
 type UserSubscription = subscriptionentity.UserSubscription
 
-func CountUserSubscriptionsByPlan(userId int, planId int) (int64, error) {
-	return SubscriptionMemberships().CountUserSubscriptionsByPlan(context.Background(), userId, planId)
-}
-
 // HasActiveUserSubscription returns whether the user has any active subscription.
 // This is a lightweight existence check to avoid heavy pre-consume transactions.
 func HasActiveUserSubscription(userId int) (bool, error) {
@@ -101,9 +97,6 @@ type SubscriptionOrder = subscriptionentity.SubscriptionOrder
 var ErrSubscriptionOrderNotFound = subscriptionpayments.ErrOrderNotFound
 var ErrSubscriptionOrderStatusInvalid = subscriptionpayments.ErrOrderStatusInvalid
 
-func CreateSubscriptionOrder(order *SubscriptionOrder) error {
-	return SubscriptionPayments().Create(context.Background(), order)
-}
 func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
 	order, err := SubscriptionPayments().Get(context.Background(), tradeNo)
 	if err != nil {
@@ -116,7 +109,4 @@ func CompleteSubscriptionOrder(tradeNo, providerPayload, expectedPaymentProvider
 }
 func ExpireSubscriptionOrder(tradeNo, expectedPaymentProvider string) error {
 	return SubscriptionPayments().FinishPending(context.Background(), tradeNo, expectedPaymentProvider, common.TopUpStatusExpired)
-}
-func FailSubscriptionOrder(tradeNo, expectedPaymentProvider string) error {
-	return SubscriptionPayments().FinishPending(context.Background(), tradeNo, expectedPaymentProvider, common.TopUpStatusFailed)
 }

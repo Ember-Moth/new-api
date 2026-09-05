@@ -3,10 +3,20 @@ package subscription_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/Calcium-Ion/go-epay/epay"
+	billingcheckout "github.com/QuantumNous/new-api/internal/module/billing/checkout"
+	"github.com/QuantumNous/new-api/internal/module/identity"
+	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
+	"github.com/QuantumNous/new-api/internal/module/subscription/memberships"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/billing"
@@ -216,4 +226,173 @@ func TestSubscriptionBalanceRejectsInvalidMoneyAndPreservesHTTPIdentity(t *testi
 	var order entity.SubscriptionOrder
 	require.NoError(t, f.db.First(&order).Error)
 	assert.Equal(t, f.user.Id, order.UserId)
+}
+
+type checkoutGatewayFixture struct {
+	create   func(context.Context, billingcontract.CheckoutRequest) (billingcontract.CheckoutSession, error)
+	verifier *billingcheckout.Client
+}
+
+func (g checkoutGatewayFixture) ValidateSubscription(string, string) error { return nil }
+func (g checkoutGatewayFixture) CreateSubscription(ctx context.Context, r billingcontract.CheckoutRequest) (billingcontract.CheckoutSession, error) {
+	return g.create(ctx, r)
+}
+func (g checkoutGatewayFixture) VerifyEpay(params map[string]string) (billingcontract.VerifiedPayment, error) {
+	return g.verifier.VerifyEpay(params)
+}
+func (g checkoutGatewayFixture) ReturnURL(suffix string) string {
+	return "https://console.example" + suffix
+}
+
+func TestSubscriptionCheckoutPersistsBeforeGatewayAndPreservesResponseContracts(t *testing.T) {
+	for _, provider := range []string{"stripe", "creem", "waffo_pancake", "epay"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPaymentFixture(t, 10)
+			require.NoError(t, f.db.Model(&f.plan).Updates(map[string]any{"stripe_price_id": "price_month", "creem_product_id": "prod_creem", "waffo_pancake_product_id": "prod_waffo"}).Error)
+			require.NoError(t, f.db.Model(&f.user).Updates(map[string]any{"email": "buyer@example.test", "stripe_customer": "cus_saved"}).Error)
+			accounts := identity.New(identity.Dependencies{DB: f.db})
+			var reference string
+			gateways := checkoutGatewayFixture{create: func(ctx context.Context, r billingcontract.CheckoutRequest) (billingcontract.CheckoutSession, error) {
+				persisted, err := f.store.Get(ctx, r.TradeNo)
+				require.NoError(t, err)
+				assert.Equal(t, common.TopUpStatusPending, persisted.Status)
+				assert.Equal(t, provider, persisted.PaymentProvider)
+				assert.Equal(t, f.user.Id, r.UserID)
+				assert.Equal(t, "buyer@example.test", r.Email)
+				assert.Equal(t, "cus_saved", r.CustomerID)
+				reference = r.TradeNo
+				return billingcontract.CheckoutSession{PayLink: "https://stripe.example/pay", CheckoutURL: "https://checkout.example/pay", SessionID: "session", Token: "token", ExpiresAt: "expiry", TokenExpiresAt: "token-expiry", EpayURL: "https://epay.example/submit.php", EpayParams: map[string]string{"sign": "signed"}}, nil
+			}}
+			runtime := subscription.New(subscription.Dependencies{DB: f.db, Members: memberships.New(memberships.Dependencies{DB: f.db}), Payments: f.store, CheckoutBuyer: accounts.CheckoutBuyer, Gateways: gateways, PaymentAllowed: func() bool { return true }})
+			handler := subscriptionhttp.New(runtime)
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set("id", f.user.Id) })
+			switch provider {
+			case "stripe":
+				router.POST("/pay", handler.SubscriptionRequestStripePay)
+			case "creem":
+				router.POST("/pay", handler.SubscriptionRequestCreemPay)
+			case "waffo_pancake":
+				router.POST("/pay", handler.SubscriptionRequestWaffoPancakePay)
+			case "epay":
+				router.POST("/pay", handler.SubscriptionRequestEpay)
+			}
+			body := planRequest(t, router, http.MethodPost, "/pay", map[string]any{"plan_id": f.plan.Id, "payment_method": "alipay", "user_id": 999, "price": 0.01})
+			assert.Equal(t, "success", body.Message)
+			var data map[string]any
+			require.NoError(t, common.Unmarshal(body.Data, &data))
+			switch provider {
+			case "stripe":
+				assert.Equal(t, map[string]any{"pay_link": "https://stripe.example/pay"}, data)
+				assert.True(t, strings.HasPrefix(reference, "sub_ref_"))
+			case "creem":
+				assert.Equal(t, map[string]any{"checkout_url": "https://checkout.example/pay", "order_id": reference}, data)
+			case "waffo_pancake":
+				assert.True(t, strings.HasPrefix(reference, "WAFFO_PANCAKE_SUB-"))
+				assert.Equal(t, "token", data["token"])
+				assert.Equal(t, "token-expiry", data["token_expires_at"])
+				assert.Equal(t, reference, data["order_id"])
+			case "epay":
+				assert.True(t, strings.HasPrefix(reference, "SUBUSR"))
+				assert.Equal(t, map[string]any{"sign": "signed"}, data)
+			}
+			saved, err := f.store.Get(t.Context(), reference)
+			require.NoError(t, err)
+			assert.Equal(t, f.plan.PriceAmount, saved.Money)
+		})
+	}
+}
+
+func TestSubscriptionCheckoutFailureRetainsOrderForVerifiedCallback(t *testing.T) {
+	for _, callbackDuringRequest := range []bool{false, true} {
+		t.Run(fmt.Sprint(callbackDuringRequest), func(t *testing.T) {
+			f := newPaymentFixture(t, 10)
+			require.NoError(t, f.db.Model(&f.plan).Update("stripe_price_id", "price_month").Error)
+			accounts := identity.New(identity.Dependencies{DB: f.db})
+			reference := ""
+			gateways := checkoutGatewayFixture{create: func(ctx context.Context, r billingcontract.CheckoutRequest) (billingcontract.CheckoutSession, error) {
+				reference = r.TradeNo
+				if callbackDuringRequest {
+					require.NoError(t, f.store.Complete(ctx, reference, "verified", "stripe", ""))
+				}
+				return billingcontract.CheckoutSession{}, errors.New("gateway timeout")
+			}}
+			runtime := subscription.New(subscription.Dependencies{DB: f.db, Members: memberships.New(memberships.Dependencies{DB: f.db}), Payments: f.store, CheckoutBuyer: accounts.CheckoutBuyer, Gateways: gateways, PaymentAllowed: func() bool { return true }})
+			_, err := runtime.StartCheckout(t.Context(), f.user.Id, "stripe", subscriptioncontract.CheckoutInput{PlanId: f.plan.Id})
+			require.Error(t, err)
+			var checkoutErr *subscription.CheckoutError
+			require.ErrorAs(t, err, &checkoutErr)
+			assert.Equal(t, "gateway", checkoutErr.Stage)
+			saved, err := f.store.Get(t.Context(), reference)
+			require.NoError(t, err)
+			if callbackDuringRequest {
+				assert.Equal(t, common.TopUpStatusSuccess, saved.Status)
+			} else {
+				assert.Equal(t, common.TopUpStatusPending, saved.Status)
+			}
+			require.NoError(t, f.store.Complete(t.Context(), reference, "verified", "stripe", ""))
+			assert.EqualValues(t, 1, f.logs.Load())
+		})
+	}
+	f := newPaymentFixture(t, 10)
+	accounts := identity.New(identity.Dependencies{DB: f.db})
+	called := false
+	runtime := subscription.New(subscription.Dependencies{DB: f.db, Members: memberships.New(memberships.Dependencies{DB: f.db}), Payments: f.store, CheckoutBuyer: accounts.CheckoutBuyer, Gateways: checkoutGatewayFixture{create: func(context.Context, billingcontract.CheckoutRequest) (billingcontract.CheckoutSession, error) {
+		called = true
+		return billingcontract.CheckoutSession{}, nil
+	}}, PaymentAllowed: func() bool { return true }})
+	_, err := runtime.StartCheckout(t.Context(), f.user.Id, "stripe", subscriptioncontract.CheckoutInput{PlanId: f.plan.Id})
+	require.Error(t, err)
+	assert.False(t, called)
+	require.NoError(t, f.db.Model(&f.plan).Updates(map[string]any{"stripe_price_id": "price_month", "enabled": false}).Error)
+	_, err = runtime.StartCheckout(t.Context(), f.user.Id, "stripe", subscriptioncontract.CheckoutInput{PlanId: f.plan.Id})
+	require.Error(t, err)
+	assert.False(t, called)
+	require.NoError(t, f.db.Model(&f.plan).Updates(map[string]any{"enabled": true, "max_purchase_per_user": 1}).Error)
+	require.NoError(t, f.db.Create(&entity.UserSubscription{UserId: f.user.Id, PlanId: f.plan.Id, Status: "cancelled", EndTime: 1}).Error)
+	_, err = runtime.StartCheckout(t.Context(), f.user.Id, "stripe", subscriptioncontract.CheckoutInput{PlanId: f.plan.Id})
+	require.Error(t, err)
+	assert.False(t, called)
+	require.NoError(t, f.db.Model(&f.plan).Update("max_purchase_per_user", 0).Error)
+	require.NoError(t, f.db.Exec("ALTER TABLE subscription_orders ADD CONSTRAINT reject_checkout_fixture CHECK (payment_provider <> 'stripe')").Error)
+	_, err = runtime.StartCheckout(t.Context(), f.user.Id, "stripe", subscriptioncontract.CheckoutInput{PlanId: f.plan.Id})
+	require.Error(t, err)
+	assert.False(t, called)
+}
+
+func TestSubscriptionEpayCallbacksRequireSignatureAndRemainIdempotent(t *testing.T) {
+	f := newPaymentFixture(t, 10)
+	order := entity.SubscriptionOrder{UserId: f.user.Id, PlanId: f.plan.Id, Money: 1.25, TradeNo: "epay-sub", PaymentProvider: "epay", PaymentMethod: "alipay", Status: common.TopUpStatusPending}
+	require.NoError(t, f.store.Create(t.Context(), &order))
+	gateway := billingcheckout.New(billingcheckout.Options{Config: func() billingcontract.GatewayConfig {
+		return billingcontract.GatewayConfig{EpayAddress: "https://epay.example", EpayID: "merchant", EpayKey: "secret", ServerAddress: "https://console.example"}
+	}})
+	handler := subscriptionhttp.New(subscription.New(subscription.Dependencies{Payments: f.store, Gateways: gateway}))
+	router := gin.New()
+	router.GET("/notify", handler.SubscriptionEpayNotify)
+	router.POST("/notify", handler.SubscriptionEpayNotify)
+	router.GET("/return", handler.SubscriptionEpayReturn)
+	signed := epay.GenerateParams(map[string]string{"out_trade_no": order.TradeNo, "type": "wxpay", "trade_status": epay.StatusTradeSuccess, "money": "1.25"}, "secret")
+	values := url.Values{}
+	for key, value := range signed {
+		values.Set(key, value)
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/notify?out_trade_no=epay-sub&sign=bad", nil))
+	assert.Equal(t, "fail", response.Body.String())
+	for range 2 {
+		request := httptest.NewRequest(http.MethodPost, "/notify", strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response = httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		assert.Equal(t, "success", response.Body.String())
+	}
+	assert.EqualValues(t, 1, f.logs.Load())
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/return?"+values.Encode(), nil))
+	assert.Equal(t, http.StatusFound, response.Code)
+	assert.Equal(t, "https://console.example/wallet?pay=success", response.Header().Get("Location"))
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/return?sign=bad", nil))
+	assert.Equal(t, "https://console.example/wallet?pay=fail", response.Header().Get("Location"))
 }

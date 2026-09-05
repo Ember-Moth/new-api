@@ -60,3 +60,12 @@ func (r *Plans) Update(ctx context.Context, plan *entity.SubscriptionPlan) error
 func (r *Plans) UpdateStatus(ctx context.Context, id int, enabled bool) error {
 	return r.db.WithContext(ctx).Model(&entity.SubscriptionPlan{}).Where("id = ?", id).Update("enabled", enabled).Error
 }
+
+func (r *Plans) Get(ctx context.Context, id int) (*entity.SubscriptionPlan, error) {
+	var plan entity.SubscriptionPlan
+	if err := r.db.WithContext(ctx).First(&plan, id).Error; err != nil {
+		return nil, err
+	}
+	plan.NormalizeDefaults()
+	return &plan, nil
+}

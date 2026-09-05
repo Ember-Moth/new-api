@@ -176,10 +176,10 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 			subscriptionRoute.GET("/self", subscriptionHandler.GetSubscriptionSelf)
 			subscriptionRoute.PUT("/self/preference", identityHandler.UpdateBillingPreference)
 			subscriptionRoute.POST("/balance/pay", middleware.CriticalRateLimit(), subscriptionHandler.SubscriptionRequestBalancePay)
-			subscriptionRoute.POST("/epay/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestEpay)
-			subscriptionRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestStripePay)
-			subscriptionRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestCreemPay)
-			subscriptionRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestWaffoPancakePay)
+			subscriptionRoute.POST("/epay/pay", middleware.CriticalRateLimit(), subscriptionHandler.SubscriptionRequestEpay)
+			subscriptionRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), subscriptionHandler.SubscriptionRequestStripePay)
+			subscriptionRoute.POST("/creem/pay", middleware.CriticalRateLimit(), subscriptionHandler.SubscriptionRequestCreemPay)
+			subscriptionRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), subscriptionHandler.SubscriptionRequestWaffoPancakePay)
 		}
 		subscriptionAdminRoute := apiRouter.Group("/subscription/admin")
 		subscriptionAdminRoute.Use(middleware.AdminAuth())
@@ -200,10 +200,10 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		}
 
 		// Subscription payment callbacks (no auth)
-		apiRouter.POST("/subscription/epay/notify", anonymousRequestBodyLimit, controller.SubscriptionEpayNotify)
-		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
-		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
-		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+		apiRouter.POST("/subscription/epay/notify", anonymousRequestBodyLimit, subscriptionHandler.SubscriptionEpayNotify)
+		apiRouter.GET("/subscription/epay/notify", subscriptionHandler.SubscriptionEpayNotify)
+		apiRouter.GET("/subscription/epay/return", subscriptionHandler.SubscriptionEpayReturn)
+		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, subscriptionHandler.SubscriptionEpayReturn)
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{
