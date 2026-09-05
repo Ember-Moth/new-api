@@ -421,3 +421,54 @@ func TestMembershipRemovalStillWorksAfterAccountDeletion(t *testing.T) {
 	assert.Equal(t, "cancelled", rows[0].Status)
 	assert.Equal(t, "expired", rows[1].Status)
 }
+
+func TestSelfSubscriptionsPreserveUserScopeAndPropagateDatabaseFailure(t *testing.T) {
+	db, members := newMembershipStore(t)
+	accounts := identity.New(identity.Dependencies{DB: db})
+	service := subscription.New(subscription.Dependencies{DB: db, Members: members, BillingPreference: accounts.BillingPreference})
+	user := identityentity.User{Username: "self-subs", AffCode: "self-subs", Setting: `{"billing_preference":"wallet_only"}`}
+	other := identityentity.User{Username: "other-subs", AffCode: "other-subs"}
+	require.NoError(t, db.Create(&user).Error)
+	require.NoError(t, db.Create(&other).Error)
+	now := common.GetTimestamp()
+	rows := []entity.UserSubscription{
+		{UserId: user.Id, PlanId: 1, Status: "active", EndTime: now + 3600, AmountTotal: 100},
+		{UserId: user.Id, PlanId: 1, Status: "active", EndTime: now - 1, AmountTotal: 100},
+		{UserId: user.Id, PlanId: 1, Status: "cancelled", EndTime: now + 3600, AmountTotal: 100},
+		{UserId: other.Id, PlanId: 1, Status: "active", EndTime: now + 3600, AmountTotal: 999},
+	}
+	require.NoError(t, db.Create(&rows).Error)
+	result, err := service.SelfSubscriptions(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "wallet_only", result.BillingPreference)
+	require.Len(t, result.AllSubscriptions, 3)
+	require.Len(t, result.Subscriptions, 1)
+	assert.Equal(t, rows[0].Id, result.Subscriptions[0].Subscription.Id)
+	for _, entry := range result.AllSubscriptions {
+		assert.Equal(t, user.Id, entry.Subscription.UserId)
+	}
+	handler := subscriptionhttp.New(service)
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("id", user.Id) })
+	router.GET("/self", handler.GetSubscriptionSelf)
+	response := planRequest(t, router, http.MethodGet, fmt.Sprintf("/self?user_id=%d", other.Id), nil)
+	require.True(t, response.Success, response.Message)
+	var view contract.SelfSubscriptions
+	require.NoError(t, common.Unmarshal(response.Data, &view))
+	require.Len(t, view.Subscriptions, 1)
+	assert.Equal(t, user.Id, view.Subscriptions[0].Subscription.UserId)
+	require.NoError(t, db.Exec("ALTER TABLE user_subscriptions RENAME TO unavailable_user_subscriptions").Error)
+	response = planRequest(t, router, http.MethodGet, "/self", nil)
+	assert.False(t, response.Success)
+	assert.NotEmpty(t, response.Message)
+	require.NoError(t, db.Exec("ALTER TABLE unavailable_user_subscriptions RENAME TO user_subscriptions").Error)
+	require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&entity.UserSubscription{}).Error)
+	result, err = service.SelfSubscriptions(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.NotNil(t, result.Subscriptions)
+	assert.Empty(t, result.Subscriptions)
+	assert.NotNil(t, result.AllSubscriptions)
+	assert.Empty(t, result.AllSubscriptions)
+	_, err = service.SelfSubscriptions(t.Context(), 999999)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+}

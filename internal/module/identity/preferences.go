@@ -133,3 +133,32 @@ func (s *Service) UpdateNotificationSettings(ctx context.Context, id int, req co
 	}
 	return nil
 }
+
+func (s *Service) BillingPreference(ctx context.Context, id int) (string, error) {
+	user, err := s.users.Get(ctx, id, false)
+	if err != nil {
+		return "", err
+	}
+	return common.NormalizeBillingPreference(user.GetSetting().BillingPreference), nil
+}
+
+func (s *Service) UpdateBillingPreference(ctx context.Context, id int, value string) (string, error) {
+	preference := common.NormalizeBillingPreference(value)
+	err := s.users.Transaction(ctx, func(users *repo.Users, tx *gorm.DB) error {
+		user, err := users.Lock(id, false)
+		if err != nil {
+			return err
+		}
+		settings := user.GetSetting()
+		settings.BillingPreference = preference
+		user.SetSetting(settings)
+		return users.Update(user, map[string]any{"setting": user.Setting})
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := s.userSecurity.PublishAuth(id); err != nil {
+		return "", err
+	}
+	return preference, nil
+}

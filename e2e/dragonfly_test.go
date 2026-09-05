@@ -447,7 +447,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.EqualValues(t, 1, cached.AuthVersion)
 		_, _, err = service.ValidateLoginSession(auth)
 		require.NoError(t, err)
-		active, err := model.GetAllActiveUserSubscriptions(user.Id)
+		active, err := model.SubscriptionMemberships().GetAllActiveUserSubscriptions(t.Context(), user.Id)
 		require.NoError(t, err)
 		require.Len(t, active, 1)
 		_, err = model.SubscriptionMemberships().AdminInvalidateUserSubscription(t.Context(), active[0].Subscription.Id)
@@ -531,6 +531,35 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		var count int64
 		require.NoError(t, database.Model(&model.SubscriptionOrder{}).Where("user_id = ?", user.Id).Count(&count).Error)
 		assert.EqualValues(t, 1, count)
+	})
+
+	t.Run("billing preference publication preserves pending wallet reservations", func(t *testing.T) {
+		previousBatch := common.BatchUpdateEnabled
+		common.BatchUpdateEnabled = true
+		t.Cleanup(func() { require.NoError(t, model.FlushQuotaUpdates()); common.BatchUpdateEnabled = previousBatch })
+		user := model.User{Username: "dragonfly-preference", AffCode: "dragonfly-preference", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 100, AuthVersion: 1, Setting: `{"language":"zh","billing_preference":"subscription_first"}`}
+		require.NoError(t, database.Create(&user).Error)
+		_, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		reserved, err := model.TryReserveUserQuota(user.Id, 7)
+		require.NoError(t, err)
+		require.True(t, reserved)
+		require.NoError(t, database.First(&user, user.Id).Error)
+		assert.Equal(t, 100, user.Quota)
+		accounts := identity.New(identity.Dependencies{DB: database, UserSecurity: identity.UserSecurity{PublishAuth: usercache.New(database).PublishUserAuthCache}})
+		preference, err := accounts.UpdateBillingPreference(t.Context(), user.Id, "wallet_only")
+		require.NoError(t, err)
+		assert.Equal(t, "wallet_only", preference)
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 93, cached.Quota)
+		assert.EqualValues(t, 1, cached.AuthVersion)
+		assert.Equal(t, "wallet_only", cached.GetSetting().BillingPreference)
+		assert.Equal(t, "zh", cached.GetSetting().Language)
+		require.NoError(t, model.FlushQuotaUpdates())
+		require.NoError(t, database.First(&user, user.Id).Error)
+		assert.Equal(t, 93, user.Quota)
+		assert.Equal(t, "wallet_only", user.GetSetting().BillingPreference)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

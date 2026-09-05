@@ -34,21 +34,9 @@ const (
 type SubscriptionPlan = subscriptionentity.SubscriptionPlan
 
 type UserSubscription = subscriptionentity.UserSubscription
-type SubscriptionSummary = subscriptioncontract.SubscriptionSummary
-type SubscriptionResetResult = subscriptioncontract.SubscriptionResetResult
 
 func CountUserSubscriptionsByPlan(userId int, planId int) (int64, error) {
 	return SubscriptionMemberships().CountUserSubscriptionsByPlan(context.Background(), userId, planId)
-}
-
-// GetAllActiveUserSubscriptions returns all active subscriptions for a user.
-func GetAllActiveUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
-	return SubscriptionMemberships().GetAllActiveUserSubscriptions(context.Background(), userId)
-}
-
-// GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
-func GetAllUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
-	return SubscriptionMemberships().GetAllUserSubscriptions(context.Background(), userId)
 }
 
 // HasActiveUserSubscription returns whether the user has any active subscription.

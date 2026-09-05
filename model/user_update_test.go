@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -196,36 +195,6 @@ func TestUpdateUserAccessTokenRejectsSoftDeletedUser(t *testing.T) {
 	var got User
 	require.NoError(t, DB.Unscoped().First(&got, user.Id).Error)
 	assert.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", got.GetAccessToken())
-}
-
-func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
-	setupUserUpdateTestState(t)
-
-	user := User{
-		Id:           2,
-		Username:     "setting-user",
-		Password:     "password",
-		Status:       common.UserStatusEnabled,
-		Quota:        1000,
-		UsedQuota:    20,
-		RequestCount: 3,
-	}
-	require.NoError(t, DB.Create(&user).Error)
-
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
-		"quota":         gorm.Expr("quota - ?", 250),
-		"used_quota":    gorm.Expr("used_quota + ?", 250),
-		"request_count": gorm.Expr("request_count + ?", 1),
-	}).Error)
-
-	require.NoError(t, UpdateUserSetting(user.Id, dto.UserSetting{Language: "zh"}))
-
-	var got User
-	require.NoError(t, DB.First(&got, user.Id).Error)
-	assert.Equal(t, 750, got.Quota)
-	assert.Equal(t, 270, got.UsedQuota)
-	assert.Equal(t, 4, got.RequestCount)
-	assert.Equal(t, "zh", got.GetSetting().Language)
 }
 
 func TestEnsureEmailAvailableRejectsExistingEmailCaseInsensitive(t *testing.T) {

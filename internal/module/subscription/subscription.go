@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -18,31 +19,33 @@ import (
 var ErrPaymentComplianceRequired = errors.New("payment compliance confirmation required")
 
 type Dependencies struct {
-	Payments       *payments.Store
-	Quota          *quota.Store
-	Members        *memberships.Store
-	DB             *gorm.DB
-	PaymentAllowed func() bool
-	GroupExists    func(string) bool
-	InvalidatePlan func(int)
+	BillingPreference func(context.Context, int) (string, error)
+	Payments          *payments.Store
+	Quota             *quota.Store
+	Members           *memberships.Store
+	DB                *gorm.DB
+	PaymentAllowed    func() bool
+	GroupExists       func(string) bool
+	InvalidatePlan    func(int)
 }
 
 type Service struct {
-	Payments        *payments.Store
-	Quota           *quota.Store
-	maintenanceOnce sync.Once
-	maintenanceDone chan struct{}
-	maintenanceMu   sync.Mutex
-	lastCleanup     time.Time
-	Members         *memberships.Store
-	plans           *repo.Plans
-	paymentAllowed  func() bool
-	groupExists     func(string) bool
-	invalidatePlan  func(int)
+	billingPreference func(context.Context, int) (string, error)
+	Payments          *payments.Store
+	Quota             *quota.Store
+	maintenanceOnce   sync.Once
+	maintenanceDone   chan struct{}
+	maintenanceMu     sync.Mutex
+	lastCleanup       time.Time
+	Members           *memberships.Store
+	plans             *repo.Plans
+	paymentAllowed    func() bool
+	groupExists       func(string) bool
+	invalidatePlan    func(int)
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{Payments: deps.Payments, Quota: deps.Quota, Members: deps.Members, plans: repo.NewPlans(deps.DB), paymentAllowed: deps.PaymentAllowed, groupExists: deps.GroupExists, invalidatePlan: deps.InvalidatePlan}
+	return &Service{billingPreference: deps.BillingPreference, Payments: deps.Payments, Quota: deps.Quota, Members: deps.Members, plans: repo.NewPlans(deps.DB), paymentAllowed: deps.PaymentAllowed, groupExists: deps.GroupExists, invalidatePlan: deps.InvalidatePlan}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

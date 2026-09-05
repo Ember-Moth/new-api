@@ -25,14 +25,15 @@ internal/app/  — Application composition, startup, and shutdown
 internal/transport/http/routes/ — HTTP route composition
 internal/transport/http/middleware/ — Shared inbound HTTP middleware
 internal/transport/http/server/ — HTTP server and dashboard delivery
+internal/transport/http/audit/ — Shared management audit actor metadata
 internal/transport/task/ — Background task adapters for channel updates, health tests and provider polling
 internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
 internal/module/channel/ — Channel management, provider operations, catalog/discovery, persistence and routing; health testing and remaining callers are still being migrated
-internal/module/identity/ — Account CRUD, OAuth bindings, external identity ownership, two-factor/Passkey management, authentication challenges, JWT/session orchestration, session/user metadata cache, authentication-version fencing and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; password/OAuth login transport, billing cache ownership and legacy call adapters are still being migrated
+internal/module/identity/ — Account CRUD and preferences, OAuth bindings, external identity ownership, two-factor/Passkey management, authentication challenges, JWT/session orchestration, session/user metadata cache, authentication-version fencing and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; password/OAuth login transport, billing cache ownership and legacy call adapters are still being migrated
 internal/module/billing/ — Redemption CRUD, administrative wallet commands, transactional wallet debit and subscription payment receipts; remaining wallet runtime, pricing and settlement are still being migrated
 internal/module/system/ — Tasks, nodes and generic settings management/storage; common.OptionMap and legacy business configuration consumers remain transitional dependencies
 internal/module/usage/ — Log entities, audience filtering, event assembly, cursors, queries, hourly aggregation, dashboard/ranking/performance statistics and cleanup; pricing/configuration wiring and legacy event adapters remain transitional
-internal/module/subscription/ — Plan configuration/cache, grants/lifecycle, quota accounting, payment orders, balance purchase and maintenance; provider checkout/webhook transports, self preferences and legacy adapters are still being migrated
+internal/module/subscription/ — Plan configuration/cache, grants/lifecycle, quota accounting, payment orders, balance purchase and maintenance; provider checkout/webhook transports and legacy adapters are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules
 controller/    — Request handlers awaiting migration to their modules

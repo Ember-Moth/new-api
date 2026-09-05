@@ -158,6 +158,7 @@ func newUserFixture(t *testing.T) *userFixture {
 	selfRoutes.PUT("", h.UpdateSelf)
 	selfRoutes.DELETE("", h.DeleteSelf)
 	selfRoutes.PUT("/notifications", h.UpdateNotificationSettings)
+	selfRoutes.PUT("/billing-preference", h.UpdateBillingPreference)
 	selfRoutes.POST("/email", h.BindEmail)
 	f.router.GET("/users", h.ListUsers)
 	f.router.GET("/users/search", h.SearchUsers)
@@ -659,4 +660,68 @@ func selfRequest(t *testing.T, f *userFixture, accessToken, method, path string,
 	var result tokenAPIResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &result))
 	return result
+}
+
+func TestBillingPreferencePreservesConcurrentProfileSettingsAndAccounting(t *testing.T) {
+	f := newUserFixture(t)
+	user := seedManagedUser(t, f, "preference", common.RoleCommonUser)
+	user.SetSetting(dto.UserSetting{NotifyType: dto.NotifyTypeEmail, QuotaWarningThreshold: 1, Language: "zh", SidebarModules: `{"saved":true}`, BillingPreference: "subscription_first"})
+	require.NoError(t, f.db.Model(user).Update("setting", user.Setting).Error)
+	require.NoError(t, f.db.Model(user).Updates(map[string]any{"quota": 750, "used_quota": 270, "request_count": 4}).Error)
+	language := "fr"
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := f.service.UpdateBillingPreference(t.Context(), user.Id, " wallet_only ")
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, err := f.service.UpdateSelf(t.Context(), user.Id, contract.SelfUpdateRequest{Preference: "language", PreferenceValue: &language}, nil)
+		results <- err
+	}()
+	close(start)
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	var updated entity.User
+	require.NoError(t, f.db.First(&updated, user.Id).Error)
+	settings := updated.GetSetting()
+	assert.Equal(t, "wallet_only", settings.BillingPreference)
+	assert.Equal(t, "fr", settings.Language)
+	assert.Equal(t, `{"saved":true}`, settings.SidebarModules)
+	assert.Equal(t, dto.NotifyTypeEmail, settings.NotifyType)
+	assert.Equal(t, 750, updated.Quota)
+	assert.Equal(t, 270, updated.UsedQuota)
+	assert.Equal(t, 4, updated.RequestCount)
+	assert.Equal(t, common.RoleCommonUser, updated.Role)
+	assert.EqualValues(t, 1, updated.AuthVersion)
+	preference, err := f.service.BillingPreference(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "wallet_only", preference)
+	require.NoError(t, f.db.Exec(`ALTER TABLE users ADD CONSTRAINT reject_preference_fixture CHECK (setting NOT LIKE '%wallet_first%')`).Error)
+	_, err = f.service.UpdateBillingPreference(t.Context(), user.Id, "wallet_first")
+	require.Error(t, err)
+	preference, err = f.service.BillingPreference(t.Context(), user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "wallet_only", preference)
+	require.NoError(t, f.db.Exec("ALTER TABLE users DROP CONSTRAINT reject_preference_fixture").Error)
+	for _, test := range []struct{ input, want string }{{"subscription_only", "subscription_only"}, {" wallet_first ", "wallet_first"}, {"invalid", "subscription_first"}, {"", "subscription_first"}} {
+		got, err := f.service.UpdateBillingPreference(t.Context(), user.Id, test.input)
+		require.NoError(t, err)
+		assert.Equal(t, test.want, got)
+	}
+	login, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "preferences-browser")
+	require.NoError(t, err)
+	response := selfRequest(t, f, login.AccessToken, http.MethodPut, "/self/billing-preference", map[string]any{"billing_preference": "wallet_only", "user_id": 9999, "quota": 999999, "role": 100})
+	require.True(t, response.Success, response.Message)
+	require.NoError(t, f.db.First(&updated, user.Id).Error)
+	assert.Equal(t, "wallet_only", updated.GetSetting().BillingPreference)
+	assert.Equal(t, 750, updated.Quota)
+	assert.Equal(t, common.RoleCommonUser, updated.Role)
+	require.NoError(t, f.db.Delete(user).Error)
+	_, err = f.service.UpdateBillingPreference(t.Context(), user.Id, "wallet_first")
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	_, err = f.service.BillingPreference(t.Context(), user.Id)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }

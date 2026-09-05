@@ -12,6 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
+	usageentity "github.com/QuantumNous/new-api/internal/module/usage/entity"
+	audithttp "github.com/QuantumNous/new-api/internal/transport/http/audit"
+
 	"github.com/QuantumNous/new-api/internal/module/system"
 	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/usage"
@@ -140,12 +144,22 @@ func Run(assets router.WebAssets) {
 	service.StartCodexCredentialAutoRefreshTask()
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
+	billingService := billing.New(billing.Dependencies{DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+		WalletRuntime: billing.WalletRuntime{
+			Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
+			Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
+		},
+	})
+	identityService := identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
+		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
+	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})
 	subscriptionService := subscription.New(subscription.Dependencies{
-		Payments:       model.SubscriptionPayments(),
-		Members:        model.SubscriptionMemberships(),
-		Quota:          model.SubscriptionQuota(),
-		DB:             model.DB,
-		PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+		BillingPreference: identityService.BillingPreference,
+		Payments:          model.SubscriptionPayments(),
+		Members:           model.SubscriptionMemberships(),
+		Quota:             model.SubscriptionQuota(),
+		DB:                model.DB,
+		PaymentAllowed:    operation_setting.IsPaymentComplianceConfirmed,
 		GroupExists: func(group string) bool {
 			_, ok := ratio_setting.GetGroupRatioCopy()[group]
 			return ok
@@ -211,12 +225,6 @@ func Run(assets router.WebAssets) {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
 
-	billingService := billing.New(billing.Dependencies{DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
-		WalletRuntime: billing.WalletRuntime{
-			Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
-			Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
-		},
-	})
 	server, err := httpserver.New(assets, router.Dependencies{
 		Usage:         logService,
 		SystemHooks:   systemhttp.ManagementHooks{Audit: controller.RecordManageAudit},
@@ -228,14 +236,21 @@ func Run(assets router.WebAssets) {
 				controller.CompletePasskeyLogin(c, (*model.User)(user))
 			},
 		},
-		Billing:           billingService,
-		BillingHooks:      billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
-		SubscriptionHooks: subscriptionhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, ResetLogs: controller.RecordSubscriptionResetUserLogs},
-		Subscription:      subscriptionService,
-		Identity: identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
-			return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
-		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
-		Channel: model.ChannelService(),
+		Billing:      billingService,
+		BillingHooks: billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
+		SubscriptionHooks: subscriptionhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, ResetLogs: func(c *gin.Context, result *subscriptioncontract.SubscriptionResetResult) {
+			if result == nil || result.ResetCount == 0 {
+				return
+			}
+			info := audithttp.OperatorInfo(c)
+			content := fmt.Sprintf("管理员重置订阅套餐 %s（ID: %d）额度", result.PlanTitle, result.PlanId)
+			for _, id := range result.AffectedUserIds {
+				logService.RecordLogWithAdminInfo(context.WithoutCancel(c.Request.Context()), id, usageentity.LogTypeManage, content, info)
+			}
+		}},
+		Subscription: subscriptionService,
+		Identity:     identityService,
+		Channel:      model.ChannelService(),
 		ChannelHooks: channelhttp.ManagementHooks{
 			Can: func(userID, role int, resource, action string) bool {
 				return authorization.Can(userID, role, authz.Permission{Resource: resource, Action: action})

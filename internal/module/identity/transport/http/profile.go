@@ -101,3 +101,17 @@ func (h *Handler) UpdateNotificationSettings(c *gin.Context) {
 	}
 	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
 }
+
+func (h *Handler) UpdateBillingPreference(c *gin.Context) {
+	var request contract.BillingPreferenceRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	preference, err := h.identity.UpdateBillingPreference(c.Request.Context(), c.GetInt("id"), request.BillingPreference)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"billing_preference": preference})
+}

@@ -94,3 +94,8 @@ type SelfUserResponse struct {
 	SidebarModules  string               `json:"sidebar_modules"`
 	Permissions     DashboardPermissions `json:"permissions"`
 }
+
+// BillingPreferenceRequest retains the subscription preference wire contract.
+type BillingPreferenceRequest struct {
+	BillingPreference string `json:"billing_preference"`
+}

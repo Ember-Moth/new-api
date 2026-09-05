@@ -225,6 +225,14 @@ PostgreSQL 初始 SQL 为全部汇总维度增加非空和组合唯一约束；�
 
 各支付网关的结账请求和 webhook 传输入口、自助订阅偏好、钱包充值运行时及审计适配仍待迁移；本批未将整个支付体系视为完成。
 
+第三十批将自助扣费偏好的读写归入 identity，自助订阅视图归入 subscription，两个接口保留原路由。偏好更新在用户行锁内读取当前设置，只更新 setting 列，提交后使用已有用户缓存发布机制；语言、侧边栏、通知设置及余额等字段不会被旧用户快照覆盖，偏好变更不推进认证版本。
+
+自助订阅视图从同一份订阅列表筛出仍有效的条目，保留 subscriptions/all_subscriptions 响应字段，不再将数据库错误伪装成无订阅。订阅模块通过应用注入的身份模块查询偏好；身份、账务和订阅服务由应用各创建一个入口实例。
+
+原 controller/subscription.go 已删除，订阅重置用户日志直接通过应用注入的 usage 服务写入。公共 HTTP 审计身份提取收进 transport/http/audit，控制器审计与重置日志使用同一映射。旧的整份用户设置替换函数、无调用方的订阅列表适配及对应旧测试移除，数据/账户字段保护改由身份模块的行为回归覆盖。
+
+支付网关传输、其余身份入口、钱包与转发运行时、配置和旧调用适配仍在完整目标内。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -766,3 +774,35 @@ python3 /tmp/verify-new-api-modular-startup.py
 真实 DragonflyDB 验证余额购买后的 SQL/缓存余额一致、保留其他请求已有预扣及分组刷新，购买次数限制失败后不再次扣款。原支付提供商隔离、钱包充值和上层退款联动回归继续通过；竞态检查通过。
 
 输出：`/tmp/new-api-subscription-payments-build.log`、`/tmp/new-api-subscription-payments-tests.log`、`/tmp/new-api-subscription-payments-race.log`、`/tmp/new-api-subscription-payments-dragonfly.log`、`/tmp/new-api-subscription-payments-full-tests.log`、`/tmp/new-api-subscription-payments-vet.log`、`/tmp/new-api-subscription-payments-startup.log`。
+
+## 第三十批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./internal/module/subscription/... ./model ./controller ./service \
+  -run 'TestModular|TestBillingPreference|TestSelfSubscriptions|TestSelf|TestUserUpdate|TestSubscription|TestAdminReset' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/identity ./internal/module/subscription \
+  -run 'TestBillingPreference|TestSelfSubscriptions' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonflyCacheContracts -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+在正式 SQL 隔离 PostgreSQL schema 上验证偏好与语言并发更新、保留其他设置和账户计数、无效偏好归一化、设置写入失败回滚、删除账户拒绝修改，以及真实认证中间件下忽略伪造 user_id/role/quota。订阅查询测试验证用户范围、有效/过期/取消条目、空数组响应与数据库失败显式返回错误。原账户、订阅和审计回归继续通过，新增并发测试的竞态检查通过。
+
+真实 DragonflyDB 测试启用批量额度落库，先产生未落库预扣，再发布扣费偏好，确认缓存余额不被 SQL 中的旧余额覆盖，语言与认证版本保持，最终落库后的余额正确。
+
+输出：`/tmp/new-api-subscription-self-build.log`、`/tmp/new-api-subscription-self-tests.log`、`/tmp/new-api-subscription-self-race.log`、`/tmp/new-api-subscription-self-dragonfly.log`、`/tmp/new-api-subscription-self-full-tests.log`、`/tmp/new-api-subscription-self-vet.log`、`/tmp/new-api-subscription-self-startup.log`。

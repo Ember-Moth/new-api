@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	audithttp "github.com/QuantumNous/new-api/internal/transport/http/audit"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
@@ -65,23 +67,6 @@ func auditContentEN(action string, params map[string]interface{}) string {
 	})
 }
 
-// auditOperatorInfo 从上下文构建操作者身份信息（管理员 id/用户名/角色）。
-func auditOperatorInfo(c *gin.Context) map[string]interface{} {
-	return map[string]interface{}{
-		"admin_id":       c.GetInt("id"),
-		"admin_username": c.GetString("username"),
-		"admin_role":     c.GetInt("role"),
-		"auth_method":    auditAuthMethod(c),
-	}
-}
-
-func auditAuthMethod(c *gin.Context) string {
-	if c.GetBool("use_access_token") {
-		return "access_token"
-	}
-	return "session"
-}
-
 // markAuditLogged 标记当前请求已在 handler 内手动记录审计日志，
 // 使鉴权链路中的审计兜底（finishAdminAudit）跳过兜底记录，避免重复。
 func markAuditLogged(c *gin.Context) {
@@ -104,7 +89,7 @@ func RecordManageAuditFor(c *gin.Context, targetUserId int, action string, param
 	if _, ok := params["target_user_id"]; !ok && targetUserId > 0 && targetUserId != operatorUserId {
 		params["target_user_id"] = targetUserId
 	}
-	model.RecordOperationAuditLog(operatorUserId, auditContentEN(action, params), c.ClientIP(), action, params, auditOperatorInfo(c), nil)
+	model.RecordOperationAuditLog(operatorUserId, auditContentEN(action, params), c.ClientIP(), action, params, audithttp.OperatorInfo(c), nil)
 	markAuditLogged(c)
 }
 

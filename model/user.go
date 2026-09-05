@@ -51,21 +51,6 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 	(*identityentity.User)(user).SetSetting(setting)
 }
 
-func UpdateUserSetting(userId int, setting dto.UserSetting) error {
-	if userId == 0 {
-		return errors.New("id 为空！")
-	}
-	settingBytes, err := common.Marshal(setting)
-	if err != nil {
-		return err
-	}
-	settingValue := string(settingBytes)
-	if err = DB.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error; err != nil {
-		return err
-	}
-	return updateUserSettingCache(userId, settingValue)
-}
-
 // userBindColumns 允许通过 UpdateUserBindColumn 更新的第三方账号绑定列白名单。
 // 列名只可能来自代码内部的 provider 实现，白名单是防御纵深，不依赖调用方自律。
 var userBindColumns = map[string]bool{
