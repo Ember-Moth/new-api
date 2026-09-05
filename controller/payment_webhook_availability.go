@@ -20,14 +20,6 @@ func isStripeTopUpEnabled() bool {
 		strings.TrimSpace(setting.StripePriceId) != ""
 }
 
-func isStripeWebhookConfigured() bool {
-	return strings.TrimSpace(setting.StripeWebhookSecret) != ""
-}
-
-func isStripeWebhookEnabled() bool {
-	return isStripeTopUpEnabled()
-}
-
 func isCreemTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false
@@ -36,14 +28,6 @@ func isCreemTopUpEnabled() bool {
 	return strings.TrimSpace(setting.CreemApiKey) != "" &&
 		products != "" &&
 		products != "[]"
-}
-
-func isCreemWebhookConfigured() bool {
-	return strings.TrimSpace(setting.CreemWebhookSecret) != ""
-}
-
-func isCreemWebhookEnabled() bool {
-	return isCreemTopUpEnabled() && isCreemWebhookConfigured()
 }
 
 func isWaffoTopUpEnabled() bool {

@@ -35,13 +35,6 @@ var (
 func (topUp *TopUp) Insert() error {
 	return TopUpStore().Create(context.Background(), (*billingentity.TopUp)(topUp))
 }
-func GetTopUpById(id int) *TopUp {
-	row, err := TopUpStore().GetByID(context.Background(), id)
-	if err != nil {
-		return nil
-	}
-	return (*TopUp)(row)
-}
 func GetTopUpByTradeNo(tradeNo string) *TopUp {
 	row, err := TopUpStore().Get(context.Background(), tradeNo)
 	if err != nil {
@@ -57,14 +50,6 @@ func UpdatePendingTopUpStatus(tradeNo, provider, status string) error {
 }
 func RechargeEpay(tradeNo, method, ip string) (bool, error) {
 	return TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderEpay, ActualMethod: method, CallerIP: ip})
-}
-func Recharge(tradeNo, customerID, ip string) error {
-	_, err := TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderStripe, StripeCustomerID: &customerID, CallerIP: ip})
-	return err
-}
-func RechargeCreem(tradeNo, email, name, ip string) error {
-	_, err := TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderCreem, CustomerEmail: email, CallerIP: ip})
-	return err
 }
 func RechargeWaffo(tradeNo, ip string) error {
 	_, err := TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderWaffo, CallerIP: ip})

@@ -166,7 +166,7 @@ func TestExpireSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T) 
 	plan := insertSubscriptionPlanForPaymentGuardTest(t, 401)
 	insertSubscriptionOrderForPaymentGuardTest(t, "sub-expire-guard", 303, plan.Id, PaymentProviderStripe)
 
-	err := ExpireSubscriptionOrder("sub-expire-guard", PaymentProviderCreem)
+	err := SubscriptionPayments().FinishPending(t.Context(), "sub-expire-guard", PaymentProviderCreem, common.TopUpStatusExpired)
 	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
 	order := GetSubscriptionOrderByTradeNo("sub-expire-guard")

@@ -107,6 +107,3 @@ func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
 func CompleteSubscriptionOrder(tradeNo, providerPayload, expectedPaymentProvider, actualPaymentMethod string) error {
 	return SubscriptionPayments().Complete(context.Background(), tradeNo, providerPayload, expectedPaymentProvider, actualPaymentMethod)
 }
-func ExpireSubscriptionOrder(tradeNo, expectedPaymentProvider string) error {
-	return SubscriptionPayments().FinishPending(context.Background(), tradeNo, expectedPaymentProvider, common.TopUpStatusExpired)
-}

@@ -249,6 +249,14 @@ billing 的 checkout 客户端封装 Stripe SDK、Creem HTTP、Waffo SDK 和 Epa
 
 充值记录保留普通用户 30 天范围与管理员全量范围，关键词仍走原转义规则；搜索计数使用实际限制 10,000 条匹配记录的子查询，修复在 COUNT 聚合外加 LIMIT 不生效的问题。旧普通转发额度预扣/结算、批量缓存落库、充值结账配置和 webhook 编排仍待后续归属整理。
 
+第三十三批将 Stripe 与 Creem 的 webhook 验签、事件解析和订单分发迁入 billing 的 webhooks 实现及 HTTP 适配。钱包和订阅通过各自事务入口处理，只有明确的订阅订单不存在错误才允许继续查找钱包订单，数据库错误或提供商不匹配不会绕过订阅分支。
+
+Stripe 不再吞掉入账错误后返回 200，处理失败返回 500，使支付方能够重试。异步成功、失败和过期事件均支持订阅/钱包分发；迟到的失败/过期不会覆盖成功状态。Creem 保留 paid 状态、一次性钱包订单和订阅优先规则，签名错误、无效载荷和入账失败分别返回相应错误状态。原显式打印完整 webhook 请求体和签名的日志已移除。
+
+回调可用性只依赖支付确认开关和对应 webhook 密钥，不再依赖钱包商品列表、StripePriceId 或 API 密钥，支持只部署订阅商品的配置。原控制器的钱包结账可用性仍独立保留。旧 Stripe/Creem 回调处理函数、签名工具和无人调用的模型桥接已移除。
+
+Waffo/Waffo Pancake 回调、钱包结账与报价、配置适配以及转发额度运行时仍待继续整理。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -881,3 +889,32 @@ python3 /tmp/verify-new-api-modular-startup.py
 真实 DragonflyDB 覆盖五个充值提供商，在预扣尚未批量落库时完成充值，确认缓存增量只应用一次、不会因支付资料发布覆盖余额，最终批量落库后 SQL/缓存一致。竞态检查通过。
 
 输出：`/tmp/new-api-topups-build.log`、`/tmp/new-api-topups-tests.log`、`/tmp/new-api-topups-race.log`、`/tmp/new-api-topups-dragonfly.log`、`/tmp/new-api-topups-full-tests.log`、`/tmp/new-api-topups-vet.log`、`/tmp/new-api-topups-startup.log`。
+
+## 第三十三批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/billing/... ./internal/module/subscription/... ./controller ./model ./service \
+  -run 'TestModular|TestStripeWebhook|TestCreemWebhook|TestWebhook|TestStripeTopUp|TestCreemTopUp|TestPayment|TestSubscription|TestTopup|TestRecharge' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing \
+  -run 'TestStripeWebhook|TestCreemWebhook|TestWebhook' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+带真实 Stripe SDK 签名和 Creem HMAC 签名的 HTTP 测试使用正式 SQL 初始化的隔离 PostgreSQL schema，覆盖验签拒绝、Stripe 签名过期、无效载荷、未支付与未知事件忽略、订阅/钱包分发、异步成功/失败、过期及迟到事件、重复通知只发放一次。数据库故障和入账回滚返回 500，修复后相同事件可重试成功；订阅提供商不匹配不会绕道给钱包充值。只提供 webhook 密钥的配置可工作，支付确认关闭或密钥缺失则拒绝请求。
+
+完整回归继续覆盖真实 DragonflyDB 入账缓存和 PostgreSQL/ClickHouse 日志，竞态检查通过。
+
+输出：`/tmp/new-api-webhooks-build.log`、`/tmp/new-api-webhooks-tests.log`、`/tmp/new-api-webhooks-race.log`、`/tmp/new-api-webhooks-full-tests.log`、`/tmp/new-api-webhooks-vet.log`、`/tmp/new-api-webhooks-startup.log`。

@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	billingwebhooks "github.com/QuantumNous/new-api/internal/module/billing/webhooks"
+
 	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	usageentity "github.com/QuantumNous/new-api/internal/module/usage/entity"
 	audithttp "github.com/QuantumNous/new-api/internal/transport/http/audit"
@@ -144,7 +146,7 @@ func Run(assets router.WebAssets) {
 	service.StartCodexCredentialAutoRefreshTask()
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
-	billingService := billing.New(billing.Dependencies{TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+	billingService := billing.New(billing.Dependencies{Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{Config: service.PaymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
 		WalletRuntime: billing.WalletRuntime{
 			Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
 			Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },

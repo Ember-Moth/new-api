@@ -3,6 +3,8 @@ package billing
 import (
 	"errors"
 
+	"github.com/QuantumNous/new-api/internal/module/billing/webhooks"
+
 	"github.com/QuantumNous/new-api/internal/module/billing/topups"
 
 	"github.com/QuantumNous/new-api/internal/module/billing/internal/repo"
@@ -17,6 +19,7 @@ type WalletRuntime struct {
 }
 
 type Dependencies struct {
+	Webhooks       *webhooks.Processor
 	TopUps         *topups.Store
 	WalletRuntime  WalletRuntime
 	DB             *gorm.DB
@@ -24,6 +27,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	Webhooks       *webhooks.Processor
 	TopUps         *topups.Store
 	wallets        *repo.Wallets
 	walletRuntime  WalletRuntime
@@ -32,7 +36,7 @@ type Service struct {
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{TopUps: deps.TopUps, wallets: repo.NewWallets(deps.DB), walletRuntime: deps.WalletRuntime, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
+	return &Service{Webhooks: deps.Webhooks, TopUps: deps.TopUps, wallets: repo.NewWallets(deps.DB), walletRuntime: deps.WalletRuntime, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

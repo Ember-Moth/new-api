@@ -3,6 +3,7 @@ package service
 import (
 	"github.com/QuantumNous/new-api/internal/module/billing/checkout"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
+	"github.com/QuantumNous/new-api/internal/module/billing/webhooks"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -17,4 +18,10 @@ func PaymentCheckoutClient() *checkout.Client {
 		}
 		return contract.GatewayConfig{StripeKey: setting.StripeApiSecret, StripeWebhookSecret: setting.StripeWebhookSecret, CreemKey: setting.CreemApiKey, CreemWebhookSecret: setting.CreemWebhookSecret, CreemTestMode: setting.CreemTestMode, WaffoMerchantID: setting.WaffoPancakeMerchantID, WaffoPrivateKey: setting.WaffoPancakePrivateKey, EpayAddress: operation_setting.PayAddress, EpayID: operation_setting.EpayId, EpayKey: operation_setting.EpayKey, EpayMethods: methods, CallbackAddress: GetCallbackAddress(), ServerAddress: system_setting.ServerAddress}
 	}})
+}
+
+// PaymentWebhookConfig is independent of wallet product/catalog readiness:
+// existing orders and subscription-only deployments still need callbacks.
+func PaymentWebhookConfig() webhooks.Config {
+	return webhooks.Config{PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed(), StripeSecret: setting.StripeWebhookSecret, CreemSecret: setting.CreemWebhookSecret}
 }
