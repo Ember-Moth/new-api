@@ -429,3 +429,10 @@ func TestUserAuthVersionInvalidatesExistingSession(t *testing.T) {
 	_, err = CreateLoginSessionAtAuthVersion(user.Id, identity.UserAuthVersion, "2fa", "127.0.0.1", "test-agent")
 	assert.ErrorIs(t, err, ErrLoginSessionRevoked, "a pending 2FA flow must not survive an auth-version change")
 }
+
+func useTestSessionSecret(t *testing.T) {
+	t.Helper()
+	previous := common.SessionSecret
+	common.SessionSecret = "test-session-secret-with-sufficient-entropy"
+	t.Cleanup(func() { common.SessionSecret = previous })
+}

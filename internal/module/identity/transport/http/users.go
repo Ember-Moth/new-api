@@ -14,6 +14,8 @@ import (
 )
 
 type ManagementHooks struct {
+	WriteRefreshCookie   func(*gin.Context, string)
+	ClearRefreshCookie   func(*gin.Context)
 	RequireSecurityProof func(*gin.Context, string, []string) bool
 	PasskeyLogin         func(*gin.Context, *entity.User)
 	SecurityAudit        func(*gin.Context, int, string, map[string]any)

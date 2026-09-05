@@ -405,3 +405,7 @@ func userResponse(user *entity.User) *contract.UserResponse {
 	}
 	return result
 }
+
+func (s *Service) UserCapabilities(id, role int) map[string]map[string]bool {
+	return s.userAuthorization.Capabilities(id, role)
+}

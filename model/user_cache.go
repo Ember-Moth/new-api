@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -13,18 +15,7 @@ import (
 
 const userCacheSchemaVersion = 2
 
-type UserBase struct {
-	Id          int    `json:"id"`
-	Group       string `json:"group"`
-	Email       string `json:"email"`
-	Quota       int    `json:"quota"`
-	Status      int    `json:"status"`
-	Role        int    `json:"role"`
-	Username    string `json:"username"`
-	Setting     string `json:"setting"`
-	AuthVersion int64  `json:"-"`
-	CacheSchema int    `json:"-"`
-}
+type UserBase identityentity.UserBase
 
 func (user *UserBase) WriteContext(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyUserGroup, user.Group)
@@ -36,14 +27,7 @@ func (user *UserBase) WriteContext(c *gin.Context) {
 }
 
 func (user *UserBase) GetSetting() dto.UserSetting {
-	setting := dto.UserSetting{}
-	if user.Setting != "" {
-		err := common.Unmarshal([]byte(user.Setting), &setting)
-		if err != nil {
-			common.SysLog("failed to unmarshal setting: " + err.Error())
-		}
-	}
-	return setting
+	return (*identityentity.UserBase)(user).GetSetting()
 }
 
 // getUserCacheKey returns the key for user cache

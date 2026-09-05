@@ -200,7 +200,7 @@ func Run(assets router.WebAssets) {
 		SystemHooks:   systemhttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		System:        systemService,
 		Authorization: authorization,
-		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity,
+		IdentityHooks: identityhttp.ManagementHooks{WriteRefreshCookie: service.WriteRefreshCookie, ClearRefreshCookie: service.ClearRefreshCookie, Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity,
 			RequireSecurityProof: middleware.RequireSecurityProof, SecurityAudit: controller.RecordUserSecurityAudit,
 			PasskeyLogin: func(c *gin.Context, user *identityentity.User) {
 				controller.CompletePasskeyLogin(c, (*model.User)(user))
@@ -217,7 +217,7 @@ func Run(assets router.WebAssets) {
 			},
 			InvalidatePlan: model.InvalidateSubscriptionPlanCache,
 		}),
-		Identity: identity.New(identity.Dependencies{TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
+		Identity: identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 			return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
 		Channel: model.ChannelService(),

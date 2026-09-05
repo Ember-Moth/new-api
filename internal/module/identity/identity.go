@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 
+	"github.com/QuantumNous/new-api/internal/module/identity/authn"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/ceremony"
@@ -50,6 +51,7 @@ type UserWallet interface {
 }
 
 type Dependencies struct {
+	Authentication       *authn.Runtime
 	TwoFAEvent           func(int, string)
 	VerifyEmail          func(string, string) bool
 	UserSecurity         UserSecurity
@@ -64,6 +66,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	Authentication    *authn.Runtime
 	passkeys          *passkeys.Store
 	passkeyFlows      *passkeys.Flows
 	factors           *twofa.Store
@@ -84,7 +87,8 @@ type Service struct {
 
 func New(deps Dependencies) *Service {
 	return &Service{
-		passkeys: passkeys.NewStore(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), passkeyFlows: passkeys.NewFlows(ceremony.NewFlows(deps.DB)),
+		Authentication: deps.Authentication,
+		passkeys:       passkeys.NewStore(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), passkeyFlows: passkeys.NewFlows(ceremony.NewFlows(deps.DB)),
 		factors: twofa.New(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), twoFAEvent: deps.TwoFAEvent,
 		bindings:    repo.NewBindings(deps.DB),
 		verifyEmail: deps.VerifyEmail,

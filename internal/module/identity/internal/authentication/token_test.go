@@ -1,4 +1,4 @@
-package service
+package authentication
 
 import (
 	"errors"

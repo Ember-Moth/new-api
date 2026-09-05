@@ -99,8 +99,9 @@ func newUserFixture(t *testing.T) *userFixture {
 		Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
 	}})
 	f.service = identity.New(identity.Dependencies{
-		VerifyEmail: func(email, code string) bool { return code == "valid" },
-		DB:          db, UserAuthorization: f.authorization, UserWallet: wallet, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
+		Authentication: service.AuthenticationRuntime(),
+		VerifyEmail:    func(email, code string) bool { return code == "valid" },
+		DB:             db, UserAuthorization: f.authorization, UserWallet: wallet, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
 		WelcomeQuota: func() int { return 250 }, WelcomeGrant: func(id, quota int) { assert.Equal(t, 250, quota); f.grants = append(f.grants, id) },
 		UserSecurity: identity.UserSecurity{
 			IssueProof:            service.IssueSecurityProof,
@@ -116,7 +117,7 @@ func newUserFixture(t *testing.T) *userFixture {
 			DeleteCredentials: model.DeleteUserAuthenticationData,
 		},
 	})
-	h := identityhttp.New(f.service, identityhttp.ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, RequireSecurityProof: middleware.RequireSecurityProof,
+	h := identityhttp.New(f.service, identityhttp.ManagementHooks{WriteRefreshCookie: service.WriteRefreshCookie, ClearRefreshCookie: service.ClearRefreshCookie, SessionIdentity: middleware.GetSessionAuthIdentity, RequireSecurityProof: middleware.RequireSecurityProof,
 		PasskeyLogin: func(c *gin.Context, user *entity.User) {
 			bundle, err := service.CreateLoginSessionAtAuthVersion(user.Id, user.AuthVersion, "passkey", c.ClientIP(), c.Request.UserAgent())
 			if err != nil {
@@ -135,6 +136,11 @@ func newUserFixture(t *testing.T) *userFixture {
 		c.Next()
 	})
 	selfRoutes := f.router.Group("/self", middleware.UserAuth())
+	selfRoutes.GET("/sessions", h.GetLoginSessions)
+	selfRoutes.DELETE("/sessions/:sid", h.DeleteLoginSession)
+	selfRoutes.POST("/sessions/revoke-others", h.RevokeOtherLoginSessions)
+	f.router.POST("/auth/refresh", h.RefreshAuth)
+	f.router.POST("/auth/logout", h.AuthLogout)
 	selfRoutes.POST("/passkey/register/begin", h.PasskeyRegisterBegin)
 	selfRoutes.POST("/passkey/register/finish", h.PasskeyRegisterFinish)
 	selfRoutes.POST("/passkey/verify/begin", h.PasskeyVerifyBegin)

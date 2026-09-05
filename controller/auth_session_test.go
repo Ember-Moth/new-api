@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/identity"
+	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -152,4 +154,9 @@ func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
 	var stored model.User
 	require.NoError(t, db.First(&stored, user.Id).Error)
 	assert.Equal(t, previousLastLoginAt, stored.LastLoginAt)
+}
+
+func AuthLogout(c *gin.Context) {
+	handler := identityhttp.New(identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime()}), identityhttp.ManagementHooks{WriteRefreshCookie: service.WriteRefreshCookie, ClearRefreshCookie: service.ClearRefreshCookie})
+	handler.AuthLogout(c)
 }

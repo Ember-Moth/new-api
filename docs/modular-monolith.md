@@ -155,6 +155,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 Passkey 登录通过应用注入的完成回调连接剩余登录传输层，并携带验证时的用户认证版本，避免验证后发生安全配置变更仍创建旧状态会话。证明验证与安全审计也由明确接口连接现有中间件；这些认证外围依赖仍须继续整理。
 
+第十九批将访问 JWT、安全证明、登录会话创建/验证/刷新及撤销编排迁入 identity 的私有 authentication 实现，公开边界为 authn。用户与会话共享投影及会话错误契约归模块所有；存储和用户缓存通过明确依赖接口接入。
+
+会话列表、撤销其他会话、单会话撤销、刷新和退出接口迁入模块传输层。保留刷新令牌竞争恢复、重用拒绝、会话绑定及安全证明用途隔离；普通刷新不撤销尚未过期的访问令牌，注销或安全版本变更才会使它们失效。刷新响应使用安全用户投影。
+
+旧 service/auth_token.go 只保留调用适配；service/auth_session.go 保留存储接口适配与 Cookie 输出。底层 model/user_session.go 和用户缓存仍是后续迁移项，这些过渡依赖不能视为身份模块完成。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -434,3 +440,22 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1
 使用真实 P-256 签名和 CBOR 凭据完成注册、Passkey 登录、升阶验证和删除；验证挑战重放拒绝、安全证明不足不消费挑战、状态响应隐藏凭据、断言计数器更新、凭据替换失败回滚与管理员同级保护。既有认证挑战并发消费和账户清理回归继续通过。DragonflyDB 验证凭据增删后的会话续签、旧令牌失效及额度保留。
 
 输出：`/tmp/new-api-passkey-module-tests.log`、`/tmp/new-api-passkey-module-dragonfly.log`、`/tmp/new-api-passkey-module-full-tests.log`、`/tmp/new-api-passkey-module-vet.log`、`/tmp/new-api-passkey-module-startup.log`。
+
+## 第十九批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归与第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./model ./controller ./service \
+  -run 'TestModular|TestSession|TestAccessToken|TestSecurityProof|TestAuth|TestRefresh|TestCreateLogin|TestUserSession|TestRevoke|TestLogout|TestValidateLogin' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonfly -count=1
+```
+
+保留 JWT 篡改、用途隔离、安全证明范围及认证身份绑定测试，新增真实认证中间件下的会话列表、刷新 Cookie、安全响应、撤销其他会话和退出流程。DragonflyDB 验证刷新令牌轮换、并发窗口中恢复同一后继令牌及退出后的访问拒绝。
+
+输出：`/tmp/new-api-auth-runtime-tests.log`、`/tmp/new-api-auth-runtime-dragonfly.log`、`/tmp/new-api-auth-runtime-full-tests.log`、`/tmp/new-api-auth-runtime-vet.log`、`/tmp/new-api-auth-runtime-startup.log`。

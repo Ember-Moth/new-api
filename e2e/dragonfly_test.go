@@ -363,6 +363,30 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.Equal(t, 100, cached.Quota)
 	})
 
+	t.Run("authentication runtime refresh recovery and revoke", func(t *testing.T) {
+		previousSecret := common.SessionSecret
+		common.SessionSecret = "dragonfly-auth-runtime-secret"
+		t.Cleanup(func() { common.SessionSecret = previousSecret })
+		user := model.User{Username: "dragonfly-auth-runtime", AffCode: "dragonfly-auth-runtime", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 100}
+		require.NoError(t, database.Create(&user).Error)
+		authentication := service.AuthenticationRuntime()
+		login, err := authentication.CreateLoginSession(user.Id, "password", "127.0.0.1", "browser")
+		require.NoError(t, err)
+		identity, err := service.ParseAccessToken(login.AccessToken)
+		require.NoError(t, err)
+		_, _, err = authentication.ValidateLoginSession(identity)
+		require.NoError(t, err)
+		refreshed, _, err := authentication.RefreshLoginSession(login.RefreshToken, login.Session.SID, "127.0.0.1", "browser")
+		require.NoError(t, err)
+		assert.NotEqual(t, login.RefreshToken, refreshed.RefreshToken)
+		recovered, _, err := authentication.RefreshLoginSession(login.RefreshToken, login.Session.SID, "127.0.0.1", "browser")
+		require.NoError(t, err)
+		assert.Equal(t, refreshed.RefreshToken, recovered.RefreshToken)
+		require.NoError(t, authentication.RevokeByRefreshToken(recovered.RefreshToken, login.Session.SID, "logout"))
+		_, _, err = authentication.ValidateLoginSession(identity)
+		require.ErrorIs(t, err, service.ErrLoginSessionRevoked)
+	})
+
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {
 		user := model.User{Username: "dragonfly-session", AffCode: "dragonfly-session", AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)
