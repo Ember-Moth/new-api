@@ -131,6 +131,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 重复心跳按 node_name 更新同一记录并保留创建时间，过期删除直接使用数据库时间条件，在线节点和已恢复心跳的节点受到保护。上报循环的启动状态归实例所有，接受应用 context 并返回退出信号，应用关闭时等待该循环结束后再关闭数据库。
 
+第十五批将通用设置接口、配置读取/校验、默认配置加载、数据库持久化与周期重载迁入 system 的私有 options 实现。模块对管理接口保留敏感值过滤、计费默认表达式投影、合规字段保护、提供商配置校验和任务插件表达式校验；应用注入定价缓存失效、任务资源 URL 校验及模型别名解析。
+
+保存使用 PostgreSQL upsert 并检查写入结果，批量写入放在显式事务内；已覆盖的 JSON 倍率校验不再提前修改内存，写库失败不会发布配置。重载先校验已支持的值约束，再应用数据库快照，周期循环接受应用 context。
+
+旧 model/option.go 缩为 setup、支付和插件写入方的过渡适配；common.OptionMap 及 setting 下的业务配置仍是共享运行时投影，并非最终的配置边界。后续要继续将业务消费者归到所属模块，不能将本批视为全局配置整理完成。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -340,3 +346,19 @@ GOWORK=off go test ./internal/arch ./internal/module/system/... ./internal/trans
 在正式 SQL 初始化的隔离 schema 中验证重复上报、角色/资源信息序列化、创建时间保留、90 秒过期边界、心跳恢复后的删除保护、列表和清理响应、主机名回退及取消后的上报循环退出。任务调度与日志清理回归继续通过。
 
 输出：`/tmp/new-api-system-instances-tests.log`、`/tmp/new-api-system-instances-full-tests.log`、`/tmp/new-api-system-instances-vet.log`、`/tmp/new-api-system-instances-startup.log`。
+
+## 第十五批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归和第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test ./internal/arch ./internal/module/system/... ./controller ./model -count=1
+```
+
+读取并遵循 `pkg/billingexpr/expr.md`，保留插件 usage schema、模型别名和非负表达式校验。SQL 集成测试覆盖单项失败不更新倍率、分批写入时的事务回滚、显式空值、无效倍率拒绝、敏感项过滤、有效计费配置投影和重载失败保留旧快照；原 Gemini/Claude、插件开关和计费配置回归继续通过。
+
+输出：`/tmp/new-api-options-module-tests.log`、`/tmp/new-api-options-module-full-tests.log`、`/tmp/new-api-options-module-vet.log`、`/tmp/new-api-options-module-startup.log`。

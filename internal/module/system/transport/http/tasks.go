@@ -115,6 +115,15 @@ func (h *Handler) GetSystemTask(c *gin.Context) {
 	})
 }
 
-type Handler struct{ service *system.Service }
+type Handler struct {
+	service *system.Service
+	hooks   ManagementHooks
+}
 
-func New(service *system.Service) *Handler { return &Handler{service: service} }
+func New(service *system.Service, hooks ...ManagementHooks) *Handler {
+	handler := &Handler{service: service}
+	if len(hooks) > 0 {
+		handler.hooks = hooks[0]
+	}
+	return handler
+}

@@ -1,4 +1,4 @@
-package model
+package options
 
 import (
 	"testing"
@@ -34,14 +34,14 @@ export function parseTaskResult() { return {}; }
 	_, ok := jsplugin.DefaultRegistry.Get(key)
 	require.True(t, ok)
 
-	require.NoError(t, updateOptionMap("TaskPluginEnabled", "false"))
+	require.NoError(t, New(Dependencies{}).ApplyRuntime("TaskPluginEnabled", "false"))
 
 	assert.False(t, constant.TaskPluginEnabled)
 	assert.Equal(t, "false", common.OptionMap["TaskPluginEnabled"])
 	_, ok = jsplugin.DefaultRegistry.Get(key)
 	assert.False(t, ok)
 
-	require.NoError(t, updateOptionMap("TaskPluginEnabled", "true"))
+	require.NoError(t, New(Dependencies{}).ApplyRuntime("TaskPluginEnabled", "true"))
 	_, ok = jsplugin.DefaultRegistry.Get(key)
 	assert.True(t, ok)
 }
@@ -56,7 +56,7 @@ func TestTaskPluginOverrideEnabledOptionUpdatesRuntimeSwitch(t *testing.T) {
 		common.OptionMap = originalMap
 	})
 
-	require.NoError(t, updateOptionMap("TaskPluginOverrideEnabled", "false"))
+	require.NoError(t, New(Dependencies{}).ApplyRuntime("TaskPluginOverrideEnabled", "false"))
 
 	assert.False(t, constant.TaskPluginOverrideEnabled)
 	assert.Equal(t, "false", common.OptionMap["TaskPluginOverrideEnabled"])
@@ -83,7 +83,7 @@ export function parseTaskResult() { return {}; }
 	_, ok := jsplugin.DefaultRegistry.Get(key)
 	require.True(t, ok)
 
-	require.NoError(t, updateOptionMap(setting.TaskPluginDisabledFactoryKeysKey, `["option-factory-off"]`))
+	require.NoError(t, New(Dependencies{}).ApplyRuntime(setting.TaskPluginDisabledFactoryKeysKey, `["option-factory-off"]`))
 
 	assert.Equal(t, `["option-factory-off"]`, common.OptionMap[setting.TaskPluginDisabledFactoryKeysKey])
 	_, ok = jsplugin.DefaultRegistry.Get(key)

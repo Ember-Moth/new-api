@@ -7,9 +7,13 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/system"
+	"github.com/QuantumNous/new-api/internal/module/system/contract"
+	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -200,4 +204,18 @@ export function parseTaskResult() { return {}; }
 	assert.Equal(t, http.StatusOK, unresolvable.Code)
 	assert.Contains(t, unresolvable.Body.String(), `"success":false`)
 	assert.Contains(t, unresolvable.Body.String(), "no task plugin usage schema")
+}
+
+// Existing provider/billing fixtures exercise the migrated management handler.
+type OptionUpdateRequest = contract.OptionUpdateRequest
+
+func UpdateOption(c *gin.Context) {
+	manager := system.NewOptions(system.OptionDependencies{
+		DB: model.DB, InvalidatePricing: model.InvalidatePricingCache, ValidateTaskURL: service.ValidateTaskArtifactBaseURL,
+		AliasPlugin: func(generation *jsplugin.RoutingGeneration, name string) (string, bool) {
+			target, ok := model.ChannelService().ResolveTaskModelAlias(generation, name)
+			return target.PluginKey, ok
+		},
+	})
+	systemhttp.New(system.New(system.Dependencies{DB: model.DB, Options: manager}), systemhttp.ManagementHooks{Audit: RecordManageAudit}).UpdateOption(c)
 }

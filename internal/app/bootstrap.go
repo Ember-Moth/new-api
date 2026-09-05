@@ -7,12 +7,16 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
+	"context"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/module/channel"
+	"github.com/QuantumNous/new-api/internal/module/system"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/service"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
@@ -63,7 +67,17 @@ func initResources() error {
 
 	// Initialize options, should after model.InitDB()
 
-	model.InitOptionMap()
+	options := system.NewOptions(system.OptionDependencies{DB: model.DB, InvalidatePricing: model.InvalidatePricingCache,
+		ValidateTaskURL: service.ValidateTaskArtifactBaseURL,
+		AliasPlugin: func(generation *jsplugin.RoutingGeneration, name string) (string, bool) {
+			target, ok := model.ChannelService().ResolveTaskModelAlias(generation, name)
+			return target.PluginKey, ok
+		},
+	})
+	model.ConfigureOptions(options)
+	if err := options.Initialize(context.Background()); err != nil {
+		return err
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

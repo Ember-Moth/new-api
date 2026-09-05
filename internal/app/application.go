@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/internal/module/system"
+	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 
 	_ "net/http/pprof"
 
@@ -109,7 +110,7 @@ func Run(assets router.WebAssets) {
 	model.GetPricing()
 
 	// 热更新配置
-	go model.SyncOptions(common.SyncFrequency)
+	go model.OptionManager().SyncOptions(runCtx, common.SyncFrequency)
 	go controller.SyncTaskPlugins()
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
@@ -151,7 +152,7 @@ func Run(assets router.WebAssets) {
 	// (DB-lease dedup across masters + run history), then start the runner that
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
-	systemService := system.New(system.Dependencies{DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
+	systemService := system.New(system.Dependencies{Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
 		Logs:           system.LogOperations{Count: model.CountOldLog, DeleteBatch: model.DeleteOldLogBatch},
 		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})
@@ -194,6 +195,7 @@ func Run(assets router.WebAssets) {
 		},
 	})
 	server, err := httpserver.New(assets, router.Dependencies{
+		SystemHooks:   systemhttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		System:        systemService,
 		Authorization: authorization,
 		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity},

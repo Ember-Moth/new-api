@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/controller"
-	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/internal/module/system"
+	"github.com/QuantumNous/new-api/internal/module/system/contract"
+	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -64,10 +65,10 @@ func TestGPT6AstraBuiltinBilling(t *testing.T) {
 	t.Run("admin options expose defaults without persisting them", func(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
-		controller.GetOptions(ctx)
+		systemhttp.New(system.New(system.Dependencies{})).GetOptions(ctx)
 		var response struct {
 			Success bool
-			Data    []model.Option
+			Data    []contract.Option
 		}
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 		require.True(t, response.Success)

@@ -5,11 +5,13 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/system/entity"
 	"github.com/QuantumNous/new-api/internal/module/system/internal/instances"
+	"github.com/QuantumNous/new-api/internal/module/system/internal/options"
 	implementation "github.com/QuantumNous/new-api/internal/module/system/internal/tasks"
 	"gorm.io/gorm"
 )
 
 type Service struct {
+	*options.Manager
 	*implementation.Runtime
 	*instances.Registry
 	*instances.Reporter
@@ -17,6 +19,7 @@ type Service struct {
 
 type InstanceReportConfig = instances.ReportConfig
 type Dependencies struct {
+	Options        *Options
 	DB             *gorm.DB
 	NodeName       string
 	Master         bool
@@ -51,8 +54,13 @@ const (
 var ErrSystemTaskLockLost = entity.ErrSystemTaskLockLost
 
 func New(deps Dependencies) *Service {
+	optionManager := deps.Options
+	if optionManager == nil {
+		optionManager = NewOptions(OptionDependencies{DB: deps.DB})
+	}
 	registry := instances.NewRegistry(deps.DB)
 	return &Service{
+		Manager:  optionManager,
 		Runtime:  implementation.New(implementation.Dependencies{DB: deps.DB, NodeName: deps.NodeName, Master: deps.Master, Logs: deps.Logs}),
 		Registry: registry, Reporter: instances.NewReporter(registry, deps.InstanceReport, deps.Master),
 	}
@@ -68,3 +76,10 @@ func FromContext(ctx context.Context) *Service {
 	service, _ := ctx.Value(contextKey{}).(*Service)
 	return service
 }
+
+type Options = options.Manager
+type OptionDependencies = options.Dependencies
+
+var ErrPaymentComplianceRequired = options.ErrPaymentComplianceRequired
+
+func NewOptions(deps OptionDependencies) *Options { return options.New(deps) }

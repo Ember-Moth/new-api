@@ -18,7 +18,7 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
-	systemHandler := systemhttp.New(deps.System)
+	systemHandler := systemhttp.New(deps.System, deps.SystemHooks)
 	billingHandler := billinghttp.New(deps.Billing, deps.BillingHooks)
 	subscriptionHandler := subscriptionhttp.New(deps.Subscription)
 	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
@@ -205,8 +205,8 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{
-			optionRoute.GET("/", controller.GetOptions)
-			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.GET("/", systemHandler.GetOptions)
+			optionRoute.PUT("/", systemHandler.UpdateOption)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)

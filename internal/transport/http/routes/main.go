@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/internal/module/system"
+	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 
@@ -24,6 +25,7 @@ import (
 )
 
 type Dependencies struct {
+	SystemHooks   systemhttp.ManagementHooks
 	System        *system.Service
 	Authorization *authz.Engine
 	IdentityHooks identityhttp.ManagementHooks
