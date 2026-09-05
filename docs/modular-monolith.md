@@ -257,6 +257,14 @@ Stripe 不再吞掉入账错误后返回 200，处理失败返回 500，使支�
 
 Waffo/Waffo Pancake 回调、钱包结账与报价、配置适配以及转发额度运行时仍待继续整理。
 
+第三十四批将旧 Waffo 与 Waffo Pancake 的回调验签、响应签名、订单查找和分发迁入 billing。旧控制器中的回调处理、进程订单锁，以及 service 中的 Pancake webhook DTO/解析/订单映射已移除；配置仍经现有设置适配进入模块。
+
+旧 Waffo 只在 PAY_SUCCESS 入账，在 ORDER_CLOSE 关闭订单；PAY_IN_PROGRESS、AUTHORIZATION_REQUIRED、AUTHED_WAITING_CAPTURE 不再错误地标成失败。成功/失败响应按原协议返回 HTTP 200 的签名 JSON；业务失败返回签名 failed，签名与服务配置错误独立处理。迟到的关闭通知不会覆盖已入账订单。
+
+Pancake 绑定路由环境对应的验签公钥，并验证签名载荷 mode、已配置的 StoreID、商户外部订单号、提供商及买家身份。StoreID 使用现有配置保存流程已要求的字段，避免其他 Store 的签名事件被错误关联；回调不再依赖钱包商品 ID，订阅商品可独立使用。已验证事件的数据库错误或暂时找不到本地订单返回 500/retry；环境、Store 或身份不匹配不触发入账。钱包记录不能替代订阅前缀对应的订阅订单。
+
+Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、报价、Epay 钱包回调、配置适配及普通转发额度运行时仍待继续整理。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -918,3 +926,32 @@ python3 /tmp/verify-new-api-modular-startup.py
 完整回归继续覆盖真实 DragonflyDB 入账缓存和 PostgreSQL/ClickHouse 日志，竞态检查通过。
 
 输出：`/tmp/new-api-webhooks-build.log`、`/tmp/new-api-webhooks-tests.log`、`/tmp/new-api-webhooks-race.log`、`/tmp/new-api-webhooks-full-tests.log`、`/tmp/new-api-webhooks-vet.log`、`/tmp/new-api-webhooks-startup.log`。
+
+## 第三十四批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**；支付 SDK 保持 **waffo-go v1.3.2**、**waffo-pancake-sdk-go v0.3.1**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/billing/... ./internal/module/subscription/... ./controller ./model ./service \
+  -run 'TestModular|TestWaffo|TestPancake|TestWebhook|TestSubscription|TestPayment|TestTopup|TestRecharge' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing \
+  -run 'TestWaffoWebhook|TestPancake|TestStripeWebhook|TestCreemWebhook|TestWebhook' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+使用独立 RSA 密钥生成有效请求签名，并验证商户响应签名。真实 PostgreSQL 测试覆盖 Waffo 支付中/授权/待捕获状态保留 pending、ORDER_CLOSE 关闭待支付订单、入账失败签名 failed、恢复后重试、重复成功和迟到关闭。
+
+Pancake 测试覆盖测试/生产公钥隔离、签名时效、签名载荷环境、Store 和买家身份不匹配不入账、数据库故障返回 retry、重复通知只发放一次、订阅与钱包不能互相替代，以及配置缺少 Store 时拒绝回调。完整回归继续验证真实 DragonflyDB 入账缓存和 PostgreSQL/ClickHouse 日志；竞态检查通过。
+
+输出：`/tmp/new-api-waffo-hooks-build.log`、`/tmp/new-api-waffo-hooks-tests.log`、`/tmp/new-api-waffo-hooks-race.log`、`/tmp/new-api-waffo-hooks-full-tests.log`、`/tmp/new-api-waffo-hooks-vet.log`、`/tmp/new-api-waffo-hooks-startup.log`。

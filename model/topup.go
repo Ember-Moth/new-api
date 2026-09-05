@@ -51,11 +51,3 @@ func UpdatePendingTopUpStatus(tradeNo, provider, status string) error {
 func RechargeEpay(tradeNo, method, ip string) (bool, error) {
 	return TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderEpay, ActualMethod: method, CallerIP: ip})
 }
-func RechargeWaffo(tradeNo, ip string) error {
-	_, err := TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderWaffo, CallerIP: ip})
-	return err
-}
-func RechargeWaffoPancake(tradeNo string) error {
-	_, err := TopUpStore().Complete(context.Background(), billingcontract.TopUpCompletion{TradeNo: tradeNo, Provider: PaymentProviderWaffoPancake})
-	return err
-}

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 
+	subentity "github.com/QuantumNous/new-api/internal/module/subscription/entity"
+	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
+
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/topups"
 	"github.com/QuantumNous/new-api/internal/module/subscription/payments"
@@ -15,17 +18,23 @@ var ErrSignature = errors.New("invalid payment webhook signature")
 var ErrPayload = errors.New("invalid payment webhook payload")
 
 type Config struct {
-	PaymentAllowed            bool
-	StripeSecret, CreemSecret string
+	WaffoEnabled                    bool
+	WaffoPrivateKey, WaffoPublicKey string
+	PancakeEnabled                  bool
+	PancakeStoreID                  string
+	PaymentAllowed                  bool
+	StripeSecret, CreemSecret       string
 }
 type SubscriptionOrders interface {
+	Get(context.Context, string) (*subentity.SubscriptionOrder, error)
 	Complete(context.Context, string, string, string, string) error
 	FinishPending(context.Context, string, string, string) error
 }
 type Dependencies struct {
-	Config        func() Config
-	TopUps        *topups.Store
-	Subscriptions SubscriptionOrders
+	PancakePublicKeys *pancake.WebhookPublicKeys
+	Config            func() Config
+	TopUps            *topups.Store
+	Subscriptions     SubscriptionOrders
 }
 type Processor struct{ deps Dependencies }
 
@@ -41,6 +50,10 @@ func (p *Processor) Enabled(provider string) bool {
 		return strings.TrimSpace(cfg.StripeSecret) != ""
 	case "creem":
 		return strings.TrimSpace(cfg.CreemSecret) != ""
+	case "waffo":
+		return cfg.WaffoEnabled && strings.TrimSpace(cfg.WaffoPrivateKey) != "" && strings.TrimSpace(cfg.WaffoPublicKey) != ""
+	case "waffo_pancake":
+		return cfg.PancakeEnabled && strings.TrimSpace(cfg.PancakeStoreID) != ""
 	default:
 		return false
 	}

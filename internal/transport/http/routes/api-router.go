@@ -72,10 +72,10 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, billingHandler.StripeWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, billingHandler.CreemWebhook)
-		apiRouter.POST("/waffo/webhook", anonymousRequestBodyLimit, controller.WaffoWebhook)
+		apiRouter.POST("/waffo/webhook", anonymousRequestBodyLimit, billingHandler.WaffoWebhook)
 		// :env separates test vs prod URLs so the operator can register each
 		// in Pancake's matching webhook slot; handler enforces env match.
-		apiRouter.POST("/waffo-pancake/webhook/:env", anonymousRequestBodyLimit, controller.WaffoPancakeWebhook)
+		apiRouter.POST("/waffo-pancake/webhook/:env", anonymousRequestBodyLimit, billingHandler.WaffoPancakeWebhook)
 
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UniversalVerify)

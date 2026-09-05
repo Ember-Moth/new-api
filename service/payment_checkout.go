@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/internal/module/billing/checkout"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/webhooks"
@@ -23,5 +25,11 @@ func PaymentCheckoutClient() *checkout.Client {
 // PaymentWebhookConfig is independent of wallet product/catalog readiness:
 // existing orders and subscription-only deployments still need callbacks.
 func PaymentWebhookConfig() webhooks.Config {
-	return webhooks.Config{PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed(), StripeSecret: setting.StripeWebhookSecret, CreemSecret: setting.CreemWebhookSecret}
+	private, public := setting.WaffoPrivateKey, setting.WaffoPublicCert
+	if setting.WaffoSandbox {
+		private, public = setting.WaffoSandboxPrivateKey, setting.WaffoSandboxPublicCert
+	}
+	return webhooks.Config{PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed(), StripeSecret: setting.StripeWebhookSecret, CreemSecret: setting.CreemWebhookSecret,
+		WaffoEnabled: setting.WaffoEnabled, WaffoPrivateKey: private, WaffoPublicKey: public,
+		PancakeEnabled: strings.TrimSpace(setting.WaffoPancakeMerchantID) != "" && strings.TrimSpace(setting.WaffoPancakePrivateKey) != "", PancakeStoreID: setting.WaffoPancakeStoreID}
 }

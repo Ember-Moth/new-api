@@ -53,10 +53,6 @@ func isWaffoWebhookConfigured() bool {
 		strings.TrimSpace(setting.WaffoPublicCert) != ""
 }
 
-func isWaffoWebhookEnabled() bool {
-	return isWaffoTopUpEnabled()
-}
-
 func isWaffoPancakeTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false
@@ -66,14 +62,6 @@ func isWaffoPancakeTopUpEnabled() bool {
 	return strings.TrimSpace(setting.WaffoPancakeMerchantID) != "" &&
 		strings.TrimSpace(setting.WaffoPancakePrivateKey) != "" &&
 		strings.TrimSpace(setting.WaffoPancakeProductID) != ""
-}
-
-func isWaffoPancakeWebhookConfigured() bool {
-	return isWaffoPancakeTopUpEnabled()
-}
-
-func isWaffoPancakeWebhookEnabled() bool {
-	return isWaffoPancakeTopUpEnabled()
 }
 
 func isEpayTopUpEnabled() bool {

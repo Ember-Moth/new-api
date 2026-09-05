@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,7 +96,7 @@ func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {
 	insertUserForPaymentGuardTest(t, 101, 0)
 	insertTopUpForPaymentGuardTest(t, "waffo-pancake-guard", 101, PaymentProviderStripe)
 
-	err := RechargeWaffoPancake("waffo-pancake-guard")
+	_, err := TopUpStore().Complete(t.Context(), billingcontract.TopUpCompletion{TradeNo: "waffo-pancake-guard", Provider: PaymentProviderWaffoPancake})
 	require.Error(t, err)
 
 	topUp := GetTopUpByTradeNo("waffo-pancake-guard")
@@ -147,10 +149,11 @@ func TestCompleteSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T
 	plan := insertSubscriptionPlanForPaymentGuardTest(t, 301)
 	insertSubscriptionOrderForPaymentGuardTest(t, "sub-guard-order", 202, plan.Id, PaymentProviderStripe)
 
-	err := CompleteSubscriptionOrder("sub-guard-order", `{"provider":"epay"}`, PaymentProviderEpay, "alipay")
+	err := SubscriptionPayments().Complete(t.Context(), "sub-guard-order", `{"provider":"epay"}`, PaymentProviderEpay, "alipay")
 	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
-	order := GetSubscriptionOrderByTradeNo("sub-guard-order")
+	order, getErr := SubscriptionPayments().Get(t.Context(), "sub-guard-order")
+	require.NoError(t, getErr)
 	require.NotNil(t, order)
 	assert.Equal(t, common.TopUpStatusPending, order.Status)
 	assert.Zero(t, countUserSubscriptionsForPaymentGuardTest(t, 202))
@@ -169,7 +172,8 @@ func TestExpireSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T) 
 	err := SubscriptionPayments().FinishPending(t.Context(), "sub-expire-guard", PaymentProviderCreem, common.TopUpStatusExpired)
 	require.ErrorIs(t, err, ErrPaymentMethodMismatch)
 
-	order := GetSubscriptionOrderByTradeNo("sub-expire-guard")
+	order, getErr := SubscriptionPayments().Get(t.Context(), "sub-expire-guard")
+	require.NoError(t, getErr)
 	require.NotNil(t, order)
 	assert.Equal(t, common.TopUpStatusPending, order.Status)
 }

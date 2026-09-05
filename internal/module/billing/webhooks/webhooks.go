@@ -10,5 +10,7 @@ type SubscriptionOrders = implementation.SubscriptionOrders
 var ErrDisabled = implementation.ErrDisabled
 var ErrSignature = implementation.ErrSignature
 var ErrPayload = implementation.ErrPayload
+var ErrEnvironment = implementation.ErrEnvironment
+var ErrOrderIdentity = implementation.ErrOrderIdentity
 
 func New(deps Dependencies) *Processor { return implementation.New(deps) }

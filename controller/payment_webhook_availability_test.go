@@ -57,7 +57,7 @@ func TestCreemTopUpEnabledRequiresKeyAndCatalog(t *testing.T) {
 	require.False(t, isCreemTopUpEnabled())
 }
 
-func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
+func TestWaffoTopUpEnabledRequiresCredentials(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	originalEnabled := setting.WaffoEnabled
 	originalSandbox := setting.WaffoSandbox
@@ -83,26 +83,26 @@ func TestWaffoWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	setting.WaffoApiKey = ""
 	setting.WaffoPrivateKey = "private"
 	setting.WaffoPublicCert = "public"
-	require.False(t, isWaffoWebhookEnabled())
+	require.False(t, isWaffoTopUpEnabled())
 
 	setting.WaffoApiKey = "api"
-	require.True(t, isWaffoWebhookEnabled())
+	require.True(t, isWaffoTopUpEnabled())
 
 	setting.WaffoEnabled = false
-	require.False(t, isWaffoWebhookEnabled())
+	require.False(t, isWaffoTopUpEnabled())
 
 	setting.WaffoEnabled = true
 	setting.WaffoSandbox = true
 	setting.WaffoSandboxApiKey = ""
 	setting.WaffoSandboxPrivateKey = "sandbox_private"
 	setting.WaffoSandboxPublicCert = "sandbox_public"
-	require.False(t, isWaffoWebhookEnabled())
+	require.False(t, isWaffoTopUpEnabled())
 
 	setting.WaffoSandboxApiKey = "sandbox_api"
-	require.True(t, isWaffoWebhookEnabled())
+	require.True(t, isWaffoTopUpEnabled())
 }
 
-func TestWaffoPancakeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
+func TestWaffoPancakeTopUpEnabledRequiresProduct(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	originalMerchantID := setting.WaffoPancakeMerchantID
 	originalPrivateKey := setting.WaffoPancakePrivateKey
@@ -119,17 +119,17 @@ func TestWaffoPancakeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	setting.WaffoPancakeMerchantID = ""
 	setting.WaffoPancakePrivateKey = "private"
 	setting.WaffoPancakeProductID = "product"
-	require.False(t, isWaffoPancakeWebhookEnabled())
+	require.False(t, isWaffoPancakeTopUpEnabled())
 
 	setting.WaffoPancakeMerchantID = "merchant"
-	require.True(t, isWaffoPancakeWebhookEnabled())
+	require.True(t, isWaffoPancakeTopUpEnabled())
 
 	setting.WaffoPancakeProductID = ""
-	require.False(t, isWaffoPancakeWebhookEnabled())
+	require.False(t, isWaffoPancakeTopUpEnabled())
 
 	setting.WaffoPancakeProductID = "product"
 	setting.WaffoPancakePrivateKey = ""
-	require.False(t, isWaffoPancakeWebhookEnabled())
+	require.False(t, isWaffoPancakeTopUpEnabled())
 }
 
 func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {

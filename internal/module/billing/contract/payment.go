@@ -63,3 +63,8 @@ type TopUpEvent struct {
 type RedeemRequest struct {
 	Key string `json:"key"`
 }
+
+type SignedWebhookResponse struct {
+	Body      []byte
+	Signature string
+}

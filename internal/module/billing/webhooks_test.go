@@ -7,8 +7,13 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
+
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+	waffoutils "github.com/waffo-com/waffo-go/utils"
+	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/billing"
@@ -192,4 +197,160 @@ func TestWebhookEnablementPayloadValidationAndSignatureExpiry(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, response.Code)
 	f.cfg.CreemSecret = ""
 	assert.Equal(t, http.StatusForbidden, webhookRequest(f, "creem", []byte(`{}`), true).Code)
+}
+
+type waffoWebhookFixture struct {
+	base                          *webhookFixture
+	testKey, prodKey, merchantKey *waffoutils.KeyPair
+}
+
+func newWaffoWebhookFixture(t *testing.T) *waffoWebhookFixture {
+	t.Helper()
+	f := &waffoWebhookFixture{base: newWebhookFixture(t)}
+	var err error
+	f.testKey, err = waffoutils.GenerateKeyPair()
+	require.NoError(t, err)
+	f.prodKey, err = waffoutils.GenerateKeyPair()
+	require.NoError(t, err)
+	f.merchantKey, err = waffoutils.GenerateKeyPair()
+	require.NoError(t, err)
+	f.base.cfg.WaffoEnabled = true
+	f.base.cfg.WaffoPrivateKey = f.merchantKey.PrivateKey
+	f.base.cfg.WaffoPublicKey = f.testKey.PublicKey
+	f.base.cfg.PancakeEnabled = true
+	f.base.cfg.PancakeStoreID = "STO_owned"
+	processor := webhooks.New(webhooks.Dependencies{Config: func() webhooks.Config { return f.base.cfg }, TopUps: f.base.topup.store, Subscriptions: f.base.subscriptions, PancakePublicKeys: &pancake.WebhookPublicKeys{Test: f.testKey.PublicKey, Prod: f.prodKey.PublicKey}})
+	handler := billinghttp.New(billing.New(billing.Dependencies{Webhooks: processor}), billinghttp.ManagementHooks{})
+	f.base.router.POST("/waffo", handler.WaffoWebhook)
+	f.base.router.POST("/pancake/:env", handler.WaffoPancakeWebhook)
+	return f
+}
+func (f *waffoWebhookFixture) legacyRequest(t *testing.T, reference, status string, valid bool) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := common.Marshal(map[string]any{"eventType": "PAYMENT_NOTIFICATION", "result": map[string]any{"merchantOrderId": reference, "orderStatus": status}})
+	require.NoError(t, err)
+	signature, err := waffoutils.Sign(string(body), f.testKey.PrivateKey)
+	require.NoError(t, err)
+	if !valid {
+		signature = "invalid"
+	}
+	request := httptest.NewRequest(http.MethodPost, "/waffo", bytes.NewReader(body))
+	request.Header.Set("X-SIGNATURE", signature)
+	response := httptest.NewRecorder()
+	f.base.router.ServeHTTP(response, request)
+	return response
+}
+func (f *waffoWebhookFixture) pancakeRequest(t *testing.T, route, mode, store, reference, buyer string, key *waffoutils.KeyPair, when time.Time) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := common.Marshal(map[string]any{"id": "evt_pancake", "eventType": "order.completed", "mode": mode, "storeId": store, "data": map[string]any{"orderId": "ORD_provider", "orderMerchantExternalId": reference, "merchantProvidedBuyerIdentity": buyer, "amount": "2.5", "currency": "USD"}})
+	require.NoError(t, err)
+	timestamp := strconv.FormatInt(when.UnixMilli(), 10)
+	signature, err := waffoutils.Sign(timestamp+"."+string(body), key.PrivateKey)
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "/pancake/"+route, bytes.NewReader(body))
+	request.Header.Set("X-Waffo-Signature", "t="+timestamp+",v1="+signature)
+	response := httptest.NewRecorder()
+	f.base.router.ServeHTTP(response, request)
+	return response
+}
+
+func TestWaffoWebhookKeepsProgressPendingAndSignsRetryResponses(t *testing.T) {
+	f := newWaffoWebhookFixture(t)
+	row := entity.TopUp{UserId: f.base.topup.user.Id, Amount: 2, Money: 2.5, TradeNo: "waffo-wallet", PaymentProvider: "waffo", Status: common.TopUpStatusPending}
+	require.NoError(t, f.base.topup.store.Create(t.Context(), &row))
+	assert.Equal(t, http.StatusBadRequest, f.legacyRequest(t, "waffo-wallet", "PAY_SUCCESS", false).Code)
+	for _, status := range []string{"PAY_IN_PROGRESS", "AUTHORIZATION_REQUIRED", "AUTHED_WAITING_CAPTURE"} {
+		response := f.legacyRequest(t, "waffo-wallet", status, true)
+		assert.Equal(t, http.StatusOK, response.Code)
+		assert.JSONEq(t, `{"message":"success"}`, response.Body.String())
+		assert.True(t, waffoutils.Verify(response.Body.String(), response.Header().Get("X-SIGNATURE"), f.merchantKey.PublicKey))
+		require.NoError(t, f.base.topup.db.First(&row, row.Id).Error)
+		assert.Equal(t, common.TopUpStatusPending, row.Status)
+	}
+	require.NoError(t, f.base.topup.db.Exec("ALTER TABLE top_ups ADD CONSTRAINT reject_waffo_credit CHECK (status <> 'success')").Error)
+	response := f.legacyRequest(t, "waffo-wallet", "PAY_SUCCESS", true)
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.JSONEq(t, `{"message":"failed"}`, response.Body.String())
+	assert.True(t, waffoutils.Verify(response.Body.String(), response.Header().Get("X-SIGNATURE"), f.merchantKey.PublicKey))
+	assert.Zero(t, f.base.topup.credits.Load())
+	require.NoError(t, f.base.topup.db.Exec("ALTER TABLE top_ups DROP CONSTRAINT reject_waffo_credit").Error)
+	for range 2 {
+		response = f.legacyRequest(t, "waffo-wallet", "PAY_SUCCESS", true)
+		assert.JSONEq(t, `{"message":"success"}`, response.Body.String())
+	}
+	assert.EqualValues(t, 20, f.base.topup.credits.Load())
+	assert.EqualValues(t, 1, f.base.topup.events.Load())
+	response = f.legacyRequest(t, "waffo-wallet", "ORDER_CLOSE", true)
+	assert.JSONEq(t, `{"message":"success"}`, response.Body.String())
+	require.NoError(t, f.base.topup.db.First(&row, row.Id).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, row.Status)
+	closed := entity.TopUp{UserId: f.base.topup.user.Id, Amount: 2, Money: 2.5, TradeNo: "waffo-close", PaymentProvider: "waffo", Status: common.TopUpStatusPending}
+	require.NoError(t, f.base.topup.store.Create(t.Context(), &closed))
+	response = f.legacyRequest(t, "waffo-close", "ORDER_CLOSE", true)
+	assert.JSONEq(t, `{"message":"success"}`, response.Body.String())
+	require.NoError(t, f.base.topup.db.First(&closed, closed.Id).Error)
+	assert.Equal(t, common.TopUpStatusFailed, closed.Status)
+	assert.EqualValues(t, 20, f.base.topup.credits.Load())
+}
+
+func TestPancakeWebhookEnforcesEnvironmentStoreAndBuyerBeforeCredit(t *testing.T) {
+	f := newWaffoWebhookFixture(t)
+	row := entity.TopUp{UserId: f.base.topup.user.Id, Amount: 2, Money: 2.5, TradeNo: "WAFFO_PANCAKE-wallet", PaymentProvider: "waffo_pancake", Status: common.TopUpStatusPending}
+	require.NoError(t, f.base.topup.store.Create(t.Context(), &row))
+	buyer := billingcontract.WaffoBuyerIdentity(row.UserId)
+	now := time.Now()
+	response := f.pancakeRequest(t, "test", "test", "STO_owned", row.TradeNo, buyer, f.prodKey, now)
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	response = f.pancakeRequest(t, "test", "prod", "STO_owned", row.TradeNo, buyer, f.testKey, now)
+	assert.Equal(t, http.StatusOK, response.Code)
+	response = f.pancakeRequest(t, "test", "test", "STO_foreign", row.TradeNo, buyer, f.testKey, now)
+	assert.Equal(t, http.StatusOK, response.Code)
+	response = f.pancakeRequest(t, "test", "test", "STO_owned", row.TradeNo, "new-api-user-999", f.testKey, now)
+	assert.Equal(t, http.StatusOK, response.Code)
+	response = f.pancakeRequest(t, "test", "test", "STO_owned", row.TradeNo, buyer, f.testKey, now.Add(-time.Hour))
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	assert.Zero(t, f.base.topup.credits.Load())
+	require.NoError(t, f.base.topup.db.Exec("ALTER TABLE top_ups RENAME TO unavailable_pancake_topups").Error)
+	response = f.pancakeRequest(t, "test", "test", "STO_owned", row.TradeNo, buyer, f.testKey, now)
+	assert.Equal(t, http.StatusInternalServerError, response.Code)
+	assert.Equal(t, "retry", response.Body.String())
+	require.NoError(t, f.base.topup.db.Exec("ALTER TABLE unavailable_pancake_topups RENAME TO top_ups").Error)
+	for range 2 {
+		response = f.pancakeRequest(t, "test", "test", "STO_owned", row.TradeNo, buyer, f.testKey, now)
+		assert.Equal(t, http.StatusOK, response.Code)
+	}
+	assert.EqualValues(t, 20, f.base.topup.credits.Load())
+	assert.EqualValues(t, 1, f.base.topup.events.Load())
+	response = f.pancakeRequest(t, "unknown", "test", "STO_owned", row.TradeNo, buyer, f.testKey, now)
+	assert.Equal(t, http.StatusNotFound, response.Code)
+}
+
+func TestPancakeSubscriptionLookupFailuresRetryWithoutWalletFallback(t *testing.T) {
+	f := newWaffoWebhookFixture(t)
+	reference := "WAFFO_PANCAKE_SUB-owned"
+	buyer := billingcontract.WaffoBuyerIdentity(f.base.topup.user.Id)
+	now := time.Now()
+	// Even a wallet record with this prefix cannot substitute for the missing
+	// subscription order. The verified event must be retried until it exists.
+	require.NoError(t, f.base.topup.store.Create(t.Context(), &entity.TopUp{UserId: f.base.topup.user.Id, Amount: 2, Money: 2.5, TradeNo: reference, PaymentProvider: "waffo_pancake", Status: common.TopUpStatusPending}))
+	response := f.pancakeRequest(t, "prod", "prod", "STO_owned", reference, buyer, f.prodKey, now)
+	assert.Equal(t, http.StatusInternalServerError, response.Code)
+	assert.Zero(t, f.base.topup.credits.Load())
+	order := subentity.SubscriptionOrder{UserId: f.base.topup.user.Id, PlanId: f.base.plan.Id, Money: 2.5, TradeNo: reference, PaymentProvider: "waffo_pancake", Status: common.TopUpStatusPending}
+	require.NoError(t, f.base.subscriptions.Create(t.Context(), &order))
+	// Remove the deliberately conflicting wallet record before completion,
+	// which creates its own zero-credit subscription payment receipt.
+	require.NoError(t, f.base.topup.db.Where("trade_no = ?", reference).Delete(&entity.TopUp{}).Error)
+	for range 2 {
+		response = f.pancakeRequest(t, "prod", "prod", "STO_owned", reference, buyer, f.prodKey, now)
+		assert.Equal(t, http.StatusOK, response.Code)
+	}
+	var count int64
+	require.NoError(t, f.base.topup.db.Model(&subentity.UserSubscription{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+	require.NoError(t, f.base.topup.db.First(&f.base.topup.user, f.base.topup.user.Id).Error)
+	assert.Equal(t, 10, f.base.topup.user.Quota)
+	f.base.cfg.PancakeStoreID = ""
+	response = f.pancakeRequest(t, "prod", "prod", "STO_owned", reference, buyer, f.prodKey, now)
+	assert.Equal(t, http.StatusForbidden, response.Code)
 }

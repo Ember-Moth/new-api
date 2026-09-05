@@ -3,8 +3,6 @@ package model
 import (
 	"context"
 
-	subscriptionpayments "github.com/QuantumNous/new-api/internal/module/subscription/payments"
-
 	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
 
 	"github.com/QuantumNous/new-api/common"
@@ -93,17 +91,3 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 }
 
 type SubscriptionOrder = subscriptionentity.SubscriptionOrder
-
-var ErrSubscriptionOrderNotFound = subscriptionpayments.ErrOrderNotFound
-var ErrSubscriptionOrderStatusInvalid = subscriptionpayments.ErrOrderStatusInvalid
-
-func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
-	order, err := SubscriptionPayments().Get(context.Background(), tradeNo)
-	if err != nil {
-		return nil
-	}
-	return order
-}
-func CompleteSubscriptionOrder(tradeNo, providerPayload, expectedPaymentProvider, actualPaymentMethod string) error {
-	return SubscriptionPayments().Complete(context.Background(), tradeNo, providerPayload, expectedPaymentProvider, actualPaymentMethod)
-}
