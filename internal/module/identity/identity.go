@@ -5,6 +5,8 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/internal/ceremony"
+	"github.com/QuantumNous/new-api/internal/module/identity/internal/passkeys"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/repo"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/twofa"
 	"gorm.io/gorm"
@@ -25,6 +27,7 @@ type TokenPolicy struct {
 }
 
 type UserSecurity struct {
+	IssueProof            func(contract.AuthIdentity, string, []string) (string, int64, error)
 	AdvanceCurrentSession func(contract.AuthIdentity, string) (*contract.AuthBundle, error)
 	AdvanceVersion        func(*gorm.DB, int) (int64, error)
 	PublishAuth           func(int) error
@@ -61,6 +64,8 @@ type Dependencies struct {
 }
 
 type Service struct {
+	passkeys          *passkeys.Store
+	passkeyFlows      *passkeys.Flows
 	factors           *twofa.Store
 	twoFAEvent        func(int, string)
 	bindings          *repo.Bindings
@@ -79,6 +84,7 @@ type Service struct {
 
 func New(deps Dependencies) *Service {
 	return &Service{
+		passkeys: passkeys.NewStore(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), passkeyFlows: passkeys.NewFlows(ceremony.NewFlows(deps.DB)),
 		factors: twofa.New(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), twoFAEvent: deps.TwoFAEvent,
 		bindings:    repo.NewBindings(deps.DB),
 		verifyEmail: deps.VerifyEmail,

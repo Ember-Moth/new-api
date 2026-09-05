@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
+	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -320,6 +321,46 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		status, err := management.TwoFAStatus(t.Context(), user.Id)
 		require.NoError(t, err)
 		assert.False(t, status.Enabled)
+	})
+
+	t.Run("passkey enrollment and removal refresh cached sessions", func(t *testing.T) {
+		previousSecret := common.SessionSecret
+		common.SessionSecret = "dragonfly-passkey-secret"
+		t.Cleanup(func() { common.SessionSecret = previousSecret })
+		user := model.User{Username: "dragonfly-passkey", AffCode: "dragonfly-passkey", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 100}
+		require.NoError(t, database.Create(&user).Error)
+		browser, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "passkey-browser")
+		require.NoError(t, err)
+		other, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "other-passkey-browser")
+		require.NoError(t, err)
+		before, err := service.ParseAccessToken(browser.AccessToken)
+		require.NoError(t, err)
+		_, err = model.GetUserSessionCached(other.Session.SID)
+		require.NoError(t, err)
+		management := identity.New(identity.Dependencies{DB: database, UserSecurity: identity.UserSecurity{
+			AdvanceVersion: model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
+			AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
+		}})
+		saved, err := management.SaveRegisteredPasskey(t.Context(), &entity.PasskeyCredential{UserID: user.Id, CredentialID: "dragonfly-credential", PublicKey: "validated-public-key"}, before)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(before)
+		require.Error(t, err)
+		_, err = model.GetUserSessionCached(other.Session.SID)
+		require.ErrorIs(t, err, model.ErrUserSessionInactive)
+		enrolled, err := service.ParseAccessToken(saved.AccessToken)
+		require.NoError(t, err)
+		removed, err := management.DeletePasskey(t.Context(), user.Id, enrolled)
+		require.NoError(t, err)
+		final, err := service.ParseAccessToken(removed.AccessToken)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(final)
+		require.NoError(t, err)
+		_, _, err = service.ValidateLoginSession(enrolled)
+		require.Error(t, err)
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.EqualValues(t, 3, cached.AuthVersion)
+		assert.Equal(t, 100, cached.Quota)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

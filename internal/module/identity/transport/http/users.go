@@ -9,12 +9,16 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
+	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/gin-gonic/gin"
 )
 
 type ManagementHooks struct {
-	SessionIdentity func(*gin.Context) (contract.AuthIdentity, bool)
-	Audit           func(*gin.Context, int, string, map[string]any)
+	RequireSecurityProof func(*gin.Context, string, []string) bool
+	PasskeyLogin         func(*gin.Context, *entity.User)
+	SecurityAudit        func(*gin.Context, int, string, map[string]any)
+	SessionIdentity      func(*gin.Context) (contract.AuthIdentity, bool)
+	Audit                func(*gin.Context, int, string, map[string]any)
 }
 
 func (h *Handler) ListUsers(c *gin.Context)   { h.listUsers(c, false) }

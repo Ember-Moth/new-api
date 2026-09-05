@@ -1,4 +1,4 @@
-package controller
+package identityhttp
 
 import (
 	"fmt"
@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	identitymodule "github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/testdb"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -79,7 +82,7 @@ func TestPasskeyRegisterFinishRejectsMissingOrWrongProofWithoutConsumingFlow(t *
 	identity := service.AuthIdentity{
 		UserID: user.Id, SessionID: "passkey-proof-session", UserAuthVersion: 1, SessionVersion: 1,
 	}
-	wrongScopeProof, _, err := service.IssueSecurityProof(identity, secureVerificationMethod2FA, []string{securityProofScopePasskeyDelete})
+	wrongScopeProof, _, err := service.IssueSecurityProof(identity, contract.SecurityVerificationMethod2FA, []string{securityProofScopePasskeyDelete})
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -111,7 +114,7 @@ func TestPasskeyRegisterFinishRejectsMissingOrWrongProofWithoutConsumingFlow(t *
 			context.Set("auth_version", identity.UserAuthVersion)
 			context.Set("session_version", identity.SessionVersion)
 
-			PasskeyRegisterFinish(context)
+			New(identitymodule.New(identitymodule.Dependencies{DB: db}), ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, RequireSecurityProof: middleware.RequireSecurityProof}).PasskeyRegisterFinish(context)
 
 			assert.Equal(t, http.StatusForbidden, response.Code)
 			var responseBody struct {

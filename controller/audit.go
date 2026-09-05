@@ -110,6 +110,6 @@ func RecordManageAuditFor(c *gin.Context, targetUserId int, action string, param
 
 // recordUserSecurityAudit 记录普通用户自己的安全敏感操作（如 passkey 绑定/解绑）。
 // 这类日志没有管理员操作者，不写 admin_info；同时不依赖 AdminAuth/RootAuth 的兜底。
-func recordUserSecurityAudit(c *gin.Context, userId int, action string, params map[string]interface{}) {
+func RecordUserSecurityAudit(c *gin.Context, userId int, action string, params map[string]interface{}) {
 	model.RecordOperationAuditLog(userId, auditContentEN(action, params), c.ClientIP(), action, params, nil, nil)
 }

@@ -497,3 +497,8 @@ func TopUp(c *gin.Context) {
 		"data":    quota,
 	})
 }
+
+// CompletePasskeyLogin bridges verified module credentials into the remaining login transport.
+func CompletePasskeyLogin(c *gin.Context, user *model.User) {
+	setupLoginAtAuthVersion(user, user.AuthVersion, c)
+}

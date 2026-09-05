@@ -1,11 +1,13 @@
-package passkey
+package passkeys
 
 import (
 	"errors"
 	"time"
 
+	"context"
+
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/internal/module/identity/internal/ceremony"
 
 	webauthn "github.com/go-webauthn/webauthn/webauthn"
 )
@@ -19,7 +21,7 @@ type flowPayload struct {
 	Scope       string               `json:"scope,omitempty"`
 }
 
-func CreateSessionDataFlow(purpose string, userID int, sessionID, scope string, data *webauthn.SessionData) (string, int64, error) {
+func (r *Flows) CreateSessionDataFlow(ctx context.Context, purpose string, userID int, sessionID, scope string, data *webauthn.SessionData) (string, int64, error) {
 	if data == nil {
 		return "", 0, errors.New("Passkey 会话数据不能为空")
 	}
@@ -28,7 +30,7 @@ func CreateSessionDataFlow(purpose string, userID int, sessionID, scope string, 
 		return "", 0, err
 	}
 	expiresAt := time.Now().Add(passkeyFlowTTL)
-	token, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
+	token, _, err := r.store.CreateAuthFlow(ctx, ceremony.AuthFlowCreate{
 		Purpose:   purpose,
 		UserId:    userID,
 		SessionId: sessionID,
@@ -41,14 +43,14 @@ func CreateSessionDataFlow(purpose string, userID int, sessionID, scope string, 
 	return token, expiresAt.Unix(), nil
 }
 
-func PopSessionDataFlow(token, purpose string, userID int, sessionID string) (*webauthn.SessionData, string, error) {
-	flow, err := model.ConsumeAuthFlow(token, model.AuthFlowMatch{
+func (r *Flows) PopSessionDataFlow(ctx context.Context, token, purpose string, userID int, sessionID string) (*webauthn.SessionData, string, error) {
+	flow, err := r.store.ConsumeAuthFlow(ctx, token, ceremony.AuthFlowMatch{
 		Purpose:   purpose,
 		UserId:    userID,
 		SessionId: sessionID,
 	})
 	if err != nil {
-		if errors.Is(err, model.ErrAuthFlowInvalid) || errors.Is(err, model.ErrAuthFlowExpired) || errors.Is(err, model.ErrAuthFlowConsumed) {
+		if errors.Is(err, ceremony.ErrAuthFlowInvalid) || errors.Is(err, ceremony.ErrAuthFlowExpired) || errors.Is(err, ceremony.ErrAuthFlowConsumed) {
 			return nil, "", errSessionNotFound
 		}
 		return nil, "", err
@@ -59,3 +61,7 @@ func PopSessionDataFlow(token, purpose string, userID int, sessionID string) (*w
 	}
 	return &payload.SessionData, payload.Scope, nil
 }
+
+type Flows struct{ store *ceremony.Flows }
+
+func NewFlows(store *ceremony.Flows) *Flows { return &Flows{store: store} }

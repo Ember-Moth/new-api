@@ -41,6 +41,7 @@ func tokenPolicy() identity.TokenPolicy {
 
 func userSecurity() identity.UserSecurity {
 	return identity.UserSecurity{
+		IssueProof:            service.IssueSecurityProof,
 		AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
 		AdvanceVersion:        model.IncrementUserAuthVersionWithTx,
 		PublishAuth:           model.PublishUserAuthCache,

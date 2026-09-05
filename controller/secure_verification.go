@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -14,8 +15,11 @@ import (
 )
 
 const (
-	secureVerificationMethod2FA     = "2fa"
-	secureVerificationMethodPasskey = "passkey"
+	securityProofScopeChannelKeyRead  = contract.SecurityProofScopeChannelKeyRead
+	securityProofScopePasskeyRegister = contract.SecurityProofScopePasskeyRegister
+	securityProofScopePasskeyDelete   = contract.SecurityProofScopePasskeyDelete
+	secureVerificationMethod2FA       = "2fa"
+	secureVerificationMethodPasskey   = "passkey"
 )
 
 type UniversalVerifyRequest struct {

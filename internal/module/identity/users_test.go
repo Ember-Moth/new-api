@@ -103,6 +103,7 @@ func newUserFixture(t *testing.T) *userFixture {
 		DB:          db, UserAuthorization: f.authorization, UserWallet: wallet, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
 		WelcomeQuota: func() int { return 250 }, WelcomeGrant: func(id, quota int) { assert.Equal(t, 250, quota); f.grants = append(f.grants, id) },
 		UserSecurity: identity.UserSecurity{
+			IssueProof:            service.IssueSecurityProof,
 			AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
 			AdvanceVersion:        model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
 			PublishDeletedVersion: model.PublishCommittedUserAuthVersion,
@@ -115,9 +116,17 @@ func newUserFixture(t *testing.T) *userFixture {
 			DeleteCredentials: model.DeleteUserAuthenticationData,
 		},
 	})
-	h := identityhttp.New(f.service, identityhttp.ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, Audit: func(c *gin.Context, id int, action string, params map[string]any) {
-		f.audits = append(f.audits, contract.UserAudit{TargetID: id, Action: action, Parameters: params})
-	}})
+	h := identityhttp.New(f.service, identityhttp.ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, RequireSecurityProof: middleware.RequireSecurityProof,
+		PasskeyLogin: func(c *gin.Context, user *entity.User) {
+			bundle, err := service.CreateLoginSessionAtAuthVersion(user.Id, user.AuthVersion, "passkey", c.ClientIP(), c.Request.UserAgent())
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			common.ApiSuccess(c, bundle)
+		}, Audit: func(c *gin.Context, id int, action string, params map[string]any) {
+			f.audits = append(f.audits, contract.UserAudit{TargetID: id, Action: action, Parameters: params})
+		}})
 	f.router.Use(middleware.Authorization(authorization))
 	f.router.Use(func(c *gin.Context) {
 		role, _ := strconv.Atoi(c.GetHeader("X-Test-Role"))
@@ -126,6 +135,14 @@ func newUserFixture(t *testing.T) *userFixture {
 		c.Next()
 	})
 	selfRoutes := f.router.Group("/self", middleware.UserAuth())
+	selfRoutes.POST("/passkey/register/begin", h.PasskeyRegisterBegin)
+	selfRoutes.POST("/passkey/register/finish", h.PasskeyRegisterFinish)
+	selfRoutes.POST("/passkey/verify/begin", h.PasskeyVerifyBegin)
+	selfRoutes.POST("/passkey/verify/finish", h.PasskeyVerifyFinish)
+	selfRoutes.DELETE("/passkey", h.PasskeyDelete)
+	selfRoutes.GET("/passkey", h.PasskeyStatus)
+	f.router.POST("/passkey/login/begin", h.PasskeyLoginBegin)
+	f.router.POST("/passkey/login/finish", h.PasskeyLoginFinish)
 	selfRoutes.GET("/2fa", h.TwoFAStatus)
 	selfRoutes.POST("/2fa/setup", h.SetupTwoFA)
 	selfRoutes.POST("/2fa/enable", h.EnableTwoFA)

@@ -1,4 +1,4 @@
-package passkey
+package passkeys
 
 import (
 	"errors"

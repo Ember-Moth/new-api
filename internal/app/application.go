@@ -26,6 +26,7 @@ import (
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
@@ -40,6 +41,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/gin-gonic/gin"
 )
 
 // Run assembles application services and owns their process lifecycle.
@@ -198,9 +200,14 @@ func Run(assets router.WebAssets) {
 		SystemHooks:   systemhttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		System:        systemService,
 		Authorization: authorization,
-		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity},
-		Billing:       billingService,
-		BillingHooks:  billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
+		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity,
+			RequireSecurityProof: middleware.RequireSecurityProof, SecurityAudit: controller.RecordUserSecurityAudit,
+			PasskeyLogin: func(c *gin.Context, user *identityentity.User) {
+				controller.CompletePasskeyLogin(c, (*model.User)(user))
+			},
+		},
+		Billing:      billingService,
+		BillingHooks: billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		Subscription: subscription.New(subscription.Dependencies{
 			DB:             model.DB,
 			PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,

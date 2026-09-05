@@ -149,6 +149,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 既有失败计数、锁定和备用码单次使用逻辑随存储迁入模块；无浏览器会话的请求在消费验证材料之前被拒绝。操作日志通过明确回调连接尚未迁移的日志模块。
 
+第十八批将 Passkey 凭据存储、WebAuthn 适配、注册/登录/升阶验证、解绑与管理员重置迁入 identity。一次性认证挑战的实体与数据库操作同时归入模块，原 model 文件仅保留尚未迁移认证调用方的适配，旧 service/passkey 和 controller/passkey.go 已移除。
+
+注册与删除在锁定用户后复核认证版本或管理员角色，凭据替换与版本推进处于同一事务。断言更新继续只写计数器、验证状态和使用时间，不能替换注册身份。安全证明检查在挑战消费之前，挑战按用途、用户和会话匹配且只能消费一次。
+
+Passkey 登录通过应用注入的完成回调连接剩余登录传输层，并携带验证时的用户认证版本，避免验证后发生安全配置变更仍创建旧状态会话。证明验证与安全审计也由明确接口连接现有中间件；这些认证外围依赖仍须继续整理。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -409,3 +415,22 @@ GOWORK=off go test ./e2e -run TestDragonfly -count=1
 SQL 集成覆盖完整启停、备用码散列与重建、初始化失败回滚、状态响应不含密钥、管理员同级保护、认证版本推进与会话撤销；原并发备用码、失败次数和账户删除回归继续通过。真实 DragonflyDB 覆盖预热会话后的启停，确认旧令牌失效、当前会话续签和额度保留。
 
 输出：`/tmp/new-api-twofa-module-tests.log`、`/tmp/new-api-twofa-module-dragonfly.log`、`/tmp/new-api-twofa-module-full-tests.log`、`/tmp/new-api-twofa-module-vet.log`、`/tmp/new-api-twofa-module-startup.log`。
+
+## 第十八批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归及第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./model ./controller \
+  -run 'TestModular|TestPasskey|TestParsePasskey|TestAuthFlow|TestClaimExternal|TestSecurityFactor|TestUpdatePasskey|TestHardDelete' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonfly -count=1
+```
+
+使用真实 P-256 签名和 CBOR 凭据完成注册、Passkey 登录、升阶验证和删除；验证挑战重放拒绝、安全证明不足不消费挑战、状态响应隐藏凭据、断言计数器更新、凭据替换失败回滚与管理员同级保护。既有认证挑战并发消费和账户清理回归继续通过。DragonflyDB 验证凭据增删后的会话续签、旧令牌失效及额度保留。
+
+输出：`/tmp/new-api-passkey-module-tests.log`、`/tmp/new-api-passkey-module-dragonfly.log`、`/tmp/new-api-passkey-module-full-tests.log`、`/tmp/new-api-passkey-module-vet.log`、`/tmp/new-api-passkey-module-startup.log`。

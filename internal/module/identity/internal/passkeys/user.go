@@ -1,21 +1,21 @@
-package passkey
+package passkeys
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 
 	webauthn "github.com/go-webauthn/webauthn/webauthn"
 )
 
 type WebAuthnUser struct {
-	user       *model.User
-	credential *model.PasskeyCredential
+	user       *entity.User
+	credential *entity.PasskeyCredential
 }
 
-func NewWebAuthnUser(user *model.User, credential *model.PasskeyCredential) *WebAuthnUser {
+func NewWebAuthnUser(user *entity.User, credential *entity.PasskeyCredential) *WebAuthnUser {
 	return &WebAuthnUser{user: user, credential: credential}
 }
 
@@ -56,14 +56,14 @@ func (u *WebAuthnUser) WebAuthnCredentials() []webauthn.Credential {
 	return []webauthn.Credential{cred}
 }
 
-func (u *WebAuthnUser) ModelUser() *model.User {
+func (u *WebAuthnUser) ModelUser() *entity.User {
 	if u == nil {
 		return nil
 	}
 	return u.user
 }
 
-func (u *WebAuthnUser) PasskeyCredential() *model.PasskeyCredential {
+func (u *WebAuthnUser) PasskeyCredential() *entity.PasskeyCredential {
 	if u == nil {
 		return nil
 	}
