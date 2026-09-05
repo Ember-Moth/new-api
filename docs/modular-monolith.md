@@ -51,7 +51,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
-按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已开始 identity 的 OAuth 提供商配置管理，后续继续套餐、兑换码、用户/令牌和系统管理等控制面功能。整体模块化目标不变。
+按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已完成 identity 的 OAuth 提供商配置和 subscription 的套餐配置管理，后续继续兑换码、用户/令牌和系统管理等控制面功能。整体模块化目标不变。
 
 已完成的第一批改动：
 
@@ -86,6 +86,10 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 上游模型巡检改由 `internal/transport/task` 注册并直接调用渠道服务；手动检测的入队与冲突响应由应用层连接现有任务框架。共享 OpenAI 账单响应类型归独立 RelayKit DTO。原 `controller/channel.go`、`channel-billing.go`、`channel_upstream_update.go` 已移除。
 
 第六批按控制面优先顺序，迁移 OAuth 提供商配置的列表、详情、创建、更新、删除与 Discovery 配置读取。identity 模块拥有请求/响应契约、配置校验、实体及私有仓储，注册表更新通过应用层注入。管理响应不包含 client_secret，空密钥更新保留已有密钥，显式空值及禁用状态继续生效；Slug 归一化后检查唯一性和内置提供商冲突，有绑定的提供商拒绝删除，写库失败不会更新注册表。
+
+第七批将套餐配置列表、创建、完整编辑和启停迁入 subscription 模块。请求/响应契约与 GORM 实体分离；模块服务统一校验价格、额度、分组与重置周期，私有仓储处理显式零值和空值更新。支付合规状态、分组存在性和套餐缓存失效由应用层注入；省略可选支付标志时保留原值，写库失败不会失效缓存。用户列表仍按合规状态和套餐启用状态过滤，路由权限与 JSON 格式保持。
+
+套餐实体、默认值和周期常量归模块所有，尚未迁移的购买、订阅额度和重置流程暂通过类型别名使用；本批没有修改这些事务，也没有添加套餐删除接口。
 
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
@@ -162,3 +166,18 @@ GOWORK=off make test
 OAuth CRUD 专项测试使用 SQL 迁移初始化的独立 schema，覆盖密钥隐藏与保留、可选字段清空、Slug/内置名称冲突、访问策略校验、绑定删除保护以及注入写入失败后的数据库/注册表一致性。
 
 输出：`/tmp/new-api-control-crud-tests.log`、`/tmp/new-api-control-crud-full-tests.log`、`/tmp/new-api-control-crud-startup.log`。
+
+## 第七批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。执行第四批完整后端回归命令、主模块 build/vet、RelayKit 独立 build/vet，以及第一批的新库/两次重启命令，全部通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/subscription/...
+```
+
+专项测试以 SQL 迁移初始化隔离 schema 并重复初始化，覆盖套餐默认值、定价精度及 bigint 额度、排序与用户可见性、启停不覆盖配置、显式清空字段、省略支付标志保留 false、校验拒绝和真实写入失败后的缓存失效边界。
+
+输出：`/tmp/new-api-plan-crud-tests.log`、`/tmp/new-api-plan-crud-full-tests.log`、`/tmp/new-api-plan-crud-vet.log`、`/tmp/new-api-plan-crud-startup.log`。

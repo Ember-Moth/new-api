@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	subscriptionentity "github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
@@ -19,20 +20,20 @@ import (
 
 // Subscription duration units
 const (
-	SubscriptionDurationYear   = "year"
-	SubscriptionDurationMonth  = "month"
-	SubscriptionDurationDay    = "day"
-	SubscriptionDurationHour   = "hour"
-	SubscriptionDurationCustom = "custom"
+	SubscriptionDurationYear   = subscriptionentity.SubscriptionDurationYear
+	SubscriptionDurationMonth  = subscriptionentity.SubscriptionDurationMonth
+	SubscriptionDurationDay    = subscriptionentity.SubscriptionDurationDay
+	SubscriptionDurationHour   = subscriptionentity.SubscriptionDurationHour
+	SubscriptionDurationCustom = subscriptionentity.SubscriptionDurationCustom
 )
 
 // Subscription quota reset period
 const (
-	SubscriptionResetNever   = "never"
-	SubscriptionResetDaily   = "daily"
-	SubscriptionResetWeekly  = "weekly"
-	SubscriptionResetMonthly = "monthly"
-	SubscriptionResetCustom  = "custom"
+	SubscriptionResetNever   = subscriptionentity.SubscriptionResetNever
+	SubscriptionResetDaily   = subscriptionentity.SubscriptionResetDaily
+	SubscriptionResetWeekly  = subscriptionentity.SubscriptionResetWeekly
+	SubscriptionResetMonthly = subscriptionentity.SubscriptionResetMonthly
+	SubscriptionResetCustom  = subscriptionentity.SubscriptionResetCustom
 )
 
 var (
@@ -144,73 +145,9 @@ func InvalidateSubscriptionPlanCache(planId int) {
 	_ = infoCache.Purge()
 }
 
-// Subscription plan
-type SubscriptionPlan struct {
-	Id int `json:"id"`
-
-	Title    string `json:"title" gorm:"type:varchar(128);not null"`
-	Subtitle string `json:"subtitle" gorm:"type:varchar(255);default:''"`
-
-	// Display money amount (follow existing code style: float64 for money)
-	PriceAmount float64 `json:"price_amount" gorm:"type:decimal(10,6);not null;default:0"`
-	Currency    string  `json:"currency" gorm:"type:varchar(8);not null;default:'USD'"`
-
-	DurationUnit  string `json:"duration_unit" gorm:"type:varchar(16);not null;default:'month'"`
-	DurationValue int    `json:"duration_value" gorm:"type:int;not null;default:1"`
-	CustomSeconds int64  `json:"custom_seconds" gorm:"type:bigint;not null;default:0"`
-
-	Enabled   bool `json:"enabled" gorm:"default:true"`
-	SortOrder int  `json:"sort_order" gorm:"type:int;default:0"`
-
-	AllowBalancePay *bool `json:"allow_balance_pay"`
-
-	// Allow falling back to wallet balance after subscription quota is exhausted (empty = true)
-	AllowWalletOverflow *bool `json:"allow_wallet_overflow"`
-
-	StripePriceId         string `json:"stripe_price_id" gorm:"type:varchar(128);default:''"`
-	CreemProductId        string `json:"creem_product_id" gorm:"type:varchar(128);default:''"`
-	WaffoPancakeProductId string `json:"waffo_pancake_product_id" gorm:"type:varchar(128);default:''"`
-
-	// Max purchases per user (0 = unlimited)
-	MaxPurchasePerUser int `json:"max_purchase_per_user" gorm:"type:int;default:0"`
-
-	// Upgrade user group after purchase (empty = no change)
-	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
-
-	// Downgrade user group on expiry (empty = revert to the group held before purchase)
-	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
-
-	// Total quota (amount in quota units, 0 = unlimited)
-	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
-
-	// Quota reset period for plan
-	QuotaResetPeriod        string `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
-	QuotaResetCustomSeconds int64  `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
-
-	CreatedAt int64 `json:"created_at" gorm:"bigint"`
-	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
-}
-
-func (p *SubscriptionPlan) BeforeCreate(tx *gorm.DB) error {
-	now := common.GetTimestamp()
-	p.CreatedAt = now
-	p.UpdatedAt = now
-	return nil
-}
-
-func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
-	p.UpdatedAt = common.GetTimestamp()
-	return nil
-}
-
-func (p *SubscriptionPlan) NormalizeDefaults() {
-	if p.AllowBalancePay == nil {
-		p.AllowBalancePay = common.GetPointer(true)
-	}
-	if p.AllowWalletOverflow == nil {
-		p.AllowWalletOverflow = common.GetPointer(true)
-	}
-}
+// SubscriptionPlan is shared with the subscription configuration module while
+// purchase, settlement and quota reset are migrated.
+type SubscriptionPlan = subscriptionentity.SubscriptionPlan
 
 // Subscription order (payment -> webhook -> create UserSubscription)
 type SubscriptionOrder struct {
@@ -335,12 +272,7 @@ func calcPlanEndTime(start time.Time, plan *SubscriptionPlan) (int64, error) {
 }
 
 func NormalizeResetPeriod(period string) string {
-	switch strings.TrimSpace(period) {
-	case SubscriptionResetDaily, SubscriptionResetWeekly, SubscriptionResetMonthly, SubscriptionResetCustom:
-		return strings.TrimSpace(period)
-	default:
-		return SubscriptionResetNever
-	}
+	return subscriptionentity.NormalizeResetPeriod(period)
 }
 
 func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) int64 {

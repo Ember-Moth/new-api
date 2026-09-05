@@ -4,6 +4,7 @@ import (
 	"github.com/QuantumNous/new-api/controller"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
+	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/service/authz"
 
@@ -15,6 +16,7 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
+	subscriptionHandler := subscriptionhttp.New(deps.Subscription)
 	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
 	identityHandler := identityhttp.New(deps.Identity)
 	apiRouter := router.Group("/api")
@@ -162,7 +164,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		subscriptionRoute := apiRouter.Group("/subscription")
 		subscriptionRoute.Use(middleware.UserAuth())
 		{
-			subscriptionRoute.GET("/plans", controller.GetSubscriptionPlans)
+			subscriptionRoute.GET("/plans", subscriptionHandler.ListPlans)
 			subscriptionRoute.GET("/self", controller.GetSubscriptionSelf)
 			subscriptionRoute.PUT("/self/preference", controller.UpdateSubscriptionPreference)
 			subscriptionRoute.POST("/balance/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestBalancePay)
@@ -174,10 +176,10 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		subscriptionAdminRoute := apiRouter.Group("/subscription/admin")
 		subscriptionAdminRoute.Use(middleware.AdminAuth())
 		{
-			subscriptionAdminRoute.GET("/plans", controller.AdminListSubscriptionPlans)
-			subscriptionAdminRoute.POST("/plans", controller.AdminCreateSubscriptionPlan)
-			subscriptionAdminRoute.PUT("/plans/:id", controller.AdminUpdateSubscriptionPlan)
-			subscriptionAdminRoute.PATCH("/plans/:id", controller.AdminUpdateSubscriptionPlanStatus)
+			subscriptionAdminRoute.GET("/plans", subscriptionHandler.AdminListPlans)
+			subscriptionAdminRoute.POST("/plans", subscriptionHandler.CreatePlan)
+			subscriptionAdminRoute.PUT("/plans/:id", subscriptionHandler.UpdatePlan)
+			subscriptionAdminRoute.PATCH("/plans/:id", subscriptionHandler.UpdatePlanStatus)
 			subscriptionAdminRoute.POST("/bind", controller.AdminBindSubscription)
 			subscriptionAdminRoute.POST("/plans/:id/subscriptions/reset", controller.AdminResetPlanSubscriptions)
 

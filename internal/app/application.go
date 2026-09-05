@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/subscription"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	httpserver "github.com/QuantumNous/new-api/internal/transport/http/server"
 	tasktransport "github.com/QuantumNous/new-api/internal/transport/task"
@@ -29,6 +30,8 @@ import (
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
@@ -159,19 +162,32 @@ func Run(assets router.WebAssets) {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
 
-	server, err := httpserver.New(assets, router.Dependencies{Identity: identity.New(identity.Dependencies{DB: model.DB, Providers: providerRegistry{}}), Channel: model.ChannelService(), ChannelHooks: channelhttp.ManagementHooks{
-		Can: func(userID, role int, resource, action string) bool {
-			return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})
+	server, err := httpserver.New(assets, router.Dependencies{
+		Subscription: subscription.New(subscription.Dependencies{
+			DB:             model.DB,
+			PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+			GroupExists: func(group string) bool {
+				_, ok := ratio_setting.GetGroupRatioCopy()[group]
+				return ok
+			},
+			InvalidatePlan: model.InvalidateSubscriptionPlanCache,
+		}),
+		Identity: identity.New(identity.Dependencies{DB: model.DB, Providers: providerRegistry{}}),
+		Channel:  model.ChannelService(),
+		ChannelHooks: channelhttp.ManagementHooks{
+			Can: func(userID, role int, resource, action string) bool {
+				return authz.Can(userID, role, authz.Permission{Resource: resource, Action: action})
+			},
+			Audit: controller.RecordManageAudit,
+			EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {
+				task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
+				if err != nil {
+					return channelhttp.TaskSubmission{}, err
+				}
+				return channelhttp.TaskSubmission{TaskID: task.TaskID, Status: string(task.Status), Type: task.Type, Created: created}, nil
+			},
 		},
-		Audit: controller.RecordManageAudit,
-		EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {
-			task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
-			if err != nil {
-				return channelhttp.TaskSubmission{}, err
-			}
-			return channelhttp.TaskSubmission{TaskID: task.TaskID, Status: string(task.Status), Type: task.Type, Created: created}, nil
-		},
-	}})
+	})
 	if err != nil {
 		common.FatalLog("failed to configure HTTP server: " + err.Error())
 		return
