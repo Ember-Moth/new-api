@@ -9,18 +9,26 @@ import (
 
 var ErrPaymentComplianceRequired = errors.New("payment compliance confirmation required")
 
+type WalletRuntime struct {
+	Credit func(int, int) error
+	Debit  func(int, int) error
+}
+
 type Dependencies struct {
+	WalletRuntime  WalletRuntime
 	DB             *gorm.DB
 	PaymentAllowed func() bool
 }
 
 type Service struct {
+	wallets        *repo.Wallets
+	walletRuntime  WalletRuntime
 	redemptions    *repo.Redemptions
 	paymentAllowed func() bool
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
+	return &Service{wallets: repo.NewWallets(deps.DB), walletRuntime: deps.WalletRuntime, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

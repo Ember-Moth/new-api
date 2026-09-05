@@ -474,7 +474,7 @@ func AdminResetPasskey(c *gin.Context) {
 		return
 	}
 
-	recordManageAuditFor(c, user.Id, "user.reset_passkey", map[string]interface{}{
+	RecordManageAuditFor(c, user.Id, "user.reset_passkey", map[string]interface{}{
 		"username": user.Username,
 		"id":       user.Id,
 	})

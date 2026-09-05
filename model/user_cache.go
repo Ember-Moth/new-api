@@ -59,8 +59,8 @@ func userCacheTTLSeconds() int {
 	return ttl
 }
 
-// invalidateUserCache clears user cache
-func invalidateUserCache(userId int) error {
+// InvalidateUserCache clears user cache
+func InvalidateUserCache(userId int) error {
 	if !common.RedisEnabled {
 		return nil
 	}

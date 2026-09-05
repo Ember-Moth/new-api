@@ -10,9 +10,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type Handler struct{ identity *identity.Service }
+type Handler struct {
+	identity *identity.Service
+	hooks    ManagementHooks
+}
 
-func New(service *identity.Service) *Handler { return &Handler{identity: service} }
+func New(service *identity.Service, hooks ...ManagementHooks) *Handler {
+	handler := &Handler{identity: service}
+	if len(hooks) > 0 {
+		handler.hooks = hooks[0]
+	}
+	return handler
+}
 
 func (h *Handler) DiscoverProvider(c *gin.Context) {
 	var request contract.FetchCustomOAuthDiscoveryRequest

@@ -202,7 +202,7 @@ func TestUserAuthVersionFenceAndCommittedFloorAreMonotonic(t *testing.T) {
 
 	// Committing an older transaction must neither clear a newer pending fence
 	// nor lower the effective deny floor.
-	require.NoError(t, publishCommittedUserAuthVersion(userID, 3))
+	require.NoError(t, PublishCommittedUserAuthVersion(userID, 3))
 	pending, err = common.RDB.Get(t.Context(), getUserAuthFenceKey(userID)).Result()
 	require.NoError(t, err)
 	assert.Equal(t, "5", pending)
@@ -210,13 +210,13 @@ func TestUserAuthVersionFenceAndCommittedFloorAreMonotonic(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 5, floor)
 
-	require.NoError(t, publishCommittedUserAuthVersion(userID, 5))
+	require.NoError(t, PublishCommittedUserAuthVersion(userID, 5))
 	assert.False(t, server.Exists(getUserAuthFenceKey(userID)))
 	committed, err := common.RDB.Get(t.Context(), getUserAuthVersionKey(userID)).Result()
 	require.NoError(t, err)
 	assert.Equal(t, "5", committed)
 
-	require.NoError(t, publishCommittedUserAuthVersion(userID, 4))
+	require.NoError(t, PublishCommittedUserAuthVersion(userID, 4))
 	committed, err = common.RDB.Get(t.Context(), getUserAuthVersionKey(userID)).Result()
 	require.NoError(t, err)
 	assert.Equal(t, "5", committed)

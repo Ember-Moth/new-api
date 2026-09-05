@@ -585,7 +585,7 @@ func AdminDisable2FA(c *gin.Context) {
 		return
 	}
 
-	recordManageAuditFor(c, userId, "user.2fa_disable", nil)
+	RecordManageAuditFor(c, userId, "user.2fa_disable", nil)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

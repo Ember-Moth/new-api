@@ -72,7 +72,7 @@ func (r *Tokens) Update(ctx context.Context, token *entity.Token, statusOnly, up
 			changes["auto_groups"] = token.AutoGroups
 		}
 	}
-	r.invalidateBeforeMutation(token.Key)
+	r.InvalidateKey(token.Key)
 	result := r.db.WithContext(ctx).Model(token).Where("user_id = ?", token.UserId).Clauses(clause.Returning{}).Updates(changes)
 	if result.Error != nil {
 		return result.Error
@@ -84,7 +84,7 @@ func (r *Tokens) Update(ctx context.Context, token *entity.Token, statusOnly, up
 }
 
 func (r *Tokens) Delete(ctx context.Context, token *entity.Token) error {
-	r.invalidateBeforeMutation(token.Key)
+	r.InvalidateKey(token.Key)
 	result := r.db.WithContext(ctx).Where("user_id = ?", token.UserId).Delete(token)
 	if result.Error != nil {
 		return result.Error
@@ -103,7 +103,7 @@ func (r *Tokens) DeleteBatch(ctx context.Context, ids []int, userID int) (int, e
 			return err
 		}
 		for _, token := range tokens {
-			r.invalidateBeforeMutation(token.Key)
+			r.InvalidateKey(token.Key)
 		}
 		result := tx.Where("user_id = ? AND id IN ?", userID, ids).Delete(&entity.Token{})
 		count = result.RowsAffected
@@ -112,7 +112,7 @@ func (r *Tokens) DeleteBatch(ctx context.Context, ids []int, userID int) (int, e
 	return int(count), err
 }
 
-func (r *Tokens) invalidateBeforeMutation(key string) {
+func (r *Tokens) InvalidateKey(key string) {
 	if r.invalidate == nil {
 		return
 	}

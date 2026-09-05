@@ -22,7 +22,34 @@ type TokenPolicy struct {
 	AutoGroups        func(string) []string
 }
 
+type UserSecurity struct {
+	AdvanceVersion         func(*gorm.DB, int) (int64, error)
+	PublishAuth            func(int) error
+	PublishDeletedVersion  func(int, int64) error
+	RevokeSessions         func(int, string) error
+	InvalidateUser         func(int) error
+	InvalidateTokens       func(int) error
+	DeleteCredentials      func(*gorm.DB, int) error
+	ReleaseExternalBinding func(*gorm.DB, string, int) error
+}
+
+type UserAuthorization interface {
+	Capabilities(int, int) map[string]map[string]bool
+	SetPermissions(*gorm.DB, int, map[string]map[string]bool) error
+	ClearPermissions(*gorm.DB, int) error
+	Reload() error
+}
+
+type UserWallet interface {
+	AdjustWallet(context.Context, int, string, int) (int, error)
+}
+
 type Dependencies struct {
+	UserSecurity         UserSecurity
+	UserAuthorization    UserAuthorization
+	UserWallet           UserWallet
+	WelcomeQuota         func() int
+	WelcomeGrant         func(int, int)
 	TokenPolicy          TokenPolicy
 	InvalidateTokenCache func(string) error
 	DB                   *gorm.DB
@@ -30,14 +57,22 @@ type Dependencies struct {
 }
 
 type Service struct {
-	tokens      *repo.Tokens
-	tokenPolicy TokenPolicy
-	providers   *repo.Providers
-	registry    ProviderRegistry
+	users             *repo.Users
+	userSecurity      UserSecurity
+	userAuthorization UserAuthorization
+	userWallet        UserWallet
+	welcomeQuota      func() int
+	welcomeGrant      func(int, int)
+	tokens            *repo.Tokens
+	tokenPolicy       TokenPolicy
+	providers         *repo.Providers
+	registry          ProviderRegistry
 }
 
 func New(deps Dependencies) *Service {
 	return &Service{
+		users: repo.NewUsers(deps.DB), userSecurity: deps.UserSecurity, userAuthorization: deps.UserAuthorization,
+		userWallet: deps.UserWallet, welcomeQuota: deps.WelcomeQuota, welcomeGrant: deps.WelcomeGrant,
 		tokens:      repo.NewTokens(deps.DB, deps.InvalidateTokenCache),
 		tokenPolicy: deps.TokenPolicy,
 		providers:   repo.NewProviders(deps.DB),

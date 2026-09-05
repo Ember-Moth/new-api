@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
+	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
@@ -19,12 +20,13 @@ import (
 )
 
 type Dependencies struct {
-	Billing      *billing.Service
-	BillingHooks billinghttp.ManagementHooks
-	Subscription *subscription.Service
-	Identity     *identity.Service
-	Channel      *channel.Service
-	ChannelHooks channelhttp.ManagementHooks
+	IdentityHooks identityhttp.ManagementHooks
+	Billing       *billing.Service
+	BillingHooks  billinghttp.ManagementHooks
+	Subscription  *subscription.Service
+	Identity      *identity.Service
+	Channel       *channel.Service
+	ChannelHooks  channelhttp.ManagementHooks
 }
 
 func SetRouter(router *gin.Engine, assets WebAssets, deps Dependencies) {

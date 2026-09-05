@@ -114,10 +114,10 @@ func SetUserAuthVersionFence(userId int, authVersion int64) error {
 	return setUserAuthVersionFenceScript.Run(context.Background(), common.RDB, []string{getUserAuthFenceKey(userId)}, authVersion, userAuthFenceTTLSeconds()).Err()
 }
 
-// publishCommittedUserAuthVersion records the durable lower bound used to
+// PublishCommittedUserAuthVersion records the durable lower bound used to
 // reject an arbitrarily delayed cache fill after a committed security change.
 // It also removes this transaction's now-obsolete pending fence.
-func publishCommittedUserAuthVersion(userId int, authVersion int64) error {
+func PublishCommittedUserAuthVersion(userId int, authVersion int64) error {
 	if !common.RedisEnabled {
 		return nil
 	}

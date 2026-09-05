@@ -4,113 +4,22 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
-const UserNameMaxLength = 20
+const UserNameMaxLength = identityentity.UserNameMaxLength
 
-var userSortColumns = map[string]string{
-	"id":            "id",
-	"username":      "username",
-	"quota":         "quota",
-	"group":         "group",
-	"created_at":    "created_at",
-	"last_login_at": "last_login_at",
-}
-
-type UserSortOptions struct {
-	SortBy    string
-	SortOrder string
-}
-
-func NewUserSortOptions(sortBy string, sortOrder string) UserSortOptions {
-	normalizedSortBy := strings.ToLower(strings.TrimSpace(sortBy))
-	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
-	if _, ok := userSortColumns[normalizedSortBy]; !ok {
-		normalizedSortBy = "id"
-		normalizedSortOrder = "desc"
-	} else if normalizedSortOrder != "asc" {
-		normalizedSortOrder = "desc"
-	}
-
-	return UserSortOptions{
-		SortBy:    normalizedSortBy,
-		SortOrder: normalizedSortOrder,
-	}
-}
-
-func (options UserSortOptions) Apply(query *gorm.DB) *gorm.DB {
-	columnName, ok := userSortColumns[options.SortBy]
-	if !ok {
-		columnName = "id"
-	}
-	q := query.Order(clause.OrderByColumn{
-		Column: clause.Column{Name: columnName},
-		Desc:   options.SortOrder != "asc",
-	})
-	if columnName != "id" {
-		q = q.Order(clause.OrderByColumn{
-			Column: clause.Column{Name: "id"},
-			Desc:   true,
-		})
-	}
-	return q
-}
-
-func resolveUserSortOptions(sortOptions []UserSortOptions) UserSortOptions {
-	if len(sortOptions) == 0 {
-		return NewUserSortOptions("", "")
-	}
-	return sortOptions[0]
-}
-
-// User if you add sensitive fields, don't forget to clean them in setupLogin function.
-// Otherwise, the sensitive information will be saved on local storage in plain text!
-type User struct {
-	Id               int                        `json:"id"`
-	Username         string                     `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password         string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	OriginalPassword string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName      string                     `json:"display_name" gorm:"index" validate:"max=20"`
-	Role             int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status           int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email            string                     `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId         string                     `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId        string                     `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId           string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId         string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId       string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
-	AccessToken      *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota            int                        `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota        int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group            string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
-	AffCode          string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount         int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota         int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota  int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId        int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt        gorm.DeletedAt             `gorm:"index"`
-	LinuxDOId        string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting          string                     `json:"setting" gorm:"type:text;column:setting"`
-	Remark           string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer   string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
-	CreatedAt        int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	LastLoginAt      int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
-	AuthVersion      int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
-	AdminPermissions map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
-}
+// User is the remaining runtime view of the identity-owned entity.
+type User identityentity.User
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
@@ -128,16 +37,9 @@ func (user *User) ToBaseUser() *UserBase {
 	return cache
 }
 
-func (user *User) GetAccessToken() string {
-	if user.AccessToken == nil {
-		return ""
-	}
-	return *user.AccessToken
-}
+func (user *User) GetAccessToken() string { return (*identityentity.User)(user).GetAccessToken() }
 
-func (user *User) SetAccessToken(token string) {
-	user.AccessToken = &token
-}
+func (user *User) SetAccessToken(token string) { (*identityentity.User)(user).SetAccessToken(token) }
 
 // UpdateUserAccessToken rotates a dashboard personal access token without
 // writing a stale user snapshot back over concurrently updated fields.
@@ -155,24 +57,10 @@ func UpdateUserAccessToken(id int, token string) error {
 	return nil
 }
 
-func (user *User) GetSetting() dto.UserSetting {
-	setting := dto.UserSetting{}
-	if user.Setting != "" {
-		err := common.Unmarshal([]byte(user.Setting), &setting)
-		if err != nil {
-			common.SysLog("failed to unmarshal setting: " + err.Error())
-		}
-	}
-	return setting
-}
+func (user *User) GetSetting() dto.UserSetting { return (*identityentity.User)(user).GetSetting() }
 
 func (user *User) SetSetting(setting dto.UserSetting) {
-	settingBytes, err := common.Marshal(setting)
-	if err != nil {
-		common.SysLog("failed to marshal setting: " + err.Error())
-		return
-	}
-	user.Setting = string(settingBytes)
+	(*identityentity.User)(user).SetSetting(setting)
 }
 
 func UpdateUserSetting(userId int, setting dto.UserSetting) error {
@@ -214,66 +102,8 @@ func UpdateUserBindColumn(userId int, column string, value string) error {
 	return DB.Model(&User{}).Where("id = ?", userId).Update(column, value).Error
 }
 
-// 根据用户角色生成默认的边栏配置
-func generateDefaultSidebarConfigForRole(userRole int) string {
-	defaultConfig := map[string]interface{}{}
-
-	// 聊天区域 - 所有用户都可以访问
-	defaultConfig["chat"] = map[string]interface{}{
-		"enabled":    true,
-		"playground": true,
-		"chat":       true,
-	}
-
-	// 控制台区域 - 所有用户都可以访问
-	defaultConfig["console"] = map[string]interface{}{
-		"enabled":    true,
-		"detail":     true,
-		"token":      true,
-		"log":        true,
-		"midjourney": true,
-		"task":       true,
-	}
-
-	// 个人中心区域 - 所有用户都可以访问
-	defaultConfig["personal"] = map[string]interface{}{
-		"enabled":  true,
-		"topup":    true,
-		"personal": true,
-	}
-
-	// 管理员区域 - 根据角色决定
-	if userRole == common.RoleAdminUser {
-		// 管理员可以访问管理员区域，但不能访问系统设置
-		defaultConfig["admin"] = map[string]interface{}{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    false, // 管理员不能访问系统设置
-		}
-	} else if userRole == common.RoleRootUser {
-		// 超级管理员可以访问所有功能
-		defaultConfig["admin"] = map[string]interface{}{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    true,
-		}
-	}
-	// 普通用户不包含admin区域
-
-	// 转换为JSON字符串
-	configBytes, err := common.Marshal(defaultConfig)
-	if err != nil {
-		common.SysLog("生成默认边栏配置失败: " + err.Error())
-		return ""
-	}
-
-	return string(configBytes)
+func generateDefaultSidebarConfigForRole(role int) string {
+	return identityentity.DefaultSidebarConfigForRole(role)
 }
 
 // CheckUserExistOrDeleted check if user exist or deleted, if not exist, return false, nil, if deleted or exist, return true, nil
@@ -372,110 +202,6 @@ func GetMaxUserId() int {
 	var user User
 	DB.Unscoped().Last(&user)
 	return user.Id
-}
-
-func GetAllUsers(pageInfo *common.PageInfo, sortOptions ...UserSortOptions) (users []*User, total int64, err error) {
-	// Start transaction
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return nil, 0, tx.Error
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	// Get total count within transaction
-	err = tx.Unscoped().Model(&User{}).Count(&total).Error
-	if err != nil {
-		tx.Rollback()
-		return nil, 0, err
-	}
-
-	// Get paginated users within same transaction
-	order := resolveUserSortOptions(sortOptions)
-	err = order.Apply(tx.Unscoped()).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password", "access_token").Find(&users).Error
-	if err != nil {
-		tx.Rollback()
-		return nil, 0, err
-	}
-
-	// Commit transaction
-	if err = tx.Commit().Error; err != nil {
-		return nil, 0, err
-	}
-
-	return users, total, nil
-}
-
-func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int, sortOptions ...UserSortOptions) ([]*User, int64, error) {
-	var users []*User
-	var total int64
-	var err error
-
-	// 开始事务
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return nil, 0, tx.Error
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	// 构建基础查询
-	query := tx.Unscoped().Model(&User{})
-
-	// 构建搜索条件
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
-	likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
-
-	// 尝试将关键字转换为整数ID
-	keywordInt, err := strconv.Atoi(keyword)
-	if err == nil {
-		// 如果是数字，同时搜索ID和其他字段
-		likeCondition = "id = ? OR " + likeCondition
-		likeArgs = append([]interface{}{keywordInt}, likeArgs...)
-	}
-
-	query = query.Where("("+likeCondition+")", likeArgs...)
-	if group != "" {
-		query = query.Where(commonGroupCol+" = ?", group)
-	}
-	if role != nil {
-		query = query.Where("role = ?", *role)
-	}
-	if status != nil {
-		if *status == -1 {
-			query = query.Where("deleted_at IS NOT NULL")
-		} else {
-			query = query.Where("deleted_at IS NULL").Where("status = ?", *status)
-		}
-	}
-
-	// 获取总数
-	err = query.Count(&total).Error
-	if err != nil {
-		tx.Rollback()
-		return nil, 0, err
-	}
-
-	// 获取分页数据
-	order := resolveUserSortOptions(sortOptions)
-	err = order.Apply(query.Omit("password", "access_token")).Limit(num).Offset(startIdx).Find(&users).Error
-	if err != nil {
-		tx.Rollback()
-		return nil, 0, err
-	}
-
-	// 提交事务
-	if err = tx.Commit().Error; err != nil {
-		return nil, 0, err
-	}
-
-	return users, total, nil
 }
 
 func GetUserById(id int, selectAll bool) (*User, error) {
@@ -906,13 +632,13 @@ func (user *User) Delete() error {
 	}); err != nil {
 		return err
 	}
-	if err := publishCommittedUserAuthVersion(user.Id, nextAuthVersion); err != nil {
+	if err := PublishCommittedUserAuthVersion(user.Id, nextAuthVersion); err != nil {
 		return err
 	}
 	if _, err := RevokeAllUserSessions(user.Id, "user_deleted"); err != nil {
 		return err
 	}
-	return invalidateUserCache(user.Id)
+	return InvalidateUserCache(user.Id)
 }
 
 func (user *User) HardDelete() error {
@@ -932,7 +658,7 @@ func (user *User) HardDelete() error {
 				return err
 			}
 		}
-		if err := deleteUserAuthenticationData(tx, user.Id); err != nil {
+		if err := DeleteUserAuthenticationData(tx, user.Id); err != nil {
 			return err
 		}
 		return tx.Unscoped().Delete(user).Error
@@ -940,19 +666,19 @@ func (user *User) HardDelete() error {
 	if err != nil {
 		return err
 	}
-	if err := publishCommittedUserAuthVersion(user.Id, deletedAuthVersion); err != nil {
+	if err := PublishCommittedUserAuthVersion(user.Id, deletedAuthVersion); err != nil {
 		common.SysError(fmt.Sprintf("failed to publish auth tombstone after hard deleting user %d: %v", user.Id, err))
 	}
 	if err := invalidateTokensCache(tokens); err != nil {
 		common.SysError(fmt.Sprintf("failed to invalidate token cache after hard deleting user %d: %v", user.Id, err))
 	}
-	if err := invalidateUserCache(user.Id); err != nil {
+	if err := InvalidateUserCache(user.Id); err != nil {
 		common.SysError(fmt.Sprintf("failed to invalidate user cache after hard deleting user %d: %v", user.Id, err))
 	}
 	return nil
 }
 
-func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
+func DeleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 	if err := releaseAllExternalIdentitiesWithTx(tx, userId); err != nil {
 		return err
 	}
@@ -1387,7 +1113,7 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	}
 
 	//// 更新缓存
-	//if err := invalidateUserCache(id); err != nil {
+	//if err := InvalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}
 }

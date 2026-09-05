@@ -177,6 +177,55 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.Equal(t, 72, retained.UserId)
 	})
 
+	t.Run("user management invalidates cached sessions and API access", func(t *testing.T) {
+		management := identity.New(identity.Dependencies{
+			DB: database, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
+			UserSecurity: identity.UserSecurity{
+				AdvanceVersion: model.IncrementUserAuthVersionWithTx, PublishAuth: model.PublishUserAuthCache,
+				PublishDeletedVersion: model.PublishCommittedUserAuthVersion,
+				RevokeSessions:        func(id int, reason string) error { _, err := model.RevokeAllUserSessions(id, reason); return err },
+				InvalidateUser:        model.InvalidateUserCache, InvalidateTokens: model.InvalidateUserTokensCache,
+				DeleteCredentials: model.DeleteUserAuthenticationData, ReleaseExternalBinding: model.ReleaseExternalIdentityWithTx,
+			},
+		})
+		user := model.User{Username: "dragonfly-managed-user", AffCode: "dragonfly-managed-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 100, AuthVersion: 1}
+		require.NoError(t, database.Create(&user).Error)
+		token := model.Token{UserId: user.Id, Key: strings.Repeat("c", 32), Status: common.TokenStatusEnabled, RemainQuota: 100, ExpiredTime: -1}
+		require.NoError(t, database.Create(&token).Error)
+		now := time.Now().Unix()
+		session := model.UserSession{SID: "dragonfly-managed-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive, RefreshHash: strings.Repeat("d", 64), LoginMethod: "password", CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600}
+		require.NoError(t, model.CreateUserSession(&session))
+		_, err := model.GetUserSessionCached(session.SID)
+		require.NoError(t, err)
+		router := gin.New()
+		router.GET("/managed-access", middleware.TokenAuthReadOnly(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		request := httptest.NewRequest(http.MethodGet, "/managed-access", nil)
+		request.Header.Set("Authorization", "Bearer sk-"+token.Key)
+		allowed := httptest.NewRecorder()
+		router.ServeHTTP(allowed, request)
+		require.Equal(t, http.StatusNoContent, allowed.Code)
+		_, err = management.ManageUser(t.Context(), contract.UserActor{ID: 9999, Role: common.RoleRootUser}, contract.ManageUserRequest{Id: user.Id, Action: "disable"})
+		require.NoError(t, err)
+		blocked := httptest.NewRecorder()
+		router.ServeHTTP(blocked, request.Clone(t.Context()))
+		assert.Equal(t, http.StatusForbidden, blocked.Code)
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, common.UserStatusDisabled, cached.Status)
+		assert.EqualValues(t, 2, cached.AuthVersion)
+		assert.Equal(t, 100, cached.Quota)
+		_, err = model.GetUserSessionCached(session.SID)
+		require.ErrorIs(t, err, model.ErrUserSessionInactive)
+		_, err = management.DeleteUser(t.Context(), contract.UserActor{ID: 9999, Role: common.RoleRootUser}, user.Id)
+		require.NoError(t, err)
+		_, err = model.GetTokenByKey(token.Key, false)
+		require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		_, err = model.GetUserCache(user.Id)
+		require.Error(t, err)
+		_, err = model.GetUserSessionCached(session.SID)
+		require.Error(t, err)
+	})
+
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {
 		user := model.User{Username: "dragonfly-session", AffCode: "dragonfly-session", AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)

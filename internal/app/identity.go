@@ -1,6 +1,12 @@
 package app
 
 import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/service/authz"
+	"gorm.io/gorm"
+
 	"context"
 
 	"github.com/QuantumNous/new-api/internal/module/identity"
@@ -33,4 +39,33 @@ func tokenPolicy() identity.TokenPolicy {
 		IsSelectableGroup: service.IsUserSelectableGroup,
 		AutoGroups:        service.GetUserAutoGroup,
 	}
+}
+
+type userAuthorization struct{}
+
+func (userAuthorization) Capabilities(id, role int) map[string]map[string]bool {
+	return authz.Capabilities(id, role)
+}
+func (userAuthorization) SetPermissions(tx *gorm.DB, id int, permissions map[string]map[string]bool) error {
+	return authz.SetUserPermissionsInTx(tx, id, permissions)
+}
+func (userAuthorization) ClearPermissions(tx *gorm.DB, id int) error {
+	return authz.ClearUserAuthorizationInTx(tx, id)
+}
+func (userAuthorization) Reload() error { return authz.ReloadPolicy() }
+
+func userSecurity() identity.UserSecurity {
+	return identity.UserSecurity{
+		AdvanceVersion:         model.IncrementUserAuthVersionWithTx,
+		PublishAuth:            model.PublishUserAuthCache,
+		PublishDeletedVersion:  model.PublishCommittedUserAuthVersion,
+		RevokeSessions:         func(id int, reason string) error { _, err := model.RevokeAllUserSessions(id, reason); return err },
+		InvalidateUser:         model.InvalidateUserCache,
+		InvalidateTokens:       model.InvalidateUserTokensCache,
+		DeleteCredentials:      model.DeleteUserAuthenticationData,
+		ReleaseExternalBinding: model.ReleaseExternalIdentityWithTx,
+	}
+}
+func recordWelcomeGrant(id, quota int) {
+	model.RecordLog(id, model.LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(quota)))
 }

@@ -26,9 +26,11 @@ type providerRegistryFixture struct {
 }
 
 func (*providerRegistryFixture) IsBuiltin(slug string) bool { return slug == "github" }
+
 func (r *providerRegistryFixture) Register(provider *entity.CustomOAuthProvider) {
 	r.providers[provider.Slug] = provider
 }
+
 func (r *providerRegistryFixture) Unregister(slug string) { delete(r.providers, slug) }
 
 func TestProviderManagementPreservesSecretsAndRegistryConsistency(t *testing.T) {
