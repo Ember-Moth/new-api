@@ -176,7 +176,7 @@ func Run(assets router.WebAssets) {
 			},
 			InvalidatePlan: model.InvalidateSubscriptionPlanCache,
 		}),
-		Identity: identity.New(identity.Dependencies{DB: model.DB, Providers: providerRegistry{}}),
+		Identity: identity.New(identity.Dependencies{DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation}),
 		Channel:  model.ChannelService(),
 		ChannelHooks: channelhttp.ManagementHooks{
 			Can: func(userID, role int, resource, action string) bool {

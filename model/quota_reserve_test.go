@@ -37,7 +37,7 @@ func createReserveTestToken(t *testing.T, remainQuota int) Token {
 		ExpiredTime: -1,
 		RemainQuota: remainQuota,
 	}
-	require.NoError(t, token.Insert())
+	require.NoError(t, InsertToken(&token))
 	return token
 }
 
@@ -332,7 +332,7 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	assert.Equal(t, 30, cached.RemainQuota)
 
 	// 变更期间：fence 删除缓存并拦截并发读者手中的过期快照。
-	require.NoError(t, invalidateTokenCacheForMutation(token.Key))
+	require.NoError(t, InvalidateTokenCacheForMutation(token.Key))
 	code, err = cacheInitToken(stale)
 	require.NoError(t, err)
 	assert.Zero(t, code, "the pre-mutation snapshot must not be published while fenced")

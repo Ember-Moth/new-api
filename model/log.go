@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	dbquery "github.com/QuantumNous/new-api/internal/infra/database/query"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -40,7 +41,7 @@ func buildLogLikeCondition(column string, value string) (string, string, error) 
 		return column + " LIKE ?", pattern, nil
 	}
 
-	pattern, err := sanitizeLikePattern(value)
+	pattern, err := dbquery.SanitizeLikePattern(value)
 	if err != nil {
 		return "", "", err
 	}
@@ -51,7 +52,7 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 	input = strings.ReplaceAll(input, `\`, `\\`)
 	input = strings.ReplaceAll(input, `_`, `\_`)
 
-	if err := validateLikePattern(input); err != nil {
+	if err := dbquery.ValidateLikePattern(input); err != nil {
 		return "", err
 	}
 	return input, nil

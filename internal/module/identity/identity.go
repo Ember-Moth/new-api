@@ -14,18 +14,35 @@ type ProviderRegistry interface {
 	Unregister(slug string)
 }
 
+type TokenPolicy struct {
+	MaxTokens         func() int
+	MaxAutoGroups     func() int
+	UserGroup         func(context.Context, int) (string, error)
+	IsSelectableGroup func(string, string) bool
+	AutoGroups        func(string) []string
+}
+
 type Dependencies struct {
-	DB        *gorm.DB
-	Providers ProviderRegistry
+	TokenPolicy          TokenPolicy
+	InvalidateTokenCache func(string) error
+	DB                   *gorm.DB
+	Providers            ProviderRegistry
 }
 
 type Service struct {
-	providers *repo.Providers
-	registry  ProviderRegistry
+	tokens      *repo.Tokens
+	tokenPolicy TokenPolicy
+	providers   *repo.Providers
+	registry    ProviderRegistry
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{providers: repo.NewProviders(deps.DB), registry: deps.Providers}
+	return &Service{
+		tokens:      repo.NewTokens(deps.DB, deps.InvalidateTokenCache),
+		tokenPolicy: deps.TokenPolicy,
+		providers:   repo.NewProviders(deps.DB),
+		registry:    deps.Providers,
+	}
 }
 
 // ProviderConfigs is the runtime-facing view; HTTP handlers use the redacted

@@ -51,7 +51,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
-按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已完成 identity 的 OAuth 提供商配置、subscription 的套餐配置和 billing 的兑换码管理，后续继续用户/令牌和系统管理等控制面功能。整体模块化目标不变。
+按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已完成 identity 的 OAuth 提供商配置和令牌管理、subscription 的套餐配置和 billing 的兑换码管理，后续继续用户和系统管理等控制面功能。整体模块化目标不变。
 
 已完成的第一批改动：
 
@@ -94,6 +94,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 第八批将兑换码的列表、条件搜索、详情、批量创建、编辑、状态修改、软删除和清理失效码迁入 billing 模块。业务服务持有显式数据库及支付合规依赖；handler 只处理 HTTP、国际化错误和注入的审计，原 `controller/redemption.go` 已移除。创建保留数量/额度/有效期校验和部分成功返回，兑换码与创建者由服务生成和确定。
 
 编辑配置只写名称、额度和过期时间，状态操作只写状态，并用 PostgreSQL `RETURNING` 返回实际写入后的记录，避免把读取之后已完成兑换的状态覆盖回旧值。原筛选测试迁入模块并改用正式 SQL schema；原子充值、溢出回滚和并发兑换仅成功一次的回归保留在 model，兑换钱包事务尚待后续迁移。
+
+第九批将 API 令牌的列表、搜索、详情、密钥查看/批量查看、创建、编辑、状态修改和单个/批量删除迁入 identity。令牌实体及数组配置解析由模块拥有，HTTP 输入/输出与 GORM 实体分离；所有权校验、密钥脱敏、数量/额度约束和自动分组校验由模块服务负责，应用层注入分组策略与缓存失效能力。
+
+自动分组仍区分省略、null 和空数组，非 auto 分组会清空快照并关闭跨组重试。管理操作在写库前调用原有缓存屏障；配置编辑不覆盖状态和用量字段，状态操作只写状态，PostgreSQL `RETURNING` 返回实际记录。注册默认令牌暂经 `model.InsertToken` 适配模块的可信创建能力，鉴权读取、预扣和结算运行时仍留待迁移。
+
+令牌与日志/充值搜索共用的 LIKE 转义和校验迁到数据库查询基础设施；PostgreSQL 和 ClickHouse 的转义路径继续独立。原控制器测试合并迁到 identity，使用正式 SQL 初始化的隔离 schema；原缓存回归改为调用真实模块管理入口。
 
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
@@ -201,3 +207,22 @@ GOWORK=off go test ./internal/arch ./internal/module/billing/... ./model \
 SQL 迁移在隔离 schema 初始化两次。覆盖：批量生成和创建者归属、唯一约束、搜索状态组合和分页、钱包额度上限、真实写入中断时只返回已提交兑换码、成功审计、软删除保留记录、清理失效码，以及管理读取之后发生兑换时不覆盖已用状态。测试显式初始化国际化资源；原有钱包兑换回归继续通过。
 
 输出：`/tmp/new-api-redemption-crud-tests.log`、`/tmp/new-api-redemption-crud-full-tests.log`、`/tmp/new-api-redemption-crud-vet.log`、`/tmp/new-api-redemption-crud-startup.log`。
+
+## 第九批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。执行第四批完整后端回归、主模块 build/vet、RelayKit 独立 build/vet，以及第一批的三种日志配置新库/两次重启命令，均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./model \
+  -run 'TestModular|TestToken|TestProvider|TestQuotaReserve' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonfly -count=1
+```
+
+覆盖密钥脱敏和所有权隔离、128 字符密钥与原生数组存储、单个/批量软删除、分组三态、分组策略和数量/额度校验、搜索转义与分页、过期/耗尽启用保护，以及交错写入时保留状态和账务字段。DragonflyDB 集成用正式 SQL schema 初始化两次，验证预热缓存后的分组收紧、禁用、单个/批量删除立即反映在实际鉴权读取上，其他用户令牌不受影响。
+
+输出：`/tmp/new-api-token-crud-tests.log`、`/tmp/new-api-token-crud-dragonfly.log`、`/tmp/new-api-token-crud-full-tests.log`、`/tmp/new-api-token-crud-vet.log`、`/tmp/new-api-token-crud-startup.log`。

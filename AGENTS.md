@@ -28,7 +28,7 @@ internal/transport/http/server/ — HTTP server and dashboard delivery
 internal/transport/task/ — Background task adapters (channel model updates migrated)
 internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
 internal/module/channel/ — Channel management, provider operations, catalog/discovery, persistence and routing; health testing and remaining callers are still being migrated
-internal/module/identity/ — OAuth provider configuration CRUD, validation, contracts and storage; authentication and remaining identity control-plane features are still being migrated
+internal/module/identity/ — OAuth provider and API token management CRUD, validation, contracts and storage; authentication and user management are still being migrated
 internal/module/billing/ — Redemption management CRUD, contracts and storage; wallet credit, pricing and settlement are still being migrated
 internal/module/subscription/ — Plan configuration CRUD, validation, contracts and storage; purchases and user subscriptions are still being migrated
 internal/migration/schema/ — Versioned production SQL schema

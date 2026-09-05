@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,15 +44,25 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 		CrossGroupRetry: true,
 		AutoGroups:      StringList{"default", "vip"},
 	}
-	require.NoError(t, token.Insert())
+	require.NoError(t, InsertToken(&token))
 	require.NoError(t, cacheSetTokenForTest(token))
 
 	preheated, err := cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, StringList{"default", "vip"}, preheated.AutoGroups)
 
-	require.NoError(t, token.SetAutoGroups([]string{"vip"}))
-	require.NoError(t, token.Update())
+	management := identity.New(identity.Dependencies{
+		DB: DB, InvalidateTokenCache: InvalidateTokenCacheForMutation,
+		TokenPolicy: identity.TokenPolicy{
+			MaxAutoGroups:     func() int { return 5 },
+			IsSelectableGroup: func(userGroup, group string) bool { return group == "vip" },
+		},
+	})
+	_, err = management.UpdateToken(t.Context(), contract.TokenActor{ID: token.UserId, Group: "default"}, contract.TokenRequest{
+		TokenSettings: contract.TokenSettings{Id: token.Id, Name: token.Name, ExpiredTime: token.ExpiredTime, RemainQuota: token.RemainQuota, UnlimitedQuota: token.UnlimitedQuota, Group: token.Group, CrossGroupRetry: token.CrossGroupRetry},
+		AutoGroups:    contract.TokenAutoGroupsInput{Set: true, Groups: []string{"vip"}},
+	}, false)
+	require.NoError(t, err)
 	// Update 是限制性变更：写库前删除缓存并设置 fence。缓存不再提供旧的
 	// 宽分组值，下一次读取必须看到收紧后的分组。
 	_, cacheErr := cacheGetTokenByKey(token.Key)

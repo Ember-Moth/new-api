@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
+	"github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -54,7 +57,10 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	model.DB, model.LOG_DB = database, database
 	common.BatchUpdateEnabled, common.SyncFrequency = false, 60
-	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Token{}, &model.UserSession{}))
+	pool, err := database.DB()
+	require.NoError(t, err)
+	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool, schema.Main))
 
 	t.Run("concurrent reservations cannot spend the same cached balance twice", func(t *testing.T) {
 		user := model.User{Username: "dragonfly-reserve", AffCode: "dragonfly-reserve", Quota: 10, AuthVersion: 1}
@@ -117,6 +123,58 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.NoError(t, database.First(&token, token.Id).Error)
 		assert.Equal(t, stored.RemainQuota, token.RemainQuota)
 		assert.Equal(t, stored.UsedQuota, token.UsedQuota)
+	})
+
+	t.Run("token management invalidates hydrated authorization snapshots", func(t *testing.T) {
+		management := identity.New(identity.Dependencies{
+			DB: database, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,
+			TokenPolicy: identity.TokenPolicy{
+				MaxAutoGroups:     func() int { return 5 },
+				IsSelectableGroup: func(userGroup, group string) bool { return group == "vip" },
+			},
+		})
+		tokens := []model.Token{
+			{UserId: 71, Name: "dragonfly-edit-token", Key: "dragonfly-edit-token-key", Status: common.TokenStatusEnabled, ExpiredTime: -1, RemainQuota: 100, Group: "auto", CrossGroupRetry: true, AutoGroups: model.StringList{"default", "vip"}},
+			{UserId: 71, Name: "dragonfly-batch-token", Key: "dragonfly-batch-token-key", Status: common.TokenStatusEnabled, ExpiredTime: -1, RemainQuota: 100},
+			{UserId: 72, Name: "dragonfly-foreign-token", Key: "dragonfly-foreign-token-key", Status: common.TokenStatusEnabled, ExpiredTime: -1, RemainQuota: 100},
+		}
+		require.NoError(t, database.Create(&tokens).Error)
+		for _, token := range tokens {
+			_, err := model.GetTokenByKey(token.Key, false)
+			require.NoError(t, err)
+		}
+		updated, err := management.UpdateToken(t.Context(), contract.TokenActor{ID: 71, Group: "default"}, contract.TokenRequest{
+			TokenSettings: contract.TokenSettings{Id: tokens[0].Id, Name: tokens[0].Name, ExpiredTime: -1, RemainQuota: 100, Group: "auto", CrossGroupRetry: true},
+			AutoGroups:    contract.TokenAutoGroupsInput{Set: true, Groups: []string{"vip"}},
+		}, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"vip"}, updated.AutoGroups)
+		reloaded, err := model.GetTokenByKey(tokens[0].Key, false)
+		require.NoError(t, err)
+		assert.Equal(t, model.StringList{"vip"}, reloaded.AutoGroups)
+		// A status-only update must preserve a quota change already committed by accounting.
+		require.NoError(t, database.Model(&tokens[0]).Updates(map[string]any{"remain_quota": 73, "used_quota": 27}).Error)
+		_, err = management.UpdateToken(t.Context(), contract.TokenActor{ID: 71}, contract.TokenRequest{
+			TokenSettings: contract.TokenSettings{Id: tokens[0].Id, Status: common.TokenStatusDisabled},
+		}, true)
+		require.NoError(t, err)
+		reloaded, err = model.GetTokenByKey(tokens[0].Key, false)
+		require.NoError(t, err)
+		assert.Equal(t, 73, reloaded.RemainQuota)
+		assert.Equal(t, 27, reloaded.UsedQuota)
+		_, err = model.ValidateUserToken(tokens[0].Key)
+		require.ErrorIs(t, err, model.ErrTokenInvalid)
+		require.NoError(t, management.DeleteToken(t.Context(), tokens[0].Id, 71))
+		_, err = model.GetTokenByKey(tokens[0].Key, false)
+		require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		deleted, err := management.DeleteTokens(t.Context(), []int{tokens[1].Id, tokens[2].Id}, 71)
+		require.NoError(t, err)
+		assert.Equal(t, 1, deleted)
+		_, err = model.GetTokenByKey(tokens[1].Key, false)
+		require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		retained, err := model.ValidateUserToken(tokens[2].Key)
+		require.NoError(t, err)
+		assert.Equal(t, 72, retained.UserId)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {
