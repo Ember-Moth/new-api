@@ -34,7 +34,7 @@ RelayKit 是从 [new-api](https://github.com/QuantumNous/new-api) 中拆分出�
 
 ## 安装
 
-RelayKit 要求 Go 1.25.1 或更高版本。
+RelayKit 要求 Go 1.27.1 或更高版本。
 
 ```bash
 go get github.com/QuantumNous/new-api/relaykit@latest
