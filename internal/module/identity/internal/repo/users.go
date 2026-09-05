@@ -161,3 +161,22 @@ func (r *Users) LockGroup(tx *gorm.DB, id int) (string, error) {
 func (r *Users) SetGroup(tx *gorm.DB, id int, group string) error {
 	return tx.Model(&entity.User{}).Where("id = ?", id).Update("group", group).Error
 }
+
+func (r *Users) ApplyPaymentCustomer(tx *gorm.DB, id int, stripeID *string, email string) (bool, error) {
+	changed := false
+	if stripeID != nil {
+		result := tx.Model(&entity.User{}).Where("id = ? AND stripe_customer IS DISTINCT FROM ?", id, *stripeID).Update("stripe_customer", *stripeID)
+		if result.Error != nil {
+			return false, result.Error
+		}
+		changed = result.RowsAffected > 0
+	}
+	if email != "" {
+		result := tx.Model(&entity.User{}).Where("id = ? AND (email IS NULL OR email = '')", id).Update("email", email)
+		if result.Error != nil {
+			return false, result.Error
+		}
+		changed = changed || result.RowsAffected > 0
+	}
+	return changed, nil
+}

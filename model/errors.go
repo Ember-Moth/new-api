@@ -26,9 +26,6 @@ var (
 	ErrTokenInvalid     = errors.New("token invalid")
 )
 
-// Redemption errors
-var ErrRedeemFailed = errors.New("redeem.failed")
-
 // 2FA errors
 var ErrTwoFANotEnabled = identityentity.ErrTwoFANotEnabled
 var ErrTwoFAAlreadyEnabled = identityentity.ErrTwoFAAlreadyEnabled

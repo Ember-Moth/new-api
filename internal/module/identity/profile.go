@@ -212,3 +212,9 @@ func (s *Service) BindEmail(ctx context.Context, id int, input contract.BindEmai
 	}
 	return s.userSecurity.PublishAuth(id)
 }
+
+// ApplyPaymentCustomer joins the payment transaction. Checkout contact details
+// may fill an empty email; an existing account email is never replaced.
+func (s *Service) ApplyPaymentCustomer(tx *gorm.DB, id int, stripeID *string, email string) (bool, error) {
+	return s.users.ApplyPaymentCustomer(tx, id, stripeID, email)
+}

@@ -241,6 +241,14 @@ billing 的 checkout 客户端封装 Stripe SDK、Creem HTTP、Waffo SDK 和 Epa
 
 四个旧订阅支付控制器文件已删除。其余支付渠道与钱包共用的 webhook 分发/验签控制器、配置适配及钱包运行时仍待继续迁移。
 
+第三十二批将五种钱包充值渠道的订单完成、补单、记录查询和兑换码入账统一收进 billing 的 topups 实现。HTTP 查询/补单/兑换入口归 billing，账户支付资料通过 identity 的事务接口更新；剩余钱包结账及 webhook 控制器只保留调用适配。原模型兑换码实现与测试已移除，相关原子性回归归模块所有。
+
+入账金额按持久化单位明确区分：Stripe 用 Money 换算额度，Creem 的 Amount 已是额度，Epay/Waffo/Waffo Pancake 的 Amount 按额度单位换算；管理员补单使用同一规则，修复 Creem 被再次放大的问题。所有渠道重复成功通知只返回已完成，不再重复增加缓存或写日志；订单状态、用户额度与支付资料在同一事务内提交，条件 UPDATE 守住钱包上限，非有限金额/单位及非法额度直接拒绝。
+
+失败/过期更新只作用于 pending 订单，旧整行 Save 调用已替换，避免覆盖成功入账。Creem 支付邮箱只填充空账户邮箱，不覆盖已经绑定的邮箱；提交后按增量同步缓存并发布更新的账户元数据。兑换码保留用户级处理中响应和入口延迟，活动请求结束即移除锁标记，数据库事务仍是跨实例正确性的依据。
+
+充值记录保留普通用户 30 天范围与管理员全量范围，关键词仍走原转义规则；搜索计数使用实际限制 10,000 条匹配记录的子查询，修复在 COUNT 聚合外加 LIMIT 不生效的问题。旧普通转发额度预扣/结算、批量缓存落库、充值结账配置和 webhook 编排仍待后续归属整理。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -842,3 +850,34 @@ python3 /tmp/verify-new-api-modular-startup.py
 真实 PostgreSQL 业务测试确认网关调用前订单已保存、四种响应字段和流水前缀保持、用户信息取自身份模块、套餐停用/购买上限/订单写入失败时不调用网关、超时后订单仍能完成，以及回调先完成时请求失败不会撤销订单。Epay HTTP 通知/返回使用真实签名验证和订单事务，重复通知仅发放一次订阅。完整回归继续覆盖真实 DragonflyDB 和 PostgreSQL/ClickHouse 日志；竞态检查通过。
 
 输出：`/tmp/new-api-checkout-build.log`、`/tmp/new-api-checkout-tests.log`、`/tmp/new-api-checkout-race.log`、`/tmp/new-api-checkout-full-tests.log`、`/tmp/new-api-checkout-vet.log`、`/tmp/new-api-checkout-startup.log`。
+
+## 第三十二批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/billing/... ./internal/module/subscription/... ./model ./controller ./service \
+  -run 'TestModular|TestTopup|TestRecharge|TestUpdatePendingTopUp|TestRedeem|TestSubscription|TestPayment|TestValidateTopUp|TestWallet' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing/... -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonflyCacheContracts -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+正式 SQL 隔离 PostgreSQL 测试覆盖五渠道自动/手动入账的单位一致性、重复通知不重复加款、成功状态保护、两个不同订单竞争钱包上限、订单完成失败时回滚额度和支付资料、非法额度/NaN/Inf 拒绝、现有邮箱保护、数据库故障不伪装成不存在。查询验证用户时间范围、管理员全量范围、转义、HTTP 用户隔离，并用 10,001 条确定性匹配记录验证搜索计数真实限制在 10,000。兑换码的单次消费、并发唯一胜者和额度上限回滚回归迁至模块并通过。
+
+真实 DragonflyDB 覆盖五个充值提供商，在预扣尚未批量落库时完成充值，确认缓存增量只应用一次、不会因支付资料发布覆盖余额，最终批量落库后 SQL/缓存一致。竞态检查通过。
+
+输出：`/tmp/new-api-topups-build.log`、`/tmp/new-api-topups-tests.log`、`/tmp/new-api-topups-race.log`、`/tmp/new-api-topups-dragonfly.log`、`/tmp/new-api-topups-full-tests.log`、`/tmp/new-api-topups-vet.log`、`/tmp/new-api-topups-startup.log`。

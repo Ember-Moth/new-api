@@ -327,3 +327,33 @@ func TestSearchRedemptionsFiltersAndPaginates(t *testing.T) {
 	require.NoError(t, db.Unscoped().Model(&entity.Redemption{}).Count(&allCount).Error)
 	assert.Equal(t, int64(5), allCount)
 }
+
+func TestRedeemRuntimeIsAtomicAndCreditsOnlyOneConcurrentCaller(t *testing.T) {
+	f := newTopupFixture(t, 10)
+	code := entity.Redemption{Name: "atomic code", Key: "10000000000000000000000000000001", Quota: 300, Status: common.RedemptionCodeStatusEnabled}
+	require.NoError(t, f.db.Create(&code).Error)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() { <-start; _, err := f.store.Redeem(t.Context(), code.Key, f.user.Id); results <- err }()
+	}
+	close(start)
+	a, b := <-results, <-results
+	require.True(t, (a == nil) != (b == nil), "one code can only be used once")
+	require.NoError(t, f.db.First(&f.user, f.user.Id).Error)
+	assert.Equal(t, 310, f.user.Quota)
+	require.NoError(t, f.db.First(&code, code.Id).Error)
+	assert.Equal(t, common.RedemptionCodeStatusUsed, code.Status)
+	assert.Equal(t, f.user.Id, code.UsedUserId)
+	assert.EqualValues(t, 300, f.credits.Load())
+	assert.EqualValues(t, 1, f.events.Load())
+	other := entity.Redemption{Name: "overflow", Key: "10000000000000000000000000000002", Quota: 11, Status: common.RedemptionCodeStatusEnabled}
+	require.NoError(t, f.db.Create(&other).Error)
+	require.NoError(t, f.db.Model(&f.user).Update("quota", common.MaxWalletQuota-10).Error)
+	_, err := f.store.Redeem(t.Context(), other.Key, f.user.Id)
+	assert.ErrorIs(t, err, contract.ErrRedeemFailed)
+	require.NoError(t, f.db.First(&other, other.Id).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, other.Status)
+	require.NoError(t, f.db.First(&f.user, f.user.Id).Error)
+	assert.Equal(t, common.MaxWalletQuota-10, f.user.Quota)
+}

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/identity"
@@ -560,6 +562,54 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.NoError(t, database.First(&user, user.Id).Error)
 		assert.Equal(t, 93, user.Quota)
 		assert.Equal(t, "wallet_only", user.GetSetting().BillingPreference)
+	})
+
+	t.Run("all topup providers preserve pending reservations and credit once", func(t *testing.T) {
+		oldUnit, oldBatch := common.QuotaPerUnit, common.BatchUpdateEnabled
+		common.QuotaPerUnit, common.BatchUpdateEnabled = 10, true
+		t.Cleanup(func() {
+			require.NoError(t, model.FlushQuotaUpdates())
+			common.QuotaPerUnit, common.BatchUpdateEnabled = oldUnit, oldBatch
+		})
+		require.NoError(t, schema.UpPostgres(pool, schema.Logs))
+		for _, test := range []struct {
+			provider string
+			credit   int
+		}{{"epay", 20}, {"stripe", 25}, {"creem", 2}, {"waffo", 20}, {"waffo_pancake", 20}} {
+			user := model.User{Username: "df-topup-" + test.provider, AffCode: "df-topup-" + test.provider, Quota: 100, AuthVersion: 1}
+			require.NoError(t, database.Create(&user).Error)
+			_, err := model.GetUserCache(user.Id)
+			require.NoError(t, err)
+			reserved, err := model.TryReserveUserQuota(user.Id, 7)
+			require.NoError(t, err)
+			require.True(t, reserved)
+			row := model.TopUp{UserId: user.Id, Amount: 2, Money: 2.5, TradeNo: "cache-" + test.provider, PaymentProvider: test.provider, PaymentMethod: test.provider, Status: common.TopUpStatusPending}
+			require.NoError(t, row.Insert())
+			customer := "cus_cache"
+			input := billingcontract.TopUpCompletion{TradeNo: row.TradeNo, Provider: test.provider, StripeCustomerID: &customer, CustomerEmail: "payer@example.test"}
+			store := model.TopUpStore()
+			done, err := store.Complete(t.Context(), input)
+			require.NoError(t, err)
+			assert.False(t, done)
+			done, err = store.Complete(t.Context(), input)
+			require.NoError(t, err)
+			assert.True(t, done)
+			cached, err := model.GetUserCache(user.Id)
+			require.NoError(t, err)
+			assert.Equal(t, 93+test.credit, cached.Quota)
+			assert.EqualValues(t, 1, cached.AuthVersion)
+			require.NoError(t, database.First(&user, user.Id).Error)
+			assert.Equal(t, 100+test.credit, user.Quota)
+			if test.provider == "creem" {
+				assert.Equal(t, "payer@example.test", cached.Email)
+			}
+			if test.provider == "stripe" {
+				assert.Equal(t, "cus_cache", user.StripeCustomer)
+			}
+			require.NoError(t, model.FlushQuotaUpdates())
+			require.NoError(t, database.First(&user, user.Id).Error)
+			assert.Equal(t, 93+test.credit, user.Quota)
+		}
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

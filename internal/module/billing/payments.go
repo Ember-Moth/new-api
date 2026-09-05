@@ -27,3 +27,10 @@ func (s *Service) RecordSubscriptionReceipt(tx *gorm.DB, receipt contract.Subscr
 	}
 	return repo.RecordSubscriptionReceipt(tx, receipt)
 }
+
+func (s *Service) CreditWalletInTx(tx *gorm.DB, id, amount int) error {
+	if tx == nil || id <= 0 {
+		return errors.New("invalid wallet credit")
+	}
+	return s.wallets.Credit(tx, id, amount)
+}

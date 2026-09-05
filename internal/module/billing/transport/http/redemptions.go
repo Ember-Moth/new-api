@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -18,12 +19,14 @@ type ManagementHooks struct {
 }
 
 type Handler struct {
-	billing *billing.Service
-	hooks   ManagementHooks
+	redeemMu  sync.Mutex
+	redeeming map[int]struct{}
+	billing   *billing.Service
+	hooks     ManagementHooks
 }
 
 func New(service *billing.Service, hooks ManagementHooks) *Handler {
-	return &Handler{billing: service, hooks: hooks}
+	return &Handler{billing: service, hooks: hooks, redeeming: make(map[int]struct{})}
 }
 
 func (h *Handler) ListRedemptions(c *gin.Context) { h.listRedemptions(c, "", "") }

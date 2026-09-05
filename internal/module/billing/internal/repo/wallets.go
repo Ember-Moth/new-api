@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -42,4 +43,39 @@ func (r *Wallets) Debit(tx *gorm.DB, id, amount int) error {
 		return nil
 	}
 	return tx.Table("users").Where("id = ? AND deleted_at IS NULL", id).Update("quota", gorm.Expr("quota - ?", amount)).Error
+}
+
+func (r *Wallets) ValidateCredit(ctx context.Context, id, amount int) error {
+	if amount <= 0 || amount > common.MaxWalletQuota {
+		return contract.ErrInvalidTopUpQuota
+	}
+	var row struct{ Quota int }
+	if err := r.db.WithContext(ctx).Table("users").Select("quota").Where("id = ? AND deleted_at IS NULL", id).Take(&row).Error; err != nil {
+		return err
+	}
+	if row.Quota > common.MaxWalletQuota-amount {
+		return contract.ErrTopUpQuotaLimitExceeded
+	}
+	return nil
+}
+
+func (r *Wallets) Credit(tx *gorm.DB, id, amount int) error {
+	if amount <= 0 || amount > common.MaxWalletQuota {
+		return contract.ErrInvalidTopUpQuota
+	}
+	result := tx.Table("users").Where("id = ? AND deleted_at IS NULL AND quota <= ?", id, common.MaxWalletQuota-amount).Update("quota", gorm.Expr("quota + ?", amount))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	var count int64
+	if err := tx.Table("users").Where("id = ? AND deleted_at IS NULL", id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return contract.ErrTopUpQuotaLimitExceeded
 }

@@ -144,7 +144,7 @@ func Run(assets router.WebAssets) {
 	service.StartCodexCredentialAutoRefreshTask()
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
-	billingService := billing.New(billing.Dependencies{DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+	billingService := billing.New(billing.Dependencies{TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
 		WalletRuntime: billing.WalletRuntime{
 			Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
 			Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
