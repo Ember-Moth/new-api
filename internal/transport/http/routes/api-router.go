@@ -2,6 +2,7 @@ package router
 
 import (
 	"github.com/QuantumNous/new-api/controller"
+	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
@@ -16,6 +17,7 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
+	billingHandler := billinghttp.New(deps.Billing, deps.BillingHooks)
 	subscriptionHandler := subscriptionhttp.New(deps.Subscription)
 	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
 	identityHandler := identityhttp.New(deps.Identity)
@@ -286,13 +288,13 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		redemptionRoute := apiRouter.Group("/redemption")
 		redemptionRoute.Use(middleware.AdminAuth())
 		{
-			redemptionRoute.GET("/", controller.GetAllRedemptions)
-			redemptionRoute.GET("/search", controller.SearchRedemptions)
-			redemptionRoute.GET("/:id", controller.GetRedemption)
-			redemptionRoute.POST("/", controller.AddRedemption)
-			redemptionRoute.PUT("/", controller.UpdateRedemption)
-			redemptionRoute.DELETE("/invalid", controller.DeleteInvalidRedemption)
-			redemptionRoute.DELETE("/:id", controller.DeleteRedemption)
+			redemptionRoute.GET("/", billingHandler.ListRedemptions)
+			redemptionRoute.GET("/search", billingHandler.SearchRedemptions)
+			redemptionRoute.GET("/:id", billingHandler.GetRedemption)
+			redemptionRoute.POST("/", billingHandler.CreateRedemptions)
+			redemptionRoute.PUT("/", billingHandler.UpdateRedemption)
+			redemptionRoute.DELETE("/invalid", billingHandler.DeleteInvalidRedemptions)
+			redemptionRoute.DELETE("/:id", billingHandler.DeleteRedemption)
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)

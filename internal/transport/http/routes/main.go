@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/billing"
+	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
@@ -17,6 +19,8 @@ import (
 )
 
 type Dependencies struct {
+	Billing      *billing.Service
+	BillingHooks billinghttp.ManagementHooks
 	Subscription *subscription.Service
 	Identity     *identity.Service
 	Channel      *channel.Service

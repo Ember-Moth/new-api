@@ -17,6 +17,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/internal/module/billing"
+	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
@@ -163,6 +165,8 @@ func Run(assets router.WebAssets) {
 	}
 
 	server, err := httpserver.New(assets, router.Dependencies{
+		Billing:      billing.New(billing.Dependencies{DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed}),
+		BillingHooks: billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		Subscription: subscription.New(subscription.Dependencies{
 			DB:             model.DB,
 			PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
