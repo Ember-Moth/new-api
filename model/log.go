@@ -82,7 +82,7 @@ func LogWriterPolicy() usage.WriterPolicy {
 			settings, err := GetUserSetting(id, false)
 			return settings.RecordIpLog, err
 		},
-		Export: LogQuotaData,
+		Export: QuotaDataStore().Record,
 	}
 }
 

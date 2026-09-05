@@ -120,7 +120,9 @@ func Run(assets router.WebAssets) {
 	go authorization.StartPolicySync(runCtx, common.SyncFrequency)
 
 	// 数据看板
-	go model.UpdateQuotaData()
+	aggregates := model.QuotaDataStore()
+	quotaDone := aggregates.Start(runCtx, func() time.Duration { return time.Duration(common.DataExportInterval) * time.Minute })
+	defer func() { cancelRun(); <-quotaDone }()
 
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
@@ -155,7 +157,7 @@ func Run(assets router.WebAssets) {
 	// (DB-lease dedup across masters + run history), then start the runner that
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
-	logService := usage.New(usage.Dependencies{DB: model.LOG_DB, Kind: common.LogDatabaseType(), ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
+	logService := usage.New(usage.Dependencies{Aggregates: aggregates, DB: model.LOG_DB, Kind: common.LogDatabaseType(), ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
 	systemService := system.New(system.Dependencies{Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
 		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
@@ -279,8 +281,11 @@ func Run(assets router.WebAssets) {
 		common.SysError("failed to flush quota updates during shutdown: " + err.Error())
 	}
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
-	if common.DataExportEnabled {
-		model.SaveQuotaDataCache()
+	<-quotaDone
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelFlush()
+	if err := aggregates.Flush(flushCtx); err != nil {
+		common.SysError("failed to flush dashboard usage during shutdown: " + err.Error())
 	}
 	common.SysLog("server exited")
 }

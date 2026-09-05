@@ -3,6 +3,8 @@ package usage
 import (
 	"context"
 
+	"github.com/QuantumNous/new-api/internal/module/usage/aggregation"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/usage/entity"
 	implementation "github.com/QuantumNous/new-api/internal/module/usage/internal/logstore"
@@ -10,12 +12,14 @@ import (
 )
 
 type Service struct {
+	Aggregates *aggregation.Store
 	*implementation.Store
 	*implementation.Writer
 }
 
 type WriterPolicy = implementation.WriterPolicy
 type Dependencies struct {
+	Aggregates   *aggregation.Store
 	DB           *gorm.DB
 	Kind         common.DatabaseType
 	ChannelNames func(context.Context, []int) (map[int]string, error)
@@ -30,7 +34,7 @@ var ErrInvalidLogCursor = implementation.ErrInvalidLogCursor
 
 func New(deps Dependencies) *Service {
 	store := implementation.New(implementation.Dependencies{DB: deps.DB, Kind: deps.Kind, ChannelNames: deps.ChannelNames})
-	return &Service{Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
+	return &Service{Aggregates: deps.Aggregates, Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
 }
 
 func FormatAdminLogs(logs []*Log) { implementation.FormatAdminLogs(logs) }

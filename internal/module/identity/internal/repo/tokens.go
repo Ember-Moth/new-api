@@ -120,3 +120,18 @@ func (r *Tokens) InvalidateKey(key string) {
 		common.SysLog("failed to invalidate token cache before mutation: " + err.Error())
 	}
 }
+
+func (r *Tokens) Names(ctx context.Context, ids []int) (map[int]string, error) {
+	names := make(map[int]string, len(ids))
+	if len(ids) == 0 {
+		return names, nil
+	}
+	var rows []entity.Token
+	if err := r.db.WithContext(ctx).Select("id", "name").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		names[row.Id] = row.Name
+	}
+	return names, nil
+}

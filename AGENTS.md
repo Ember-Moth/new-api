@@ -31,7 +31,7 @@ internal/module/channel/ — Channel management, provider operations, catalog/di
 internal/module/identity/ — Account CRUD, OAuth bindings, external identity ownership, two-factor/Passkey management, authentication challenges, JWT/session orchestration, session/user metadata cache, authentication-version fencing and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; password/OAuth login transport, billing cache ownership and legacy call adapters are still being migrated
 internal/module/billing/ — Redemption CRUD and administrative wallet commands; wallet credit/debit runtime, pricing and settlement are still being migrated
 internal/module/system/ — Tasks, nodes and generic settings management/storage; common.OptionMap and legacy business configuration consumers remain transitional dependencies
-internal/module/usage/ — Log entities, audience filtering, event assembly, cursors, queries, statistics and cleanup; hourly aggregation and legacy writer adapters remain transitional
+internal/module/usage/ — Log entities, audience filtering, event assembly, cursors, queries, hourly aggregation, dashboard statistics and cleanup; ranking orchestration and legacy event adapters remain transitional
 internal/module/subscription/ — Plan configuration CRUD, validation, contracts and storage; purchases and user subscriptions are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules

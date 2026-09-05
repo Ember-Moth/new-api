@@ -183,6 +183,12 @@ Passkey 登录通过应用注入的完成回调连接剩余登录传输层，并
 
 model/log.go 仅保留旧入口适配与业务依赖连接；元数据测试迁至 usage，剩余调用方将随各业务模块迁移继续消减。
 
+第二十四批将小时汇总实体、内存批次、持久化、流量图、时间序列与排行榜底层查询归入 usage，5 个看板 HTTP 接口随之迁移。令牌名称由 identity 批量查询，渠道名称由 channel 提供，核心查询仅接收 context 与身份参数；model 只保留旧事件生产者和排行榜编排所需的适配。
+
+PostgreSQL 初始 SQL 为全部汇总维度增加非空和组合唯一约束；写入用 ON CONFLICT 原子累加，跨实例不会新增重复行或覆盖已有计数。一次快照的所有 SQL 批次在同一事务提交，失败时保留该快照，期间新请求使用独立缓冲，数据库 I/O 不持有写入缓冲锁。定时任务支持取消，HTTP 关闭后等待任务退出并刷新尚未落库的数据；关闭导出开关不会丢弃此前已接收的数据。
+
+汇总依然是内存缓冲的看板统计，不是持久事件队列：进程异常终止可能丢失尚未落库的数据，提交结果因断连而不确定时也没有跨重启去重保证。没有宣称持久化恰好一次投递。排行榜的服务编排和其余业务事件调用方继续随业务模块迁移。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -550,3 +556,30 @@ GOWORK=off go test ./internal/arch ./internal/module/usage/... ./model ./control
 真实 PostgreSQL/ClickHouse 验证消费、错误、任务和审计日志写入，覆盖 IP 偏好、请求 ID 保留、任务发起节点、汇总参数、审计所属用户和角色过滤，以及关闭消费日志后的存储/汇总行为。原计费日志回归继续通过。
 
 输出：`/tmp/new-api-usage-writers-tests.log`、`/tmp/new-api-usage-writers-full-tests.log`、`/tmp/new-api-usage-writers-vet.log`、`/tmp/new-api-usage-writers-startup.log`。
+
+## 第二十四批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令（均在项目根目录运行，RelayKit 命令除外）：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/usage/... ./model ./controller ./service \
+  -run 'TestModular|TestUsageAggregate|TestUsageDashboard|TestGetFlowQuotaData' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/usage \
+  -run 'TestUsageAggregate|TestUsageDashboard|TestGetFlowQuotaData' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+汇总测试使用 `internal/testdb` 的隔离 schema，连续执行两次正式 SQL 初始化，验证组合唯一/非空约束、8 个维度分别隔离、两个独立实例并发累加、501 行跨 SQL 批次失败的整体回滚、失败期间的新事件、重试不重复累加已成功快照、取消后重试及停止周期任务后最终刷新。查询覆盖用户身份固定、管理员/Root 字段范围、软删除令牌名称、小时序列、排行榜分桶和非法时间范围。竞态检查通过；完整回归继续验证真实 PostgreSQL、ClickHouse 和 DragonflyDB。
+
+输出：`/tmp/new-api-usage-aggregation-build.log`、`/tmp/new-api-usage-aggregation-tests.log`、`/tmp/new-api-usage-aggregation-race.log`、`/tmp/new-api-usage-aggregation-full-tests.log`、`/tmp/new-api-usage-aggregation-vet.log`、`/tmp/new-api-usage-aggregation-startup.log`。

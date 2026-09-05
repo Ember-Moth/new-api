@@ -283,3 +283,8 @@ func maskedToken(token *entity.Token) *contract.TokenResponse {
 	}
 	return result
 }
+
+// TokenNames resolves current labels; soft-deleted credentials stay unnamed.
+func (s *Service) TokenNames(ctx context.Context, ids []int) (map[int]string, error) {
+	return s.tokens.Names(ctx, ids)
+}
