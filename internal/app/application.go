@@ -30,6 +30,7 @@ import (
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
+	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	httpserver "github.com/QuantumNous/new-api/internal/transport/http/server"
@@ -214,9 +215,11 @@ func Run(assets router.WebAssets) {
 				controller.CompletePasskeyLogin(c, (*model.User)(user))
 			},
 		},
-		Billing:      billingService,
-		BillingHooks: billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
+		Billing:           billingService,
+		BillingHooks:      billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
+		SubscriptionHooks: subscriptionhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, ResetLogs: controller.RecordSubscriptionResetUserLogs},
 		Subscription: subscription.New(subscription.Dependencies{
+			Members:        model.SubscriptionMemberships(),
 			DB:             model.DB,
 			PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
 			GroupExists: func(group string) bool {

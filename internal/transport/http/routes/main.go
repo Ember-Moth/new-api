@@ -21,23 +21,25 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
+	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Dependencies struct {
-	Usage         *usage.Service
-	SystemHooks   systemhttp.ManagementHooks
-	System        *system.Service
-	Authorization *authz.Engine
-	IdentityHooks identityhttp.ManagementHooks
-	Billing       *billing.Service
-	BillingHooks  billinghttp.ManagementHooks
-	Subscription  *subscription.Service
-	Identity      *identity.Service
-	Channel       *channel.Service
-	ChannelHooks  channelhttp.ManagementHooks
+	Usage             *usage.Service
+	SystemHooks       systemhttp.ManagementHooks
+	System            *system.Service
+	Authorization     *authz.Engine
+	IdentityHooks     identityhttp.ManagementHooks
+	Billing           *billing.Service
+	BillingHooks      billinghttp.ManagementHooks
+	Subscription      *subscription.Service
+	SubscriptionHooks subscriptionhttp.ManagementHooks
+	Identity          *identity.Service
+	Channel           *channel.Service
+	ChannelHooks      channelhttp.ManagementHooks
 }
 
 func SetRouter(router *gin.Engine, assets WebAssets, deps Dependencies) {

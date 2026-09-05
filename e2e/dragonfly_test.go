@@ -419,6 +419,46 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.Equal(t, 93, current.Quota)
 	})
 
+	t.Run("subscription group transitions preserve cached wallet and login session", func(t *testing.T) {
+		previousSecret := common.SessionSecret
+		common.SessionSecret = "dragonfly-subscription-secret"
+		t.Cleanup(func() { common.SessionSecret = previousSecret })
+		user := model.User{Username: "dragonfly-subscription", AffCode: "dragonfly-subscription", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, Quota: 100}
+		require.NoError(t, database.Create(&user).Error)
+		login, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "subscription-browser")
+		require.NoError(t, err)
+		auth, err := service.ParseAccessToken(login.AccessToken)
+		require.NoError(t, err)
+		_, err = model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		reserved, err := model.TryReserveUserQuota(user.Id, 7)
+		require.NoError(t, err)
+		require.True(t, reserved)
+		plan := model.SubscriptionPlan{Title: "Dragonfly subscription", Enabled: true, DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, TotalAmount: 100, UpgradeGroup: "pro", DowngradeGroup: "default"}
+		require.NoError(t, database.Create(&plan).Error)
+		_, err = model.AdminBindSubscription(user.Id, plan.Id, "")
+		require.NoError(t, err)
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, "pro", cached.Group)
+		assert.Equal(t, 93, cached.Quota)
+		assert.EqualValues(t, 1, cached.AuthVersion)
+		_, _, err = service.ValidateLoginSession(auth)
+		require.NoError(t, err)
+		active, err := model.GetAllActiveUserSubscriptions(user.Id)
+		require.NoError(t, err)
+		require.Len(t, active, 1)
+		_, err = model.AdminInvalidateUserSubscription(active[0].Subscription.Id)
+		require.NoError(t, err)
+		cached, err = model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, "default", cached.Group)
+		assert.Equal(t, 93, cached.Quota)
+		assert.EqualValues(t, 1, cached.AuthVersion)
+		_, _, err = service.ValidateLoginSession(auth)
+		require.NoError(t, err)
+	})
+
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {
 		user := model.User{Username: "dragonfly-session", AffCode: "dragonfly-session", AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)

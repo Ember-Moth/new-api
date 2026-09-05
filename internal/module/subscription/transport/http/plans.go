@@ -11,9 +11,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type Handler struct{ subscriptions *subscription.Service }
+type ManagementHooks struct {
+	Audit     func(*gin.Context, int, string, map[string]any)
+	ResetLogs func(*gin.Context, *contract.SubscriptionResetResult)
+}
+type Handler struct {
+	subscriptions *subscription.Service
+	hooks         ManagementHooks
+}
 
-func New(service *subscription.Service) *Handler { return &Handler{subscriptions: service} }
+func New(service *subscription.Service, hooks ...ManagementHooks) *Handler {
+	h := &Handler{subscriptions: service}
+	if len(hooks) > 0 {
+		h.hooks = hooks[0]
+	}
+	return h
+}
 
 func (h *Handler) ListPlans(c *gin.Context) {
 	plans, err := h.subscriptions.ListPlans(c.Request.Context(), true)

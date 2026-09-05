@@ -67,11 +67,9 @@ func TestSubscriptionGroupTransitionsPreserveAuthVersionAndSessions(t *testing.T
 	assert.Equal(t, "pro", cached.Group)
 	assert.EqualValues(t, 1, cached.AuthVersion)
 
-	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
-		target, err := downgradeUserGroupForSubscriptionTx(tx, subscription, now+1)
-		assert.Equal(t, "default", target)
-		return err
-	}))
+	message, err := AdminInvalidateUserSubscription(subscription.Id)
+	require.NoError(t, err)
+	assert.Contains(t, message, "default")
 	require.NoError(t, RefreshUserGroupCache(user.Id))
 	require.NoError(t, DB.First(&updated, user.Id).Error)
 	assert.Equal(t, "default", updated.Group)

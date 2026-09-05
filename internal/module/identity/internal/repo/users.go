@@ -150,3 +150,14 @@ func (r *Users) EmailTaken(email string, exceptID int) (bool, error) {
 	err := r.db.Unscoped().Model(&entity.User{}).Where("LOWER(email) = ? AND id <> ?", email, exceptID).Count(&count).Error
 	return count > 0, err
 }
+
+// LockGroup participates in the caller's subscription/wallet transaction.
+func (r *Users) LockGroup(tx *gorm.DB, id int) (string, error) {
+	var user entity.User
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", `"group"`).First(&user, id).Error
+	return user.Group, err
+}
+
+func (r *Users) SetGroup(tx *gorm.DB, id int, group string) error {
+	return tx.Model(&entity.User{}).Where("id = ?", id).Update("group", group).Error
+}

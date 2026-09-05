@@ -32,7 +32,7 @@ internal/module/identity/ — Account CRUD, OAuth bindings, external identity ow
 internal/module/billing/ — Redemption CRUD and administrative wallet commands; wallet credit/debit runtime, pricing and settlement are still being migrated
 internal/module/system/ — Tasks, nodes and generic settings management/storage; common.OptionMap and legacy business configuration consumers remain transitional dependencies
 internal/module/usage/ — Log entities, audience filtering, event assembly, cursors, queries, hourly aggregation, dashboard/ranking/performance statistics and cleanup; pricing/configuration wiring and legacy event adapters remain transitional
-internal/module/subscription/ — Plan configuration CRUD, validation, contracts and storage; purchases and user subscriptions are still being migrated
+internal/module/subscription/ — Plan configuration, subscription grants/queries/resets/cancellation/expiry and group lifecycle; plan caches, payment and quota accounting are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules
 controller/    — Request handlers awaiting migration to their modules

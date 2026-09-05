@@ -409,3 +409,11 @@ func userResponse(user *entity.User) *contract.UserResponse {
 func (s *Service) UserCapabilities(id, role int) map[string]map[string]bool {
 	return s.userAuthorization.Capabilities(id, role)
 }
+
+func (s *Service) LockUserGroup(tx *gorm.DB, id int) (string, error) {
+	return s.users.LockGroup(tx, id)
+}
+
+func (s *Service) SetUserGroup(tx *gorm.DB, id int, group string) error {
+	return s.users.SetGroup(tx, id, group)
+}
