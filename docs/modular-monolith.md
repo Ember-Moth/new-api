@@ -137,6 +137,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 旧 model/option.go 缩为 setup、支付和插件写入方的过渡适配；common.OptionMap 及 setting 下的业务配置仍是共享运行时投影，并非最终的配置边界。后续要继续将业务消费者归到所属模块，不能将本批视为全局配置整理完成。
 
+第十六批将用户 OAuth 绑定列表、解绑、绑定写入和第三方身份占用记录迁入 identity。列表一次联表读取提供商公开元数据，响应不包含提供商密钥；管理员解绑在锁定目标用户后检查角色，自助操作固定使用当前用户。
+
+绑定创建/替换依靠 PostgreSQL 唯一约束并锁定关联提供商和用户，注册调用继续复用外层事务；提供商删除在同一事务锁定提供商并检查绑定，避免并发删除产生无主绑定。外部身份占用仍支持同一映射重复声明，其他用户或同用户的冲突身份会被拒绝。
+
+原 controller/custom_oauth.go 已移除，model 中的绑定与占用函数仅保留认证运行时的过渡适配。模块内部清除 Telegram 绑定直接操作自有仓储，不再需要应用层释放身份回调；缓存发布和尚未迁移的登录流程保持原有边界。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -362,3 +368,19 @@ GOWORK=off go test ./internal/arch ./internal/module/system/... ./controller ./m
 读取并遵循 `pkg/billingexpr/expr.md`，保留插件 usage schema、模型别名和非负表达式校验。SQL 集成测试覆盖单项失败不更新倍率、分批写入时的事务回滚、显式空值、无效倍率拒绝、敏感项过滤、有效计费配置投影和重载失败保留旧快照；原 Gemini/Claude、插件开关和计费配置回归继续通过。
 
 输出：`/tmp/new-api-options-module-tests.log`、`/tmp/new-api-options-module-full-tests.log`、`/tmp/new-api-options-module-vet.log`、`/tmp/new-api-options-module-startup.log`。
+
+## 第十六批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归及第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/identity/... ./controller ./model \
+  -run 'TestModular|TestOAuthBinding|TestProvider|TestExternalIdentity|TestClearTelegram|TestHardDelete|TestUserDeletion|TestTelegram' -count=1
+```
+
+SQL 集成测试覆盖绑定响应与所有权隔离、管理员权限、自助解绑、注册回滚、并发绑定只有一个所有者、替换绑定保留创建时间、提供商删除与绑定竞态、外部身份重复声明/冲突/释放。既有 Telegram 和用户硬删除回归继续通过。
+
+输出：`/tmp/new-api-bindings-module-tests.log`、`/tmp/new-api-bindings-module-full-tests.log`、`/tmp/new-api-bindings-module-vet.log`、`/tmp/new-api-bindings-module-startup.log`。

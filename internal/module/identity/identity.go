@@ -24,15 +24,14 @@ type TokenPolicy struct {
 }
 
 type UserSecurity struct {
-	AdvanceCurrentSession  func(contract.AuthIdentity, string) (*contract.AuthBundle, error)
-	AdvanceVersion         func(*gorm.DB, int) (int64, error)
-	PublishAuth            func(int) error
-	PublishDeletedVersion  func(int, int64) error
-	RevokeSessions         func(int, string) error
-	InvalidateUser         func(int) error
-	InvalidateTokens       func(int) error
-	DeleteCredentials      func(*gorm.DB, int) error
-	ReleaseExternalBinding func(*gorm.DB, string, int) error
+	AdvanceCurrentSession func(contract.AuthIdentity, string) (*contract.AuthBundle, error)
+	AdvanceVersion        func(*gorm.DB, int) (int64, error)
+	PublishAuth           func(int) error
+	PublishDeletedVersion func(int, int64) error
+	RevokeSessions        func(int, string) error
+	InvalidateUser        func(int) error
+	InvalidateTokens      func(int) error
+	DeleteCredentials     func(*gorm.DB, int) error
 }
 
 type UserAuthorization interface {
@@ -60,6 +59,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	bindings          *repo.Bindings
 	verifyEmail       func(string, string) bool
 	users             *repo.Users
 	userSecurity      UserSecurity
@@ -75,6 +75,7 @@ type Service struct {
 
 func New(deps Dependencies) *Service {
 	return &Service{
+		bindings:    repo.NewBindings(deps.DB),
 		verifyEmail: deps.VerifyEmail,
 		users:       repo.NewUsers(deps.DB), userSecurity: deps.UserSecurity, userAuthorization: deps.UserAuthorization,
 		userWallet: deps.UserWallet, welcomeQuota: deps.WelcomeQuota, welcomeGrant: deps.WelcomeGrant,

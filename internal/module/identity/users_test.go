@@ -112,7 +112,7 @@ func newUserFixture(t *testing.T) *userFixture {
 				return err
 			},
 			InvalidateUser: model.InvalidateUserCache, InvalidateTokens: model.InvalidateUserTokensCache,
-			DeleteCredentials: model.DeleteUserAuthenticationData, ReleaseExternalBinding: model.ReleaseExternalIdentityWithTx,
+			DeleteCredentials: model.DeleteUserAuthenticationData,
 		},
 	})
 	h := identityhttp.New(f.service, identityhttp.ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, Audit: func(c *gin.Context, id int, action string, params map[string]any) {

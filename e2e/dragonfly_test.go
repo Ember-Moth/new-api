@@ -186,7 +186,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 				PublishDeletedVersion: model.PublishCommittedUserAuthVersion,
 				RevokeSessions:        func(id int, reason string) error { _, err := model.RevokeAllUserSessions(id, reason); return err },
 				InvalidateUser:        model.InvalidateUserCache, InvalidateTokens: model.InvalidateUserTokensCache,
-				DeleteCredentials: model.DeleteUserAuthenticationData, ReleaseExternalBinding: model.ReleaseExternalIdentityWithTx,
+				DeleteCredentials: model.DeleteUserAuthenticationData,
 			},
 		})
 		user := model.User{Username: "dragonfly-managed-user", AffCode: "dragonfly-managed-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 100, AuthVersion: 1}

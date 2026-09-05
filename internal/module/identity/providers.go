@@ -179,20 +179,11 @@ func (s *Service) DeleteProvider(ctx context.Context, id int) error {
 	if s.registry == nil {
 		return errors.New("OAuth provider registry is not configured")
 	}
-	provider, err := s.providers.Get(ctx, id)
+	provider, err := s.providers.DeleteUnbound(ctx, id)
 	if err != nil {
-		return errors.New("未找到该 OAuth 提供商")
-	}
-	count, err := s.providers.BindingCount(ctx, id)
-	if err != nil {
-		return errors.New("检查用户绑定时发生错误，请稍后重试")
-	}
-	if count > 0 {
-		return errors.New("该 OAuth 提供商还有用户绑定，无法删除。请先解除所有用户绑定。")
-	}
-	if err := s.providers.Delete(ctx, id); err != nil {
 		return err
 	}
+
 	s.registry.Unregister(provider.Slug)
 	return nil
 }

@@ -188,7 +188,7 @@ func (s *Service) ClearUserBinding(ctx context.Context, actor contract.UserActor
 			return err
 		}
 		if binding == "telegram" {
-			return s.userSecurity.ReleaseExternalBinding(tx, binding, user.Id)
+			return repo.ReleaseExternalIdentityWithTx(tx, binding, user.Id)
 		}
 		return nil
 	})

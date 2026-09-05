@@ -139,8 +139,8 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				selfRoute.POST("/checkin", middleware.TurnstileCheck(), controller.DoCheckin)
 
 				// Custom OAuth bindings
-				selfRoute.GET("/oauth/bindings", controller.GetUserOAuthBindings)
-				selfRoute.DELETE("/oauth/bindings/:provider_id", controller.UnbindCustomOAuth)
+				selfRoute.GET("/oauth/bindings", identityHandler.OAuthBindings)
+				selfRoute.DELETE("/oauth/bindings/:provider_id", identityHandler.UnbindOAuth)
 			}
 
 			adminRoute := userRoute.Group("/")
@@ -150,8 +150,8 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
 				adminRoute.GET("/search", identityHandler.SearchUsers)
-				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
-				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", controller.UnbindCustomOAuthByAdmin)
+				adminRoute.GET("/:id/oauth/bindings", identityHandler.AdminOAuthBindings)
+				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", identityHandler.AdminUnbindOAuth)
 				adminRoute.DELETE("/:id/bindings/:binding_type", identityHandler.ClearUserBinding)
 				adminRoute.GET("/:id", identityHandler.GetUser)
 				adminRoute.POST("/", identityHandler.CreateUser)
