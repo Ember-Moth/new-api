@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/subscription/payments"
+
 	"github.com/QuantumNous/new-api/internal/module/subscription/quota"
 
 	"github.com/QuantumNous/new-api/internal/module/subscription/memberships"
@@ -16,6 +18,7 @@ import (
 var ErrPaymentComplianceRequired = errors.New("payment compliance confirmation required")
 
 type Dependencies struct {
+	Payments       *payments.Store
 	Quota          *quota.Store
 	Members        *memberships.Store
 	DB             *gorm.DB
@@ -25,6 +28,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	Payments        *payments.Store
 	Quota           *quota.Store
 	maintenanceOnce sync.Once
 	maintenanceDone chan struct{}
@@ -38,7 +42,7 @@ type Service struct {
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{Quota: deps.Quota, Members: deps.Members, plans: repo.NewPlans(deps.DB), paymentAllowed: deps.PaymentAllowed, groupExists: deps.GroupExists, invalidatePlan: deps.InvalidatePlan}
+	return &Service{Payments: deps.Payments, Quota: deps.Quota, Members: deps.Members, plans: repo.NewPlans(deps.DB), paymentAllowed: deps.PaymentAllowed, groupExists: deps.GroupExists, invalidatePlan: deps.InvalidatePlan}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

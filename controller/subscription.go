@@ -14,10 +14,6 @@ type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
 
-type SubscriptionBalancePayRequest struct {
-	PlanId int `json:"plan_id"`
-}
-
 // ---- User APIs ----
 
 func GetSubscriptionSelf(c *gin.Context) {
@@ -65,25 +61,6 @@ func UpdateSubscriptionPreference(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{"billing_preference": pref})
-}
-
-func SubscriptionRequestBalancePay(c *gin.Context) {
-	if !requirePaymentCompliance(c) {
-		return
-	}
-
-	userId := c.GetInt("id")
-	var req SubscriptionBalancePayRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
-		common.ApiErrorMsg(c, "参数错误")
-		return
-	}
-
-	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	common.ApiSuccess(c, nil)
 }
 
 func RecordSubscriptionResetUserLogs(c *gin.Context, result *model.SubscriptionResetResult) {

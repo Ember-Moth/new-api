@@ -26,3 +26,7 @@ type AdminResetSubscriptionRequest struct {
 	PlanId           int   `json:"plan_id"`
 	AdvanceResetTime *bool `json:"advance_reset_time"`
 }
+
+type SubscriptionBalancePayRequest struct {
+	PlanId int `json:"plan_id"`
+}

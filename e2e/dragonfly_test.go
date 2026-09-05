@@ -438,7 +438,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.True(t, reserved)
 		plan := model.SubscriptionPlan{Title: "Dragonfly subscription", Enabled: true, DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, TotalAmount: 100, UpgradeGroup: "pro", DowngradeGroup: "default"}
 		require.NoError(t, database.Create(&plan).Error)
-		_, err = model.AdminBindSubscription(user.Id, plan.Id, "")
+		_, err = model.SubscriptionMemberships().AdminBindSubscription(t.Context(), user.Id, plan.Id, "")
 		require.NoError(t, err)
 		cached, err := model.GetUserCache(user.Id)
 		require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		active, err := model.GetAllActiveUserSubscriptions(user.Id)
 		require.NoError(t, err)
 		require.Len(t, active, 1)
-		_, err = model.AdminInvalidateUserSubscription(active[0].Subscription.Id)
+		_, err = model.SubscriptionMemberships().AdminInvalidateUserSubscription(t.Context(), active[0].Subscription.Id)
 		require.NoError(t, err)
 		cached, err = model.GetUserCache(user.Id)
 		require.NoError(t, err)
@@ -500,6 +500,37 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		info, err = catalog.PlanInfo(t.Context(), sub.Id)
 		require.NoError(t, err)
 		assert.Equal(t, "committed title", info.PlanTitle)
+	})
+
+	t.Run("subscription balance purchase preserves other cached reservations", func(t *testing.T) {
+		previousUnit := common.QuotaPerUnit
+		common.QuotaPerUnit = 10
+		t.Cleanup(func() { common.QuotaPerUnit = previousUnit })
+		require.NoError(t, schema.UpPostgres(pool, schema.Logs))
+		user := model.User{Username: "dragonfly-subpay", AffCode: "dragonfly-subpay", Quota: 50, Group: "default", AuthVersion: 1}
+		require.NoError(t, database.Create(&user).Error)
+		_, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		reserved, err := model.TryReserveUserQuota(user.Id, 2)
+		require.NoError(t, err)
+		require.True(t, reserved)
+		plan := model.SubscriptionPlan{Title: "Balance plan", Enabled: true, PriceAmount: 1.25, DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, MaxPurchasePerUser: 1, UpgradeGroup: "pro"}
+		require.NoError(t, database.Create(&plan).Error)
+		require.NoError(t, model.SubscriptionPayments().PurchaseWithBalance(t.Context(), user.Id, plan.Id))
+		require.NoError(t, database.First(&user, user.Id).Error)
+		assert.Equal(t, 35, user.Quota)
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 35, cached.Quota)
+		assert.Equal(t, "pro", cached.Group)
+		assert.EqualValues(t, 1, cached.AuthVersion)
+		require.Error(t, model.SubscriptionPayments().PurchaseWithBalance(t.Context(), user.Id, plan.Id))
+		cached, err = model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 35, cached.Quota)
+		var count int64
+		require.NoError(t, database.Model(&model.SubscriptionOrder{}).Where("user_id = ?", user.Id).Count(&count).Error)
+		assert.EqualValues(t, 1, count)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

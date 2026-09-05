@@ -141,6 +141,7 @@ func Run(assets router.WebAssets) {
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	subscriptionService := subscription.New(subscription.Dependencies{
+		Payments:       model.SubscriptionPayments(),
 		Members:        model.SubscriptionMemberships(),
 		Quota:          model.SubscriptionQuota(),
 		DB:             model.DB,

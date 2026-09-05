@@ -1,10 +1,13 @@
 package model
 
 import (
+	"context"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/subscription/catalog"
+	"github.com/QuantumNous/new-api/internal/module/subscription/payments"
 	"github.com/QuantumNous/new-api/internal/module/subscription/quota"
 	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
@@ -38,4 +41,19 @@ func SubscriptionQuota() *quota.Store {
 	store := quota.New(DB, SubscriptionCatalog())
 	actual, _ := subscriptionQuotaStores.LoadOrStore(key, store)
 	return actual.(*quota.Store)
+}
+
+var subscriptionPaymentStores sync.Map
+
+func SubscriptionPayments() *payments.Store {
+	key := subscriptionRuntimeKey{db: DB, redis: common.RDB}
+	if value, ok := subscriptionPaymentStores.Load(key); ok {
+		return value.(*payments.Store)
+	}
+	ledger := billing.New(billing.Dependencies{DB: DB})
+	store := payments.New(payments.Dependencies{DB: DB, Catalog: SubscriptionCatalog(), Members: SubscriptionMemberships(), Billing: ledger, QuotaPerUnit: func() float64 { return common.QuotaPerUnit }, AfterDebit: func(id, amount int) error { return cacheDecrUserQuota(id, int64(amount)) }, Log: func(ctx context.Context, id int, message string) {
+		LogService().RecordLog(ctx, id, LogTypeTopup, message)
+	}})
+	actual, _ := subscriptionPaymentStores.LoadOrStore(key, store)
+	return actual.(*payments.Store)
 }
