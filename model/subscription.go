@@ -570,10 +570,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
-	refCol := "`trade_no`"
-	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
-		refCol = `"trade_no"`
-	}
+	refCol := `"trade_no"`
 	var logUserId int
 	var logPlanTitle string
 	var logMoney float64
@@ -686,10 +683,7 @@ func ExpireSubscriptionOrder(tradeNo string, expectedPaymentProvider string) err
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
-	refCol := "`trade_no`"
-	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
-		refCol = `"trade_no"`
-	}
+	refCol := `"trade_no"`
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {

@@ -7,8 +7,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 	"github.com/QuantumNous/new-api/common"
-	"github.com/glebarez/sqlite"
-	"github.com/go-sql-driver/mysql"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,12 +22,6 @@ func TestSanitizeDBErrorStripsDriverMessage(t *testing.T) {
 		want   string
 		leaked string
 	}{
-		{
-			name:   "mysql duplicate entry",
-			err:    &mysql.MySQLError{Number: 1062, Message: "Duplicate entry 'secret-value' for key 'users.idx'"},
-			want:   "mysql error 1062",
-			leaked: "secret-value",
-		},
 		{
 			name:   "postgres unique violation",
 			err:    &pgconn.PgError{Code: "23505", Message: "duplicate key value", Detail: "Key (k)=(secret-value) already exists."},
@@ -49,8 +42,8 @@ func TestSanitizeDBErrorStripsDriverMessage(t *testing.T) {
 		},
 		{
 			name:   "wrapped driver error",
-			err:    fmt.Errorf("exec failed: %w", &mysql.MySQLError{Number: 1064, Message: "syntax error near 'secret-value'"}),
-			want:   "mysql error 1064",
+			err:    fmt.Errorf("exec failed: %w", &pgconn.PgError{Code: "42601", Message: "syntax error near 'secret-value'"}),
+			want:   "postgres error SQLSTATE 42601",
 			leaked: "secret-value",
 		},
 	}
@@ -64,19 +57,19 @@ func TestSanitizeDBErrorStripsDriverMessage(t *testing.T) {
 	}
 }
 
-func TestSanitizeDBErrorSQLiteDriver(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+func TestSanitizeDBErrorPostgreSQLDriver(t *testing.T) {
+	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	execErr := db.Exec("INSERT INTO missing_table (k) VALUES (?)", "secret-value").Error
 	require.Error(t, execErr)
 
 	got := sanitizeDBError(execErr)
-	assert.Regexp(t, `^sqlite error \d+$`, got.Error())
+	assert.Regexp(t, `^postgres error SQLSTATE 42P01$`, got.Error())
 	assert.NotContains(t, got.Error(), "secret-value")
 }
 
 func TestSanitizeDBErrorKeepsNonDriverErrors(t *testing.T) {
-	err := fmt.Errorf("dial tcp 127.0.0.1:3306: connect: connection refused")
+	err := fmt.Errorf("dial tcp 127.0.0.1:5432: connect: connection refused")
 	assert.Equal(t, err, sanitizeDBError(err))
 }
 
@@ -88,7 +81,7 @@ func TestGormLoggerEndToEndSanitizedOutput(t *testing.T) {
 
 	execQuery := func() string {
 		var buf bytes.Buffer
-		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: newGormLogger(&buf)})
+		db, err := testdb.Open(t, &gorm.Config{Logger: newGormLogger(&buf)})
 		require.NoError(t, err)
 		db.Exec("SELECT * FROM missing_table WHERE k = ?", "secret-value")
 		return buf.String()
@@ -96,13 +89,13 @@ func TestGormLoggerEndToEndSanitizedOutput(t *testing.T) {
 
 	common.DebugEnabled = false
 	out := execQuery()
-	assert.Contains(t, out, "k = ?")
+	assert.Contains(t, out, "k = $1")
 	assert.NotContains(t, out, "secret-value")
-	assert.Contains(t, out, "sqlite error")
+	assert.Contains(t, out, "postgres error")
 	assert.Contains(t, out, "gorm_logger_test.go")
 
 	common.DebugEnabled = true
 	debugOut := execQuery()
 	assert.Contains(t, debugOut, "secret-value")
-	assert.Contains(t, debugOut, "no such table")
+	assert.Contains(t, debugOut, "does not exist")
 }

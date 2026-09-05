@@ -12,8 +12,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -27,7 +27,7 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	previousLogDatabaseType := common.LogDatabaseType()
 	previousErrorLogEnabled := constant.ErrorLogEnabled
 
-	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
@@ -35,7 +35,7 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Log{}))
 	model.DB, model.LOG_DB = database, database
 	common.RedisEnabled = false
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
 	constant.ErrorLogEnabled = true
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB

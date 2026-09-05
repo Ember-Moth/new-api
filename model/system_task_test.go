@@ -352,16 +352,13 @@ func TestSystemTaskUpdatesRequireUnexpiredLock(t *testing.T) {
 }
 
 func TestUpdateSystemTaskStateIdenticalPayloadDoesNotLoseLock(t *testing.T) {
-	// SQLite reports matched rows for unchanged UPDATEs, so this case passed
-	// even before the fix. The MySQL regression is covered by
-	// TestUpdateSystemTaskStateIdenticalPayloadDoesNotLoseLockConfiguredDatabases.
 	truncateTables(t)
 	runUpdateSystemTaskStateIdenticalPayloadKeepsLock(t, SystemTaskTypeLogCleanup)
 }
 
 func runUpdateSystemTaskStateIdenticalPayloadKeepsLock(t *testing.T, taskType string) {
 	t.Helper()
-	// Two persists in the same second so MySQL's unchanged-row UPDATE returns 0.
+	// Repeating an identical state must preserve the active lease.
 
 	task, err := CreateSystemTask(taskType, nil, nil)
 	require.NoError(t, err)

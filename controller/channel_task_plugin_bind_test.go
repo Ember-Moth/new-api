@@ -9,11 +9,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -26,7 +26,7 @@ func setupTaskPluginBindChannelTest(t *testing.T) {
 	previousRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
 	originalDB, originalLogDB := model.DB, model.LOG_DB
-	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	sqlDB, err := database.DB()
 	require.NoError(t, err)

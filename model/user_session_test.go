@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -86,7 +87,7 @@ func newTestUserSession(sid string, userID int, now int64) *UserSession {
 		Version:         1,
 		UserAuthVersion: 1,
 		Status:          UserSessionStatusActive,
-		RefreshHash:     fmt.Sprintf("current-%s", sid),
+		RefreshHash:     fmt.Sprintf("%x", sha256.Sum256([]byte(sid))),
 		LoginMethod:     "password",
 		IP:              "127.0.0.1",
 		UserAgent:       "model-test",
@@ -250,21 +251,21 @@ func TestRotateUserSessionRefreshRaceAndReuse(t *testing.T) {
 	session := newTestUserSession("rotate-session", 1002, now)
 	require.NoError(t, CreateUserSession(session))
 
-	rotated, err := RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "next-hash", now+10, 30*time.Second)
+	rotated, err := RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", now+10, 30*time.Second)
 	require.NoError(t, err)
-	assert.Equal(t, "next-hash", rotated.RefreshHash)
+	assert.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", rotated.RefreshHash)
 	assert.Equal(t, session.RefreshHash, rotated.PreviousRefreshHash)
 	assert.Equal(t, now+40, rotated.PreviousValidUntil)
 
-	_, err = RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "unused-hash", now+20, 30*time.Second)
+	_, err = RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+20, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshRace)
-	_, err = RotateUserSessionRefresh(1002, session.SID, "unknown-hash", "unused-hash", now+20, 30*time.Second)
+	_, err = RotateUserSessionRefresh(1002, session.SID, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+20, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshInvalid)
 	stored, getErr := GetUserSessionBySID(session.SID)
 	require.NoError(t, getErr)
 	assert.Equal(t, UserSessionStatusActive, stored.Status)
 
-	_, err = RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "unused-hash", now+41, 30*time.Second)
+	_, err = RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", now+41, 30*time.Second)
 	assert.ErrorIs(t, err, ErrUserSessionRefreshReuse)
 	stored, getErr = GetUserSessionBySID(session.SID)
 	require.NoError(t, getErr)
@@ -375,7 +376,7 @@ func TestRevokeUserSessionByRefreshHashRequiresSecret(t *testing.T) {
 	session := newTestUserSession("refresh-logout-session", 1005, now)
 	require.NoError(t, CreateUserSession(session))
 
-	revoked, err := RevokeUserSessionByRefreshHash(session.SID, "wrong-hash", "logout")
+	revoked, err := RevokeUserSessionByRefreshHash(session.SID, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "logout")
 	require.NoError(t, err)
 	assert.False(t, revoked)
 	active, err := GetUserSessionCached(session.SID)

@@ -129,23 +129,26 @@ docker-compose up -d
 # Tirer la dernière image
 docker pull calciumion/new-api:latest
 
-# Utilisation de SQLite (par défaut)
+# Utilisation de PostgreSQL (SQL_DSN obligatoire)
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# Utilisation de MySQL
+# Utilisation de PostgreSQL avec une base de journaux séparée
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
 > **💡 Astuce:** `-v ./data:/data` sauvegardera les données dans le dossier `data` du répertoire actuel, vous pouvez également le changer en chemin absolu comme `-v /your/custom/path:/data`
+> Fichiers locaux uniquement ; sauvegardez PostgreSQL séparément.
 
 </details>
 
@@ -302,8 +305,7 @@ docker run --name new-api -d --restart always \
 
 | Composant | Exigence |
 |------|------|
-| **Base de données locale** | SQLite (Docker doit monter le répertoire `/data`)|
-| **Base de données distante | MySQL ≥ 5.7.8 ou PostgreSQL ≥ 9.6 |
+| **Base de données** | PostgreSQL ≥ 9.6 |
 | **Moteur de conteneur** | Docker / Docker Compose |
 | **Architecture système** | 64 bits uniquement (amd64 / arm64) ; les systèmes 32 bits ne sont pas pris en charge |
 
@@ -365,20 +367,22 @@ docker-compose up -d
 <details>
 <summary><strong>Méthode 2: Commandes Docker</strong></summary>
 
-**Utilisation de SQLite:**
+**Utilisation de PostgreSQL (SQL_DSN obligatoire):**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**Utilisation de MySQL:**
+**Utilisation de PostgreSQL avec une base de journaux séparée:**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -386,6 +390,7 @@ docker run --name new-api -d --restart always \
 
 > **💡 Explication du chemin:**
 > - `./data:/data` - Chemin relatif, données sauvegardées dans le dossier data du répertoire actuel
+> Fichiers locaux uniquement ; sauvegardez PostgreSQL séparément.
 > - Vous pouvez également utiliser un chemin absolu, par exemple : `/your/custom/path:/data`
 
 </details>

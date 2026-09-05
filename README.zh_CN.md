@@ -129,23 +129,26 @@ docker-compose up -d
 # 拉取最新镜像
 docker pull calciumion/new-api:latest
 
-# 使用 SQLite（默认）
+# 使用 PostgreSQL（必须配置 SQL_DSN）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# 使用 MySQL
+# 使用 PostgreSQL 并配置独立日志库
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
 > **💡 提示：** `-v ./data:/data` 会将数据保存在当前目录的 `data` 文件夹中，你也可以改为绝对路径如 `-v /your/custom/path:/data`
+> 这里只保存本地文件；PostgreSQL 数据库需要单独备份。
 
 </details>
 
@@ -302,8 +305,7 @@ docker run --name new-api -d --restart always \
 
 | 组件 | 要求 |
 |------|------|
-| **本地数据库** | SQLite（Docker 需挂载 `/data` 目录）|
-| **远程数据库** | MySQL ≥ 5.7.8 或 PostgreSQL ≥ 9.6 |
+| **数据库** | PostgreSQL ≥ 9.6 |
 | **容器引擎** | Docker / Docker Compose |
 | **系统架构** | 仅支持 64 位系统（amd64 / arm64），不支持 32 位系统 |
 
@@ -365,20 +367,22 @@ docker-compose up -d
 <details>
 <summary><strong>方式 2：Docker 命令</strong></summary>
 
-**使用 SQLite：**
+**使用 PostgreSQL（必须配置 SQL_DSN）：**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**使用 MySQL：**
+**使用 PostgreSQL 并配置独立日志库：**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -386,6 +390,7 @@ docker run --name new-api -d --restart always \
 
 > **💡 路径说明：**
 > - `./data:/data` - 相对路径，数据保存在当前目录的 data 文件夹
+> 这里只保存本地文件；PostgreSQL 数据库需要单独备份。
 > - 也可使用绝对路径，如：`/your/custom/path:/data`
 
 </details>

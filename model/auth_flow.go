@@ -120,7 +120,7 @@ func CreateAuthFlow(input AuthFlowCreate) (string, *AuthFlow, error) {
 
 // ClaimExternalAuthAssertion records a signed provider assertion as consumed.
 // The assertion is HMACed before storage and the unique token_hash index makes
-// replay rejection atomic on SQLite, MySQL and PostgreSQL.
+// replay rejection atomic in PostgreSQL.
 func ClaimExternalAuthAssertion(purpose, assertion string, expiresAt time.Time) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		return ClaimExternalAuthAssertionWithTx(tx, purpose, assertion, expiresAt)

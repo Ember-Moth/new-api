@@ -143,10 +143,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 	}
 	redemption := &Redemption{}
 
-	keyCol := "`key`"
-	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
-		keyCol = `"key"`
-	}
+	keyCol := `"key"`
 	common.RandomSleep()
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
@@ -161,7 +158,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		}
 		// Compare-and-swap on status: only the transaction that flips
 		// enabled -> used may credit quota, so a concurrent redeem of the
-		// same code loses here even without a row lock (e.g. on SQLite).
+		// same code cannot consume it more than once.
 		result := tx.Model(&Redemption{}).
 			Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
 			Updates(map[string]interface{}{

@@ -58,7 +58,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 		AffQuota:        800,
 		AffHistoryQuota: 1200,
 	}
-	user.SetAccessToken("old-token")
+	user.SetAccessToken("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	require.NoError(t, DB.Create(&user).Error)
 
 	staleUser, err := GetUserById(user.Id, true)
@@ -71,7 +71,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 		"aff_count":     gorm.Expr("aff_count + ?", 1),
 		"aff_quota":     gorm.Expr("aff_quota - ?", 500),
 		"aff_history":   gorm.Expr("aff_history + ?", 500),
-		"access_token":  "rotated-token",
+		"access_token":  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}).Error)
 
 	staleUser.DisplayName = "after"
@@ -86,7 +86,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 	assert.Equal(t, 3, got.AffCount)
 	assert.Equal(t, 300, got.AffQuota)
 	assert.Equal(t, 1700, got.AffHistoryQuota)
-	assert.Equal(t, "rotated-token", got.GetAccessToken())
+	assert.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", got.GetAccessToken())
 }
 
 func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
@@ -165,11 +165,11 @@ func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 		"display_name": "concurrent-update",
 	}).Error)
 
-	require.NoError(t, UpdateUserAccessToken(user.Id, "rotated-token"))
+	require.NoError(t, UpdateUserAccessToken(user.Id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
 
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)
-	assert.Equal(t, "rotated-token", got.GetAccessToken())
+	assert.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", got.GetAccessToken())
 	assert.Equal(t, "concurrent-update", got.DisplayName)
 	assert.Equal(t, 1500, got.Quota)
 	assert.Equal(t, 300, got.AffQuota)
@@ -185,16 +185,16 @@ func TestUpdateUserAccessTokenRejectsSoftDeletedUser(t *testing.T) {
 		Password: "password",
 		Status:   common.UserStatusEnabled,
 	}
-	user.SetAccessToken("old-token")
+	user.SetAccessToken("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	require.NoError(t, DB.Create(&user).Error)
 	require.NoError(t, DB.Delete(&user).Error)
 
-	err := UpdateUserAccessToken(user.Id, "orphaned-token")
+	err := UpdateUserAccessToken(user.Id, "cccccccccccccccccccccccccccccccc")
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	var got User
 	require.NoError(t, DB.Unscoped().First(&got, user.Id).Error)
-	assert.Equal(t, "old-token", got.GetAccessToken())
+	assert.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", got.GetAccessToken())
 }
 
 func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {

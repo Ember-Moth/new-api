@@ -35,20 +35,12 @@ const USAGE_MODE_LABEL_KEYS: Record<SetupFormValues['usageMode'], string> = {
   demo: 'Demo site mode',
 }
 
-const DATABASE_VARIANT: Record<
-  string,
-  'info' | 'success' | 'warning' | 'neutral'
-> = {
-  sqlite: 'warning',
-  mysql: 'success',
-  postgres: 'success',
-}
-
 export function CompleteStep({ status, values }: CompleteStepProps) {
   const { t } = useTranslation()
   const usageLabelKey = USAGE_MODE_LABEL_KEYS[values.usageMode]
-  const dbType = status?.database_type ?? 'Unknown'
-  const databaseVariant = DATABASE_VARIANT[dbType.toLowerCase()] ?? 'neutral'
+  const isPostgreSQL = status?.database_type?.toLowerCase() === 'postgres'
+  const dbType = isPostgreSQL ? 'PostgreSQL' : t('Unknown')
+  const databaseVariant = isPostgreSQL ? 'success' : 'neutral'
 
   return (
     <div className='flex flex-col items-center gap-6 text-center'>

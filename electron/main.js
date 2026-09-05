@@ -261,16 +261,15 @@ function startServer() {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    env.SQLITE_PATH = path.join(dataDir, 'new-api.db');
-    
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('📁 您的数据存储位置：');
     console.log('   ' + dataDir);
-    console.log('   💡 备份提示：复制此目录即可备份所有数据');
+    console.log('   数据库使用 PostgreSQL，请单独备份数据库。');
+    console.log('   在此目录的 .env 文件中配置 SQL_DSN，或通过环境变量传入。');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     const binaryPath = getBinaryPath();
-    const workingDir = process.resourcesPath;
+    const workingDir = dataDir;
     
     console.log('Starting server from:', binaryPath);
 

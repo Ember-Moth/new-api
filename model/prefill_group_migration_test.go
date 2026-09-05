@@ -2,70 +2,20 @@ package model
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-func testPrefillGroupMigrationNonPostgreSQL(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	tableName := fmt.Sprintf("prefill_group_migration_%d", time.Now().UnixNano())
-	t.Cleanup(func() { _ = db.Migrator().DropTable(tableName) })
-
-	tableDB := db.Table(tableName)
-	require.NoError(t, tableDB.AutoMigrate(&PrefillGroup{}))
-	require.NoError(t, tableDB.Create(&PrefillGroup{
-		Name:        "preserved-name",
-		Type:        "model",
-		Items:       JSONValue(`["gpt-test"]`),
-		Description: "preserve me",
-	}).Error)
-
-	for range 2 {
-		require.NoError(t, migratePrefillGroupUniqueness(db))
-		require.NoError(t, tableDB.AutoMigrate(&PrefillGroup{}))
-	}
-
-	var preserved PrefillGroup
-	require.NoError(t, tableDB.Where("name = ?", "preserved-name").First(&preserved).Error)
-	assert.Equal(t, "preserve me", preserved.Description)
-	assert.True(t, tableDB.Migrator().HasIndex(&PrefillGroup{}, prefillGroupNameIndex))
-}
-
-func TestMigratePrefillGroupUniquenessSQLite(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	testPrefillGroupMigrationNonPostgreSQL(t, db)
-}
-
-func TestMigratePrefillGroupUniquenessMySQL(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("TEST_MYSQL_DSN"))
-	if dsn == "" {
-		t.Skip("TEST_MYSQL_DSN is not configured")
-	}
-
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	require.NoError(t, err)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
-	testPrefillGroupMigrationNonPostgreSQL(t, db)
-}
-
 func TestMigratePrefillGroupUniquenessPostgreSQL(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not configured")
-	}
+	dsn := testdb.DSN(t)
 
 	db, err := gorm.Open(postgres.New(postgres.Config{
 		DSN:                  dsn,

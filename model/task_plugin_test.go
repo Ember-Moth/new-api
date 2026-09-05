@@ -3,11 +3,10 @@ package model
 import (
 	"testing"
 
-	"github.com/glebarez/sqlite"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"gorm.io/gorm/utils/tests"
 )
 
 func setupTaskPluginModelTest(t *testing.T) {
@@ -15,7 +14,7 @@ func setupTaskPluginModelTest(t *testing.T) {
 	originalDB := DB
 	t.Cleanup(func() { DB = originalDB })
 	var err error
-	DB, err = gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	DB, err = testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, DB.AutoMigrate(&TaskPlugin{}))
 }
@@ -142,8 +141,8 @@ func TestTaskPluginSyncSnapshotRevisionTracksDesiredRuntimeState(t *testing.T) {
 	assert.NotEqual(t, v2Snapshot.Revision, disabled.Revision)
 }
 
-func TestTaskPluginOrderSQLQuotesMySQLKeyColumn(t *testing.T) {
-	db, err := gorm.Open(tests.DummyDialector{}, &gorm.Config{DryRun: true})
+func TestTaskPluginOrderSQLQuotesKeyColumn(t *testing.T) {
+	db, err := testdb.Open(t, &gorm.Config{DryRun: true})
 	require.NoError(t, err)
 
 	var sqls []string
@@ -162,7 +161,7 @@ func TestTaskPluginOrderSQLQuotesMySQLKeyColumn(t *testing.T) {
 
 	require.Len(t, sqls, 2)
 	for _, sql := range sqls {
-		assert.Contains(t, sql, "`key`")
+		assert.Contains(t, sql, `"key"`)
 		assert.NotRegexp(t, `(?i)ORDER BY[[:space:]]+key([[:space:],]|$)`, sql)
 	}
 }

@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,11 +27,11 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	previousType := common.MainDatabaseType()
 	previousRedis := common.RedisEnabled
 	previousSecret := common.SessionSecret
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
 	model.DB = db
-	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false
 	common.SessionSecret = "middleware-auth-test-secret"
 	t.Cleanup(func() {
@@ -78,7 +78,7 @@ func createMiddlewarePATUser(t *testing.T, username, token string) *model.User {
 	user := &model.User{
 		Username: username, Password: "password-placeholder", Role: common.RoleCommonUser,
 		Status: common.UserStatusEnabled, Group: "default", AccessToken: &token, AuthVersion: 1,
-		AffCode: "middleware-aff-" + username,
+		AffCode: username,
 	}
 	require.NoError(t, model.DB.Create(user).Error)
 	return user
@@ -111,7 +111,12 @@ func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {
 	token, _, err := service.IssueAccessToken(identity)
 	require.NoError(t, err)
 	tampered := tamperDashboardToken(token)
-	createMiddlewarePATUser(t, "jwt-fallback-user", tampered)
+	// A dashboard JWT cannot fit in the fixed-length PAT column. Reject it
+	// before any database lookup, including a PAT fallback.
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register("test:reject_jwt_database_lookup", func(tx *gorm.DB) {
+		t.Error("invalid internal JWT must not query the PAT or session database")
+	}))
+	t.Cleanup(func() { model.DB.Callback().Query().Remove("test:reject_jwt_database_lookup") })
 	router := gin.New()
 	router.GET("/protected", UserAuth(), func(c *gin.Context) {
 		c.Status(http.StatusNoContent)

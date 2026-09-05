@@ -10,7 +10,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 - **Backend**: Go 1.22+, Gin web framework, GORM v2 ORM
 - **Frontend**: React 19, TypeScript, Rsbuild, Base UI, Tailwind CSS
-- **Databases**: SQLite, MySQL, PostgreSQL (all three must be supported)
+- **Databases**: PostgreSQL for the primary database; PostgreSQL or ClickHouse for logs
 - **Cache**: Redis (go-redis) + in-memory cache
 - **Auth**: JWT, WebAuthn/Passkeys, OAuth (GitHub, Discord, OIDC, etc.)
 - **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
@@ -79,24 +79,17 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 
 Do NOT directly import or call `encoding/json` in business code. `json.RawMessage`, `json.Number`, and other type definitions from `encoding/json` may still be referenced as types, but actual marshal/unmarshal calls must go through `common.*`.
 
-**Database compatibility:** All database code MUST work with SQLite, MySQL >= 5.7.8, and PostgreSQL >= 9.6 simultaneously.
+**Database support:** The primary database is PostgreSQL >= 9.6. Logs use the primary database by default, or a separately configured PostgreSQL or ClickHouse database. `SQL_DSN` is required and must be a `postgres://` or `postgresql://` URL. Do not add fallback database engines.
 
-- Any change that can affect database behavior MUST be verified before the work is considered complete. This includes ORM/database-driver dependency changes, connection/DSN/protocol or prepared-statement configuration, models and GORM tags, migrations and `AutoMigrate`, constraints and indexes, `Scanner`/`Valuer`/serializer behavior, raw SQL, transactions, and row locking.
-- Required database verification MUST exercise real SQLite, MySQL, and PostgreSQL instances. Unit tests, mocks, a successful build, code inspection, or testing only one dialect are not substitutes. Use at least one supported version of each engine; changes that depend on version-specific behavior must also cover the minimum supported version.
-- Treat GORM core and its database dialect/driver packages as a compatible version set. Any change to one of them requires checking upstream compatibility and running the complete three-database verification matrix; do not upgrade only the core package and infer that existing drivers remain compatible.
-- Schema or migration changes MUST be tested both on a fresh database and by upgrading a representative database created by the latest released version. Run startup/migration at least twice to prove idempotency, and verify that existing data, indexes, constraints, and uniqueness guarantees are preserved. Cover the separately configured log database when the affected path is shared with or used by it.
-- Record the exact database versions, commands, and results in the final handoff or pull request. If any required database verification cannot be run, report the blocker explicitly and do not claim the change is database-compatible or complete.
-- Prefer GORM methods (`Create`, `Find`, `Where`, `Updates`, etc.) over raw SQL.
-- Let GORM handle primary key generation; do not use `AUTO_INCREMENT` or `SERIAL` directly.
-- Standard `SELECT ... FOR UPDATE` row locks built with GORM query methods in `model/` MUST use `lockForUpdate(tx)`. Do not use the legacy GORM v1 pattern `tx.Set("gorm:query_option", "FOR UPDATE")`, because GORM v2 silently ignores it and no lock is acquired. Do not duplicate `clause.Locking{Strength: "UPDATE"}` at call sites; the shared helper emits `FOR UPDATE` for MySQL/PostgreSQL and skips it for SQLite, where the syntax is unsupported. Dialect-specific locking with different semantics (for example, a MySQL next-key/gap lock) may use raw SQL only behind explicit database-type branches with valid fallbacks for every supported database.
-- When raw SQL is unavoidable, account for dialect differences:
-  - PostgreSQL uses `"column"` quoting, while MySQL/SQLite use `` `column` ``.
-  - Use `commonGroupCol`, `commonKeyCol` from `model/main.go` for reserved-word columns like `group` and `key`.
-  - Use `commonTrueVal`/`commonFalseVal` for boolean values.
-  - Use `common.UsingMainDatabase(...)` for primary database branches and `common.UsingLogDatabase(...)` for log database branches.
-- Do not use database-specific features without cross-DB fallback, including MySQL-only functions, PostgreSQL-only operators, SQLite-unsupported `ALTER COLUMN`, or database-specific JSON column types without a `TEXT` fallback.
-- Migrations must work on all three databases. For SQLite, use `ALTER TABLE ... ADD COLUMN` instead of `ALTER COLUMN` (see `model/main.go` for patterns).
-- Avoid GORM boolean default tags such as `gorm:"default:true"` when the default is a business rule already enforced by code. MySQL and PostgreSQL can normalize boolean defaults differently, causing GORM `AutoMigrate` to repeatedly issue `ALTER TABLE` on restart. Prefer setting these defaults in request/model normalization, hooks, constructors, or service logic; do not replace `default:true` with `default:1` unless the behavior is verified across SQLite, MySQL, and PostgreSQL.
+- Any change affecting database behavior MUST be verified against a real PostgreSQL instance, including drivers, connection settings, models, migrations, constraints, indexes, serialization, SQL, transactions, and row locking. Also exercise a real ClickHouse instance when the affected path supports ClickHouse logs. Unit tests and mocks are not substitutes.
+- Treat GORM core and its database drivers as a compatible version set. Check upstream compatibility when changing their versions.
+- Schema or migration changes MUST be tested on a fresh database and by upgrading a representative database from the latest available released version. Run startup/migration at least twice to prove idempotency, and verify existing data, indexes, constraints, and uniqueness guarantees. Cover separately configured log databases where applicable.
+- Record exact database versions, commands, and results in the final handoff or pull request. If required verification cannot run, report the blocker explicitly and do not claim database compatibility or completion.
+- Database tests require `TEST_POSTGRES_DSN` and use `internal/testdb` to isolate their data in disposable schemas. Never run destructive fixtures against shared application tables.
+- Prefer GORM methods over raw SQL, and let GORM generate primary keys.
+- Standard `SELECT ... FOR UPDATE` queries in `model/` MUST use `lockForUpdate(tx)`. Do not use the ignored GORM v1 `gorm:query_option` mechanism or duplicate the shared locking helper.
+- Primary database SQL uses PostgreSQL quoting. Use `commonGroupCol` and `commonKeyCol` for reserved columns. Keep PostgreSQL and ClickHouse log behavior separate through `common.UsingLogDatabase(...)`.
+- Avoid GORM boolean default tags when code already enforces the business default. Verify that migrations do not repeatedly alter defaults on restart.
 
 **Relay and provider behavior:**
 

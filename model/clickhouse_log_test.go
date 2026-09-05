@@ -63,7 +63,7 @@ func TestChooseDBRejectsClickHouseForMainDatabase(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, db)
 	assert.Equal(t, common.DatabaseType(""), dbType)
-	assert.Contains(t, err.Error(), "does not support ClickHouse")
+	assert.Contains(t, err.Error(), "ClickHouse is supported only through LOG_SQL_DSN")
 }
 
 func TestClickHouseLogTTLExpression(t *testing.T) {
@@ -106,7 +106,7 @@ func TestBuildLogLikeConditionUsesStandardEscape(t *testing.T) {
 	t.Cleanup(func() {
 		common.SetLogDatabaseType(originalLogDatabaseType)
 	})
-	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	common.SetLogDatabaseType(common.DatabaseTypePostgreSQL)
 
 	condition, pattern, err := buildLogLikeCondition("logs.model_name", "gpt_4%")
 

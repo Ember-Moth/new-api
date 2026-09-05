@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -111,12 +111,12 @@ func setupBillingAliasOptionDB(t *testing.T) {
 	previousCache := common.MemoryCacheEnabled
 	previousMap := common.OptionMap
 	previousRedis := common.RedisEnabled
-	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Option{}, &model.Log{}, &model.User{}))
 	model.DB = database
 	model.LOG_DB = database
-	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.MemoryCacheEnabled = false
 	common.RedisEnabled = false
 	common.OptionMap = map[string]string{}

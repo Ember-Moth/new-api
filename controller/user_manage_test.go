@@ -12,8 +12,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/authz"
 
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -25,10 +25,9 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	previousRedisEnabled := common.RedisEnabled
 	previousMainDatabaseType, previousLogDatabaseType := common.MainDatabaseType(), common.LogDatabaseType()
 	common.RedisEnabled = false
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
 
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	model.DB, model.LOG_DB = db, db
 	require.NoError(t, db.AutoMigrate(

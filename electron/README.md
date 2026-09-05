@@ -41,7 +41,7 @@ This will:
 - Use the Rsbuild frontend development server on port 5173
 - Open an Electron window with DevTools enabled
 - Create a system tray icon (menu bar on macOS)
-- Store database in `../data/new-api.db`
+- Connect to PostgreSQL using the backend's `SQL_DSN` configuration
 
 ## Building for Production
 
@@ -73,9 +73,18 @@ Default port is 3000. To change, edit `main.js`:
 const PORT = 3000; // Change to desired port
 ```
 
-### Database Location
-- **Development**: `../data/new-api.db` (project directory)
-- **Production**:
+### PostgreSQL configuration
+
+The Go backend requires PostgreSQL. Set `SQL_DSN` in the environment, or create a `.env` file in the application data directory before launching the packaged app:
+
+```dotenv
+SQL_DSN=postgresql://user:password@localhost:5432/new-api
+```
+
+The backend starts in that directory and reads its `.env` file. Optional `LOG_SQL_DSN` accepts PostgreSQL or ClickHouse; otherwise logs use the primary database. Back up PostgreSQL separately; copying this directory does not back up database records.
+
+- **Development**: configure the Go backend in the repository root, or use `make dev-api`.
+- **Application data directories**:
   - macOS: `~/Library/Application Support/New API/data/`
   - Windows: `%APPDATA%/New API/data/`
   - Linux: `~/.config/New API/data/`

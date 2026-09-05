@@ -129,23 +129,26 @@ docker-compose up -d
 # 最新のイメージをプル
 docker pull calciumion/new-api:latest
 
-# SQLiteを使用（デフォルト）
+# PostgreSQLを使用（SQL_DSNの設定が必要）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# MySQLを使用
+# PostgreSQLと専用ログデータベースを使用
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
 > **💡 ヒント:** `-v ./data:/data` は現在のディレクトリの `data` フォルダにデータを保存します。絶対パスに変更することもできます：`-v /your/custom/path:/data`
+> このディレクトリはローカルファイル用です。PostgreSQLは別途バックアップしてください。
 
 </details>
 
@@ -304,8 +307,7 @@ docker run --name new-api -d --restart always \
 
 | コンポーネント | 要件 |
 |------|------|
-| **ローカルデータベース** | SQLite（Dockerは `/data` ディレクトリをマウントする必要があります）|
-| **リモートデータベース** | MySQL ≥ 5.7.8 または PostgreSQL ≥ 9.6 |
+| **データベース** | PostgreSQL ≥ 9.6 |
 | **コンテナエンジン** | Docker / Docker Compose |
 | **システムアーキテクチャ** | 64ビットのみ対応（amd64 / arm64）。32ビットシステムは非対応 |
 
@@ -367,20 +369,22 @@ docker-compose up -d
 <details>
 <summary><strong>方法 2: Dockerコマンド</strong></summary>
 
-**SQLiteを使用:**
+**PostgreSQLを使用（SQL_DSNの設定が必要）:**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**MySQLを使用:**
+**PostgreSQLと専用ログデータベースを使用:**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -388,6 +392,7 @@ docker run --name new-api -d --restart always \
 
 > **💡 パス説明:**
 > - `./data:/data` - 相対パス、データは現在のディレクトリのdataフォルダに保存されます
+> このディレクトリはローカルファイル用です。PostgreSQLは別途バックアップしてください。
 > - 絶対パスを使用することもできます：`/your/custom/path:/data`
 
 </details>

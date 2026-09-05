@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -19,13 +20,12 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	previousDB := model.DB
 	previousDatabaseType := common.MainDatabaseType()
 	previousLogDatabaseType := common.LogDatabaseType()
-	previousSQLitePath := common.SQLitePath
+
 	previousMasterNode := common.IsMasterNode
 	previousRedisEnabled := common.RedisEnabled
-	common.SQLitePath = t.TempDir() + "/router-video.db"
 	common.IsMasterNode = false
 	common.RedisEnabled = false
-	t.Setenv("SQL_DSN", "")
+	t.Setenv("SQL_DSN", testdb.DSN(t))
 	require.NoError(t, model.InitDB())
 	database := model.DB
 	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Task{}))
@@ -35,7 +35,7 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 		require.NoError(t, sqlDB.Close())
 		model.DB = previousDB
 		common.SetDatabaseTypes(previousDatabaseType, previousLogDatabaseType)
-		common.SQLitePath = previousSQLitePath
+
 		common.IsMasterNode = previousMasterNode
 		common.RedisEnabled = previousRedisEnabled
 	})

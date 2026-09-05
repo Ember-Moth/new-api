@@ -130,23 +130,26 @@ docker-compose up -d
 # Pull the latest image
 docker pull calciumion/new-api:latest
 
-# Using SQLite (default)
+# Using PostgreSQL (SQL_DSN required)
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# Using MySQL
+# Using PostgreSQL with a separate log database
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
 > **💡 Tip:** `-v ./data:/data` will save data in the `data` folder of the current directory, you can also change it to an absolute path like `-v /your/custom/path:/data`
+> Local files only; back up PostgreSQL separately.
 
 </details>
 
@@ -301,8 +304,7 @@ docker run --name new-api -d --restart always \
 
 | Component | Requirement |
 |------|------|
-| **Local database** | SQLite (Docker must mount `/data` directory)|
-| **Remote database** | MySQL ≥ 5.7.8 or PostgreSQL ≥ 9.6 |
+| **Database** | PostgreSQL ≥ 9.6 |
 | **Container engine** | Docker / Docker Compose |
 | **System architecture** | 64-bit only (amd64 / arm64); 32-bit systems are not supported |
 
@@ -364,20 +366,22 @@ docker-compose up -d
 <details>
 <summary><strong>Method 2: Docker Commands</strong></summary>
 
-**Using SQLite:**
+**Using PostgreSQL (SQL_DSN required):**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**Using MySQL:**
+**Using PostgreSQL with a separate log database:**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -385,6 +389,7 @@ docker run --name new-api -d --restart always \
 
 > **💡 Path explanation:** 
 > - `./data:/data` - Relative path, data saved in the data folder of the current directory
+> Local files only; back up PostgreSQL separately.
 > - You can also use absolute path, e.g.: `/your/custom/path:/data`
 
 </details>

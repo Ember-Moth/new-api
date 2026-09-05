@@ -128,23 +128,26 @@ docker-compose up -d
 # 拉取最新鏡像
 docker pull calciumion/new-api:latest
 
-# 使用 SQLite（預設）
+# 使用 PostgreSQL（必須設定 SQL_DSN）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# 使用 MySQL
+# 使用 PostgreSQL 並設定獨立日誌庫
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
 > **💡 提示：** `-v ./data:/data` 會將數據保存在當前目錄的 `data` 資料夾中，你也可以改為絕對路徑如 `-v /your/custom/path:/data`
+> 此目錄僅儲存本機檔案；PostgreSQL 資料庫需要另外備份。
 
 </details>
 
@@ -301,8 +304,7 @@ docker run --name new-api -d --restart always \
 
 | 組件 | 要求 |
 |------|------|
-| **本地資料庫** | SQLite（Docker 需掛載 `/data` 目錄）|
-| **遠端資料庫** | MySQL ≥ 5.7.8 或 PostgreSQL ≥ 9.6 |
+| **資料庫** | PostgreSQL ≥ 9.6 |
 | **容器引擎** | Docker / Docker Compose |
 | **系統架構** | 僅支援 64 位元系統（amd64 / arm64），不支援 32 位元系統 |
 
@@ -364,20 +366,22 @@ docker-compose up -d
 <details>
 <summary><strong>方式 2：Docker 命令</strong></summary>
 
-**使用 SQLite：**
+**使用 PostgreSQL（必須設定 SQL_DSN）：**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**使用 MySQL：**
+**使用 PostgreSQL 並設定獨立日誌庫：**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -385,6 +389,7 @@ docker run --name new-api -d --restart always \
 
 > **💡 路徑說明：**
 > - `./data:/data` - 相對路徑，數據保存在當前目錄的 data 資料夾
+> 此目錄僅儲存本機檔案；PostgreSQL 資料庫需要另外備份。
 > - 也可使用絕對路徑，如：`/your/custom/path:/data`
 
 </details>
