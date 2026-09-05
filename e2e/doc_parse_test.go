@@ -73,7 +73,7 @@ func TestDocumentPluginRunsGenericBatchArtifactChain(t *testing.T) {
 	}))
 	defer upstream.Close()
 	setting := dto.ChannelSettings{TaskPluginKey: "doc-parse"}
-	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: "documents", Key: "unused", BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled, Models: "doc-parse-v1", Group: "default"}
+	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: "documents", Key: "unused", BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled, Models: model.StringList{"doc-parse-v1"}, Group: model.StringList{"default"}}
 	channel.SetSetting(setting)
 	require.NoError(t, database.Create(&channel).Error)
 

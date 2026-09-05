@@ -3622,7 +3622,7 @@
     "Plugin version deleted": "外掛版本已刪除",
     "Policy JSON": "政策 JSON",
     "Polling": "輪詢",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "輪詢模式需要 Redis 和記憶體緩存，否則效能將顯著下降",
+    "Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded": "輪詢模式需要 DragonflyDB 和記憶體快取，否則效能將顯著下降",
     "Poor": "差",
     "Port": "端口",
     "Port must be a positive integer": "端口必須為正整數",

@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,31 +43,11 @@ func TestMain(m *testing.M) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 
-	if err := db.AutoMigrate(
-		&Task{},
-		&User{},
-		&UserSession{},
-		&AuthFlow{},
-		&ExternalIdentityClaim{},
-		&Token{},
-		&PasskeyCredential{},
-		&TwoFA{},
-		&TwoFABackupCode{},
-		&Log{},
-		&Channel{},
-		&QuotaData{},
-		&Ability{},
-		&TopUp{},
-		&SubscriptionPlan{},
-		&SubscriptionOrder{},
-		&UserSubscription{},
-		&UserOAuthBinding{},
-		&PerfMetric{},
-		&SystemInstance{},
-		&SystemTask{},
-		&SystemTaskLock{},
-	); err != nil {
-		panic("failed to migrate: " + err.Error())
+	if err := schema.UpPostgres(sqlDB, schema.Main); err != nil {
+		panic(err)
+	}
+	if err := schema.UpPostgres(sqlDB, schema.Logs); err != nil {
+		panic(err)
 	}
 
 	code := m.Run()
@@ -80,6 +61,7 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
+		DB.Exec("DELETE FROM quota_batch_receipts")
 		DB.Exec("DELETE FROM tasks")
 		DB.Exec("DELETE FROM auth_flows")
 		DB.Exec("DELETE FROM external_identity_claims")

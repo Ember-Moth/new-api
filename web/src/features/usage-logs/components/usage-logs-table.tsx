@@ -1,3 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
+import type { ColumnDef } from '@tanstack/react-table'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,9 +19,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
-import { getRouteApi } from '@tanstack/react-router'
-import type { ColumnDef } from '@tanstack/react-table'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -38,9 +39,10 @@ import {
 } from '../constants'
 import { useColumnsByCategory } from '../lib/columns'
 import { parseLogOther } from '../lib/format'
-import { fetchLogsByCategory } from '../lib/utils'
+import { fetchLogsByCategory, getDefaultTimeRange } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
+import { LogCursorPagination } from './log-cursor-pagination'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useLogsViewScope, type LogsViewAccess } from './usage-logs-provider'
@@ -125,24 +127,59 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     ],
   })
 
+  const isCommon = logCategory === 'common'
+  const [defaultRange] = useState(getDefaultTimeRange)
+  const stableSearch = {
+    ...searchParams,
+    startTime: searchParams.startTime ?? defaultRange.start.getTime(),
+    endTime: searchParams.endTime ?? defaultRange.end.getTime(),
+  }
+  const filterSearch = Object.fromEntries(
+    Object.entries(stableSearch).filter(
+      ([key]) => key !== 'page' && key !== 'pageSize'
+    )
+  )
+  const cursorKey = JSON.stringify([
+    viewAccess,
+    pagination.pageSize,
+    columnFilters,
+    filterSearch,
+  ])
+  const [cursorState, setCursorState] = useState<{
+    key: string
+    values: string[]
+  }>({ key: '', values: [''] })
+  const cursors = cursorState.key === cursorKey ? cursorState.values : ['']
+  const pageIndex = isCommon
+    ? Math.min(pagination.pageIndex, cursors.length - 1)
+    : pagination.pageIndex
+  const cursor = isCommon ? cursors[pageIndex] : undefined
+  useEffect(() => {
+    if (isCommon && pagination.pageIndex !== pageIndex) {
+      onPaginationChange({ ...pagination, pageIndex })
+    }
+  }, [isCommon, pagination, pageIndex, onPaginationChange])
+
   const { data, isLoading, isFetching } = useQuery({
     queryKey: [
       'logs',
       logCategory,
       viewAccess,
-      pagination.pageIndex + 1,
+      pageIndex + 1,
       pagination.pageSize,
       columnFilters,
-      searchParams,
+      isCommon ? cursorKey : searchParams,
+      cursor,
       t,
     ],
     queryFn: async () => {
       const result = await fetchLogsByCategory({
         logCategory,
         isAdmin,
-        page: pagination.pageIndex + 1,
+        page: pageIndex + 1,
+        cursor,
         pageSize: pagination.pageSize,
-        searchParams,
+        searchParams: isCommon ? stableSearch : searchParams,
         columnFilters,
       })
 
@@ -176,21 +213,49 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       logCategory,
       viewAccess
     ),
-    pagination,
+    pagination: { ...pagination, pageIndex },
     enableRowSelection: false,
     onPaginationChange,
     onColumnFiltersChange,
     manualPagination: true,
     manualFiltering: true,
-    totalCount: data?.total || 0,
-    ensurePageInRange,
+    totalCount: isCommon ? undefined : data?.total || 0,
+    pageCount: isCommon ? -1 : undefined,
+    ensurePageInRange: isCommon ? undefined : ensurePageInRange,
   })
-
-  const isCommon = logCategory === 'common'
 
   return (
     <DataTablePage
       table={table}
+      showPagination={!isCommon}
+      afterTable={
+        isCommon ? (
+          <LogCursorPagination
+            pageIndex={pageIndex}
+            pageSize={pagination.pageSize}
+            hasMore={Boolean(data?.has_more)}
+            loading={isFetching}
+            onPrevious={() =>
+              onPaginationChange({
+                ...pagination,
+                pageIndex: Math.max(0, pageIndex - 1),
+              })
+            }
+            onNext={() => {
+              if (!data?.next_cursor) return
+              setCursorState({
+                key: cursorKey,
+                values: [...cursors.slice(0, pageIndex + 1), data.next_cursor],
+              })
+              onPaginationChange({ ...pagination, pageIndex: pageIndex + 1 })
+            }}
+            onPageSizeChange={(pageSize) => {
+              setCursorState({ key: '', values: [''] })
+              onPaginationChange({ pageIndex: 0, pageSize })
+            }}
+          />
+        ) : undefined
+      }
       columns={columns as ColumnDef<Record<string, unknown>>[]}
       isLoading={isLoadingData}
       isFetching={isFetching}

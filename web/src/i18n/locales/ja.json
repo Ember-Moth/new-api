@@ -3622,7 +3622,7 @@
     "Plugin version deleted": "プラグインバージョンを削除しました",
     "Policy JSON": "ポリシーJSON",
     "Polling": "ポーリング",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "ポーリングモードにはRedisとメモリキャッシュが必要です。そうでない場合、パフォーマンスが大幅に低下します",
+    "Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded": "ポーリングモードにはDragonflyDBとメモリキャッシュが必要です。そうでない場合、パフォーマンスが大幅に低下します",
     "Poor": "悪い",
     "Port": "ポート",
     "Port must be a positive integer": "ポートは正の整数でなければなりません",

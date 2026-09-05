@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"gorm.io/gorm"
 )
@@ -57,6 +58,7 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 type Log struct {
+	EventID           string `json:"-" gorm:"type:varchar(36);default:''"`
 	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
 	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
 	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
@@ -78,6 +80,17 @@ type Log struct {
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+}
+
+func (entry *Log) BeforeCreate(tx *gorm.DB) error {
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) && entry.EventID == "" {
+		id, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		entry.EventID = id.String()
+	}
+	return nil
 }
 
 // don't use iota, avoid change log type value
@@ -461,7 +474,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string, cursorPages ...*LogCursorPage) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -496,15 +509,18 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
-	err = tx.Model(&Log{}).Count(&total).Error
-	if err != nil {
-		return nil, 0, err
+	if len(cursorPages) > 0 && cursorPages[0] != nil {
+		logs, err = selectLogCursorPage(tx, num, cursorPages[0])
+	} else {
+		if err = tx.Model(&Log{}).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		order := "logs.created_at desc, logs.id desc"
+		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+			order = clickHouseLogOrder("logs.")
+		}
+		err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	}
-	order := "logs.created_at desc, logs.id desc"
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		order = clickHouseLogOrder("logs.")
-	}
-	err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -557,7 +573,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 
 const logSearchCountLimit = 10000
 
-func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string, cursorPages ...*LogCursorPage) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -586,19 +602,20 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
-	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
-	if err != nil {
-		common.SysError("failed to count user logs: " + err.Error())
-		return nil, 0, errors.New("查询日志失败")
+	if len(cursorPages) > 0 && cursorPages[0] != nil {
+		logs, err = selectLogCursorPage(tx, num, cursorPages[0])
+	} else {
+		if err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		order := "logs.id desc"
+		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+			order = clickHouseLogOrder("logs.")
+		}
+		err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	}
-	order := "logs.id desc"
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		order = clickHouseLogOrder("logs.")
-	}
-	err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	if err != nil {
-		common.SysError("failed to search user logs: " + err.Error())
-		return nil, 0, errors.New("查询日志失败")
+		return nil, 0, err
 	}
 
 	formatUserLogs(logs, startIdx)

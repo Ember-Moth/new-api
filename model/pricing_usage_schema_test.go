@@ -78,7 +78,7 @@ func TestPricingAliasCarriesPluginUsageSchemaAndTailExpr(t *testing.T) {
 		Key:          "key-910",
 		Status:       1,
 		Name:         "channel-910",
-		Models:       "alias-model,pricing-usage-model",
+		Models:       StringList{"alias-model", "pricing-usage-model"},
 		ModelMapping: &mapping,
 	}
 	require.NoError(t, DB.Create(channel).Error)
@@ -117,7 +117,7 @@ func TestPricingAliasCarriesPluginUsageSchemaAndTailExpr(t *testing.T) {
 		Key:          "key-911",
 		Status:       1,
 		Name:         "channel-911",
-		Models:       "alias-own-expr,pricing-usage-model",
+		Models:       StringList{"alias-own-expr", "pricing-usage-model"},
 		ModelMapping: &ownMapping,
 	}
 	require.NoError(t, DB.Create(own).Error)

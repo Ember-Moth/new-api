@@ -103,7 +103,7 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
       // Load tag models
       if (tagModelsData?.data) {
-        const models = tagModelsData.data.split(',').filter(Boolean)
+        const models = tagModelsData.data.filter(Boolean)
         setSelectedModels(models)
       } else {
         setSelectedModels([])
@@ -172,10 +172,10 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
     setIsSubmitting(true)
     try {
-      const params: Record<string, string | null> = { tag: currentTag }
+      const params: TagOperationParams = { tag: currentTag }
 
       if (newTag && newTag !== currentTag) {
-        params.new_tag = newTag || null
+        params.new_tag = newTag
       }
 
       if (modelMapping.trim()) {
@@ -183,16 +183,14 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
       }
 
       if (selectedModels.length > 0) {
-        params.models = selectedModels.join(',')
+        params.models = selectedModels
       }
 
       if (selectedGroups.length > 0) {
-        params.groups = selectedGroups.join(',')
+        params.groups = selectedGroups
       }
 
-      const response = await editTagChannels(
-        params as unknown as TagOperationParams
-      )
+      const response = await editTagChannels(params)
 
       if (response.success) {
         toast.success(t('Tag updated successfully'))
@@ -304,12 +302,10 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
                 <div className='flex gap-2'>
                   <Select<string>
-                    items={[
-                      ...availableModels.map((model) => ({
-                        value: model,
-                        label: model,
-                      })),
-                    ]}
+                    items={availableModels.map((model) => ({
+                      value: model,
+                      label: model,
+                    }))}
                     onValueChange={(value) => {
                       if (value === null) return
                       if (!selectedModels.includes(value)) {

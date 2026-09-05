@@ -442,10 +442,7 @@ function ChannelTestDialogContent({
 
   const baseModels = useMemo(() => {
     if (!modelsValue) return []
-    return modelsValue
-      .split(',')
-      .map((model) => model.trim())
-      .filter(Boolean)
+    return modelsValue.map((model) => model.trim()).filter(Boolean)
   }, [modelsValue])
 
   const models = useMemo(
@@ -779,7 +776,7 @@ function ChannelTestDialogContent({
     setIsDeletingFailed(true)
     try {
       const response = await updateChannel(currentRow.id, {
-        models: remaining.join(','),
+        models: remaining,
       })
       if (response.success) {
         setRemovedModels((prev) => {

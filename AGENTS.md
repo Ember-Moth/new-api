@@ -11,7 +11,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - **Backend**: Go 1.22+, Gin web framework, GORM v2 ORM
 - **Frontend**: React 19, TypeScript, Rsbuild, Base UI, Tailwind CSS
 - **Databases**: PostgreSQL for the primary database; PostgreSQL or ClickHouse for logs
-- **Cache**: Redis (go-redis) + in-memory cache
+- **Cache**: DragonflyDB (Redis-compatible protocol via go-redis) + in-memory cache
 - **Auth**: JWT, WebAuthn/Passkeys, OAuth (GitHub, Discord, OIDC, etc.)
 - **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
 
@@ -28,7 +28,7 @@ relay/         — AI API relay/proxy with provider adapters
   relay/channel/ — Provider-specific adapters (openai/, claude/, gemini/, aws/, etc.)
 middleware/    — Auth, rate limiting, CORS, logging, distribution
 setting/       — Configuration management (ratio, model, operation, system, performance)
-common/        — Shared utilities (JSON, crypto, Redis, env, rate-limit, etc.)
+common/        — Shared utilities (JSON, crypto, cache client, env, rate-limit, etc.)
 dto/           — Data transfer objects (request/response structs)
 constant/      — Constants (API types, channel types, context keys)
 types/         — Type definitions (relay formats, file sources, errors)
@@ -79,13 +79,17 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 
 Do NOT directly import or call `encoding/json` in business code. `json.RawMessage`, `json.Number`, and other type definitions from `encoding/json` may still be referenced as types, but actual marshal/unmarshal calls must go through `common.*`.
 
-**Database support:** The primary database is PostgreSQL >= 9.6. Logs use the primary database by default, or a separately configured PostgreSQL or ClickHouse database. `SQL_DSN` is required and must be a `postgres://` or `postgresql://` URL. Do not add fallback database engines.
+**Database support:** The primary database is PostgreSQL >= 18. Logs use the primary database by default, or a separately configured PostgreSQL or ClickHouse database. `SQL_DSN` is required and must be a `postgres://` or `postgresql://` URL. Do not add fallback database engines.
 
 - Any change affecting database behavior MUST be verified against a real PostgreSQL instance, including drivers, connection settings, models, migrations, constraints, indexes, serialization, SQL, transactions, and row locking. Also exercise a real ClickHouse instance when the affected path supports ClickHouse logs. Unit tests and mocks are not substitutes.
 - Treat GORM core and its database drivers as a compatible version set. Check upstream compatibility when changing their versions.
-- Schema or migration changes MUST be tested on a fresh database and by upgrading a representative database from the latest available released version. Run startup/migration at least twice to prove idempotency, and verify existing data, indexes, constraints, and uniqueness guarantees. Cover separately configured log databases where applicable.
+- This project targets a new deployment. Historical database contents, old schema versions, old cache key layouts, and rolling compatibility with previous releases are not compatibility requirements. Design the final PostgreSQL 18+/DragonflyDB schema directly; do not add migration or dual-write paths solely to preserve historical deployments.
+- Production schema is owned by golang-migrate and the versioned SQL files in `internal/migration/schema/database/`. GORM models map data; production startup MUST NOT call `AutoMigrate` or repair old schemas. Add schema changes to the appropriate main/log SQL sequence. Isolated unit fixtures may use `AutoMigrate`, but migration and integration tests must exercise the SQL files.
+- Schema or initialization changes MUST be tested on a fresh database. Run initialization/startup at least twice to prove idempotency, then verify representative data, indexes, constraints, and uniqueness guarantees. Cover separately configured log databases where applicable.
 - Record exact database versions, commands, and results in the final handoff or pull request. If required verification cannot run, report the blocker explicitly and do not claim database compatibility or completion.
 - Database tests require `TEST_POSTGRES_DSN` and use `internal/testdb` to isolate their data in disposable schemas. Never run destructive fixtures against shared application tables.
+- Cache services use DragonflyDB. Keep the Redis-compatible client and `REDIS_CONN_STRING`/`REDIS_POOL_SIZE` configuration names. Exercise real DragonflyDB with `TEST_DRAGONFLY_DSN` for changes affecting Lua scripts, TTLs, transactions, rate limits, sessions, or quota caches; in-memory Redis test doubles alone do not establish DragonflyDB compatibility.
+- PostgreSQL versions below 18 must be rejected before migrations for both the primary database and separate PostgreSQL log databases. ClickHouse log connections are exempt from PostgreSQL version checks.
 - Prefer GORM methods over raw SQL, and let GORM generate primary keys.
 - Standard `SELECT ... FOR UPDATE` queries in `model/` MUST use `lockForUpdate(tx)`. Do not use the ignored GORM v1 `gorm:query_option` mechanism or duplicate the shared locking helper.
 - Primary database SQL uses PostgreSQL quoting. Use `commonGroupCol` and `commonKeyCol` for reserved columns. Keep PostgreSQL and ClickHouse log behavior separate through `common.UsingLogDatabase(...)`.

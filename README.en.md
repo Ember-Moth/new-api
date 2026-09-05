@@ -304,7 +304,7 @@ docker run --name new-api -d --restart always \
 
 | Component | Requirement |
 |------|------|
-| **Database** | PostgreSQL ≥ 9.6 |
+| **Database** | PostgreSQL ≥ 18 |
 | **Container engine** | Docker / Docker Compose |
 | **System architecture** | 64-bit only (amd64 / arm64); 32-bit systems are not supported |
 
@@ -324,9 +324,9 @@ docker run --name new-api -d --restart always \
 | `USER_SESSION_ISSUANCE_WINDOW_SECONDS` | Per-user Session issuance window; clamped to the revoked retention period when configured higher | `86400` |
 | `USER_SESSION_REVOKED_RETENTION_DAYS` | Days to retain revoked Session rows for audit and issuance accounting | `7` |
 | `USER_SESSION_HOURLY_ALERT_THRESHOLD` | Global Sessions created per hour that triggers an alert only; it never blocks login | `5000` |
-| `CRYPTO_SECRET` | HMAC secret for cache keys; nodes sharing Redis must use the same effective value | Defaults to `SESSION_SECRET` |
+| `CRYPTO_SECRET` | HMAC secret for cache keys; nodes sharing DragonflyDB must use the same effective value | Defaults to `SESSION_SECRET` |
 | `SQL_DSN` | Database connection string | - |
-| `REDIS_CONN_STRING` | Redis connection string | - |
+| `REDIS_CONN_STRING` | DragonflyDB connection string | - |
 | `STREAMING_TIMEOUT` | Streaming timeout (seconds) | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Max per-line buffer (MB) for the stream scanner; increase when upstream sends huge image/base64 payloads | `64` |
 | `MAX_REQUEST_BODY_MB` | Max request body size (MB, counted **after decompression**; prevents huge requests/zip bombs from exhausting memory). Exceeding it returns `413` | `32` |
@@ -409,17 +409,17 @@ docker run --name new-api -d --restart always \
 
 > [!WARNING]
 > - All nodes must use the same primary database and the same `SESSION_SECRET`; otherwise Access Tokens, refresh sessions, and temporary authentication flows cannot be verified consistently.
-> - Nodes connected to the same Redis must also use the same `CRYPTO_SECRET`, or their cache-key digests will differ and shared entries cannot be reused consistently.
+> - Nodes connected to the same DragonflyDB must also use the same `CRYPTO_SECRET`, or their cache-key digests will differ and shared entries cannot be reused consistently.
 
-The database is authoritative for login Sessions and for the per-user active/issuance limits. Redis Session entries are short-lived caches whose TTL follows `SYNC_FREQUENCY` (60 seconds by default) and never exceeds the Session's remaining lifetime.
+The database is authoritative for login Sessions and for the per-user active/issuance limits. DragonflyDB Session entries are short-lived caches whose TTL follows `SYNC_FREQUENCY` (60 seconds by default) and never exceeds the Session's remaining lifetime.
 
-| Redis topology | Session propagation | Rate limiting |
+| DragonflyDB topology | Session propagation | Rate limiting |
 | --- | --- | --- |
-| Shared Redis | Revocations and version publications normally propagate immediately | Redis limits are shared across nodes |
-| Independent Redis per node | Nodes converge from the database within the effective `SYNC_FREQUENCY`; a newly rotated token may receive a temporary 401 on a node with stale cache | Each node has its own allowance, so aggregate capacity can reach roughly the configured limit multiplied by the node count |
-| No Redis | Every Session validation reads the database | In-memory limits are independent per node |
+| Shared DragonflyDB | Revocations and version publications normally propagate immediately | DragonflyDB limits are shared across nodes |
+| Independent DragonflyDB per node | Nodes converge from the database within the effective `SYNC_FREQUENCY`; a newly rotated token may receive a temporary 401 on a node with stale cache | Each node has its own allowance, so aggregate capacity can reach roughly the configured limit multiplied by the node count |
+| No DragonflyDB | Every Session validation reads the database | In-memory limits are independent per node |
 
-A shorter `SYNC_FREQUENCY` reduces the independent-Redis staleness window but causes one additional primary-key Session lookup per active SID, per node, per TTL. These guarantees make Session authentication bounded-stale across the supported topologies; rate limits and other Redis-backed control-plane caches remain topology-dependent.
+A shorter `SYNC_FREQUENCY` reduces the independent-DragonflyDB staleness window but causes one additional primary-key Session lookup per active SID, per node, per TTL. These guarantees make Session authentication bounded-stale across the supported topologies; rate limits and other DragonflyDB-backed control-plane caches remain topology-dependent.
 
 See [User authentication and login sessions](./docs/authentication.md) for the token, Origin-check and PAT contracts.
 
@@ -428,7 +428,7 @@ See [User authentication and login sessions](./docs/authentication.md) for the t
 **Retry configuration:** `Settings → Operation Settings → General Settings → Failure Retry Count`
 
 **Cache configuration:**
-- `REDIS_CONN_STRING`: Redis cache (recommended)
+- `REDIS_CONN_STRING`: DragonflyDB cache (recommended)
 - `MEMORY_CACHE_ENABLED`: Memory cache
 
 ---

@@ -2,7 +2,6 @@ package common
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -20,23 +19,29 @@ func RedisKeyCacheSeconds() int {
 	return SyncFrequency
 }
 
-// InitRedisClient This function is called after init()
+// InitRedisClient connects to DragonflyDB using the Redis-compatible client.
+// REDIS_CONN_STRING and REDIS_POOL_SIZE remain the public configuration names.
 func InitRedisClient() (err error) {
 	if os.Getenv("REDIS_CONN_STRING") == "" {
 		RedisEnabled = false
-		SysLog("REDIS_CONN_STRING not set, Redis is not enabled")
+		SysLog("REDIS_CONN_STRING not set, DragonflyDB cache is not enabled")
 		return nil
 	}
 	if os.Getenv("SYNC_FREQUENCY") == "" {
 		SysLog("SYNC_FREQUENCY not set, use default value 60")
 		SyncFrequency = 60
 	}
-	SysLog("Redis is enabled")
+	SysLog("DragonflyDB cache is enabled")
 	opt, err := redis.ParseURL(os.Getenv("REDIS_CONN_STRING"))
 	if err != nil {
-		FatalLog("failed to parse Redis connection string: " + err.Error())
+		return fmt.Errorf("failed to parse DragonflyDB connection string: %w", err)
 	}
-	opt.PoolSize = GetEnvOrDefault("REDIS_POOL_SIZE", 10)
+	if configured := os.Getenv("REDIS_POOL_SIZE"); configured != "" {
+		opt.PoolSize, err = strconv.Atoi(configured)
+		if err != nil || opt.PoolSize < 0 {
+			return fmt.Errorf("REDIS_POOL_SIZE must be a non-negative integer")
+		}
+	}
 	RDB = redis.NewClient(opt)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -44,11 +49,13 @@ func InitRedisClient() (err error) {
 
 	_, err = RDB.Ping(ctx).Result()
 	if err != nil {
-		FatalLog("Redis ping test failed: " + err.Error())
+		_ = RDB.Close()
+		return fmt.Errorf("DragonflyDB ping test failed: %w", err)
 	}
+	RedisEnabled = true
 	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis connected to %s", opt.Addr))
-		SysLog(fmt.Sprintf("Redis database: %d", opt.DB))
+		SysLog(fmt.Sprintf("DragonflyDB connected to %s", opt.Addr))
+		SysLog(fmt.Sprintf("DragonflyDB database: %d", opt.DB))
 	}
 	return err
 }
@@ -139,6 +146,15 @@ func RedisHSetObj(key string, obj interface{}, expiration time.Duration) error {
 			continue
 		}
 
+		if value.Kind() == reflect.Slice || value.Kind() == reflect.Map {
+			encoded, err := Marshal(value.Interface())
+			if err != nil {
+				return err
+			}
+			data[field.Name] = string(encoded)
+			continue
+		}
+
 		// 其他类型直接转换为字符串
 		data[field.Name] = fmt.Sprintf("%v", value.Interface())
 	}
@@ -218,6 +234,12 @@ func RedisHGetObj(key string, obj interface{}) error {
 					return fmt.Errorf("failed to parse bool field %s: %w", fieldName, err)
 				}
 				fieldValue.SetBool(boolValue)
+			case reflect.Slice, reflect.Map:
+				decoded := reflect.New(fieldValue.Type())
+				if err := UnmarshalJsonStr(value, decoded.Interface()); err != nil {
+					return fmt.Errorf("failed to parse collection field %s: %w", fieldName, err)
+				}
+				fieldValue.Set(decoded.Elem())
 			case reflect.Struct:
 				// Special handling for gorm.DeletedAt
 				if fieldValue.Type().String() == "gorm.DeletedAt" {
@@ -239,89 +261,29 @@ func RedisHGetObj(key string, obj interface{}) error {
 }
 
 // RedisIncr Add this function to handle atomic increments
+var existingStringIncrement = redis.NewScript(`
+if redis.call('PTTL', KEYS[1]) <= 0 then return 0 end
+redis.call('INCRBY', KEYS[1], ARGV[1])
+return 1`)
+
+var existingHashIncrement = redis.NewScript(`
+if redis.call('PTTL', KEYS[1]) <= 0 then return 0 end
+redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
+return 1`)
+
+var existingHashFieldUpdate = redis.NewScript(`
+if redis.call('PTTL', KEYS[1]) <= 0 then return 0 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1`)
+
 func RedisIncr(key string, delta int64) error {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis INCR: key=%s, delta=%d", key, delta))
-	}
-	// 检查键的剩余生存时间
-	ttlCmd := RDB.TTL(context.Background(), key)
-	ttl, err := ttlCmd.Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return fmt.Errorf("failed to get TTL: %w", err)
-	}
-
-	// 只有在 key 存在且有 TTL 时才需要特殊处理
-	if ttl > 0 {
-		ctx := context.Background()
-		// 开始一个Redis事务
-		txn := RDB.TxPipeline()
-
-		// 减少余额
-		decrCmd := txn.IncrBy(ctx, key, delta)
-		if err := decrCmd.Err(); err != nil {
-			return err // 如果减少失败，则直接返回错误
-		}
-
-		// 重新设置过期时间，使用原来的过期时间
-		txn.Expire(ctx, key, ttl)
-
-		// 执行事务
-		_, err = txn.Exec(ctx)
-		return err
-	}
-	return nil
+	return existingStringIncrement.Run(context.Background(), RDB, []string{key}, delta).Err()
 }
 
 func RedisHIncrBy(key, field string, delta int64) error {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis HINCRBY: key=%s, field=%s, delta=%d", key, field, delta))
-	}
-	ttlCmd := RDB.TTL(context.Background(), key)
-	ttl, err := ttlCmd.Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return fmt.Errorf("failed to get TTL: %w", err)
-	}
-
-	if ttl > 0 {
-		ctx := context.Background()
-		txn := RDB.TxPipeline()
-
-		incrCmd := txn.HIncrBy(ctx, key, field, delta)
-		if err := incrCmd.Err(); err != nil {
-			return err
-		}
-
-		txn.Expire(ctx, key, ttl)
-
-		_, err = txn.Exec(ctx)
-		return err
-	}
-	return nil
+	return existingHashIncrement.Run(context.Background(), RDB, []string{key}, field, delta).Err()
 }
 
 func RedisHSetField(key, field string, value interface{}) error {
-	if DebugEnabled {
-		SysLog(fmt.Sprintf("Redis HSET field: key=%s, field=%s, value=%v", key, field, value))
-	}
-	ttlCmd := RDB.TTL(context.Background(), key)
-	ttl, err := ttlCmd.Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return fmt.Errorf("failed to get TTL: %w", err)
-	}
-
-	if ttl > 0 {
-		ctx := context.Background()
-		txn := RDB.TxPipeline()
-
-		hsetCmd := txn.HSet(ctx, key, field, value)
-		if err := hsetCmd.Err(); err != nil {
-			return err
-		}
-
-		txn.Expire(ctx, key, ttl)
-
-		_, err = txn.Exec(ctx)
-		return err
-	}
-	return nil
+	return existingHashFieldUpdate.Run(context.Background(), RDB, []string{key}, field, value).Err()
 }

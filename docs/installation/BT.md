@@ -44,7 +44,7 @@
    - **端口映射**：默认为 `3000:3000`
    - **环境变量**：
      - `SESSION_SECRET`：会话密钥（**必填**，多机部署时必须一致）
-     - `CRYPTO_SECRET`：加密密钥（使用 Redis 时必填）
+     - `CRYPTO_SECRET`：加密密钥（使用 DragonflyDB 时必填）
 5. 点击 **确认** 开始安装
 6. 等待安装完成后，访问 `http://您的服务器IP:3000` 即可使用
 
@@ -85,9 +85,9 @@ docker-compose up -d
 | 变量名                 | 说明                 | 是否必填   |
 | ------------------- | ------------------ | ------ |
 | `SESSION_SECRET`    | 会话密钥，多机部署必须一致      | **必填** |
-| `CRYPTO_SECRET`     | 加密密钥，使用 Redis 时必填  | 条件必填   |
-| `SQL_DSN`           | 数据库连接字符串（使用外部数据库时） | 可选     |
-| `REDIS_CONN_STRING` | Redis 连接字符串        | 可选     |
+| `CRYPTO_SECRET`     | 加密密钥，使用 DragonflyDB 时必填  | 条件必填   |
+| `SQL_DSN`           | PostgreSQL 18+ 连接字符串 | **必填**     |
+| `REDIS_CONN_STRING` | DragonflyDB 连接字符串        | 可选     |
 
 ### 生成随机密钥
 

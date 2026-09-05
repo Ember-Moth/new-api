@@ -113,6 +113,76 @@ func TestSystemTaskLockPreventsConcurrentClaim(t *testing.T) {
 	assert.Equal(t, SystemTaskStatusPending, reloadedSecond.Status)
 }
 
+func TestSystemTaskClaimFailureRestoresExpiredLeaseAndPreviousTask(t *testing.T) {
+	truncateTables(t)
+	first, err := CreateSystemTask(SystemTaskTypeLogCleanup, nil, nil)
+	require.NoError(t, err)
+	_, claimed, err := ClaimSystemTask(first.ID, first.Type, "runner-a", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, DB.Model(&SystemTaskLock{}).Where("type = ?", first.Type).Update("locked_until", common.GetTimestamp()-1).Error)
+	second := createLegacyPendingSystemTask(t, first.Type)
+	require.NoError(t, DB.Exec(`
+CREATE FUNCTION test_fail_task_claim() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.locked_by = 'runner-b' AND NEW.status = 'running' THEN
+        RAISE EXCEPTION 'injected task update failure';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER test_fail_task_claim BEFORE UPDATE ON system_tasks
+FOR EACH ROW EXECUTE FUNCTION test_fail_task_claim();`).Error)
+	t.Cleanup(func() { require.NoError(t, DB.Exec("DROP FUNCTION test_fail_task_claim() CASCADE").Error) })
+	_, claimed, err = ClaimSystemTask(second.ID, second.Type, "runner-b", common.GetTimestamp()+60)
+	require.Error(t, err)
+	assert.False(t, claimed)
+	var lease SystemTaskLock
+	require.NoError(t, DB.Where("type = ?", first.Type).Take(&lease).Error)
+	assert.Equal(t, first.TaskID, lease.TaskID)
+	assert.Equal(t, "runner-a", lease.LockedBy)
+	previous, err := GetSystemTaskByTaskID(first.TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, SystemTaskStatusRunning, previous.Status)
+	next, err := GetSystemTaskByTaskID(second.TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, SystemTaskStatusPending, next.Status)
+}
+
+func TestSystemTaskParallelClaimHasOneOwner(t *testing.T) {
+	truncateTables(t)
+	pool, err := DB.DB()
+	require.NoError(t, err)
+	previousMax := pool.Stats().MaxOpenConnections
+	pool.SetMaxOpenConns(4)
+	t.Cleanup(func() { pool.SetMaxOpenConns(previousMax) })
+	task, err := CreateSystemTask(SystemTaskTypeLogCleanup, nil, nil)
+	require.NoError(t, err)
+	type outcome struct {
+		claimed bool
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan outcome, 2)
+	for _, runner := range []string{"parallel-a", "parallel-b"} {
+		go func(runner string) {
+			<-start
+			_, claimed, err := ClaimSystemTask(task.ID, task.Type, runner, common.GetTimestamp()+60)
+			results <- outcome{claimed, err}
+		}(runner)
+	}
+	close(start)
+	winners := 0
+	for range 2 {
+		result := <-results
+		require.NoError(t, result.err)
+		if result.claimed {
+			winners++
+		}
+	}
+	assert.Equal(t, 1, winners)
+}
+
 func TestExpiredSystemTaskLockFailsOldRunAndClaimsLegacyPendingRun(t *testing.T) {
 	truncateTables(t)
 

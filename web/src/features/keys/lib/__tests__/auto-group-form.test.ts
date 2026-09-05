@@ -49,7 +49,7 @@ const baseApiKey: ApiKey = {
   auto_groups: null,
   cross_group_retry: true,
   model_limits_enabled: false,
-  model_limits: '',
+  model_limits: [],
   allow_ips: '',
 }
 

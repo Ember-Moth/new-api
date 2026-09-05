@@ -307,7 +307,7 @@ docker run --name new-api -d --restart always \
 
 | コンポーネント | 要件 |
 |------|------|
-| **データベース** | PostgreSQL ≥ 9.6 |
+| **データベース** | PostgreSQL ≥ 18 |
 | **コンテナエンジン** | Docker / Docker Compose |
 | **システムアーキテクチャ** | 64ビットのみ対応（amd64 / arm64）。32ビットシステムは非対応 |
 
@@ -327,9 +327,9 @@ docker run --name new-api -d --restart always \
 | `USER_SESSION_ISSUANCE_WINDOW_SECONDS` | Session 発行のカウント期間（秒）。取り消し済み Session の保持期間を超える場合は自動的に制限 | `86400` |
 | `USER_SESSION_REVOKED_RETENTION_DAYS` | 監査と発行数計算のため取り消し済み Session を保持する日数 | `7` |
 | `USER_SESSION_HOURLY_ALERT_THRESHOLD` | 1 時間あたりのグローバル Session 発行数の警告閾値。ログインは拒否しません | `5000` |
-| `CRYPTO_SECRET` | キャッシュキー用 HMAC シークレット。Redis を共有するノードでは同じ実効値が必要 | デフォルトは `SESSION_SECRET` |
+| `CRYPTO_SECRET` | キャッシュキー用 HMAC シークレット。DragonflyDB を共有するノードでは同じ実効値が必要 | デフォルトは `SESSION_SECRET` |
 | `SQL_DSN** | データベース接続文字列 | - |
-| `REDIS_CONN_STRING` | Redis接続文字列 | - |
+| `REDIS_CONN_STRING` | DragonflyDB接続文字列 | - |
 | `STREAMING_TIMEOUT` | ストリーミング応答のタイムアウト時間（秒） | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | ストリームスキャナの1行あたりバッファ上限（MB）。4K画像など巨大なbase64 `data:` ペイロードを扱う場合は値を増加させてください | `64` |
 | `MAX_REQUEST_BODY_MB` | リクエストボディ最大サイズ（MB、**解凍後**に計測。巨大リクエスト/zip bomb によるメモリ枯渇を防止）。超過時は `413` | `32` |
@@ -410,17 +410,17 @@ docker run --name new-api -d --restart always \
 
 > [!WARNING]
 > - すべてのノードで同じプライマリデータベースと同じ `SESSION_SECRET` を使用してください。異なる場合、Access Token、Refresh セッション、一時認証フローを一貫して検証できません。
-> - 同じ Redis に接続するノードでは同じ `CRYPTO_SECRET` も設定してください。異なる場合、キャッシュキーのダイジェストが一致せず、共有エントリを正しく再利用できません。
+> - 同じ DragonflyDB に接続するノードでは同じ `CRYPTO_SECRET` も設定してください。異なる場合、キャッシュキーのダイジェストが一致せず、共有エントリを正しく再利用できません。
 
-ログイン Session とユーザー単位の有効数／発行数制限では、データベースが信頼できる唯一の情報源です。Redis の Session エントリは短期キャッシュであり、TTL は `SYNC_FREQUENCY`（デフォルト 60 秒）に従い、Session の残り有効期間を超えません。
+ログイン Session とユーザー単位の有効数／発行数制限では、データベースが信頼できる唯一の情報源です。DragonflyDB の Session エントリは短期キャッシュであり、TTL は `SYNC_FREQUENCY`（デフォルト 60 秒）に従い、Session の残り有効期間を超えません。
 
-| Redis トポロジー | Session 状態の伝播 | レート制限 |
+| DragonflyDB トポロジー | Session 状態の伝播 | レート制限 |
 | --- | --- | --- |
-| すべてのノードで Redis を共有 | 取り消しとバージョン更新は通常即時に伝播 | Redis の制限枠はノード間で共有 |
-| ノードごとに独立した Redis | 有効な `SYNC_FREQUENCY` 以内にデータベースへフォールバックして収束。バージョンローテーション直後の新しい Token は、古いキャッシュを持つノードで一時的に 401 になる場合があります | ノードごとに独立して計数するため、クラスター全体では設定値の約ノード数倍まで許可される可能性があります |
-| Redis なし | Session の検証ごとにデータベースを直接参照 | メモリ内の制限枠はノードごとに独立 |
+| すべてのノードで DragonflyDB を共有 | 取り消しとバージョン更新は通常即時に伝播 | DragonflyDB の制限枠はノード間で共有 |
+| ノードごとに独立した DragonflyDB | 有効な `SYNC_FREQUENCY` 以内にデータベースへフォールバックして収束。バージョンローテーション直後の新しい Token は、古いキャッシュを持つノードで一時的に 401 になる場合があります | ノードごとに独立して計数するため、クラスター全体では設定値の約ノード数倍まで許可される可能性があります |
+| DragonflyDB なし | Session の検証ごとにデータベースを直接参照 | メモリ内の制限枠はノードごとに独立 |
 
-`SYNC_FREQUENCY` を短くすると独立 Redis のキャッシュ陳腐化時間は短くなりますが、有効な SID ごと、ノードごと、TTL ごとにデータベースへの主キー照会が 1 回増えます。この保証は Session 認証の陳腐化時間を限定するものです。レート制限や Redis を使うその他のコントロールプレーンキャッシュは、引き続きトポロジーに依存します。
+`SYNC_FREQUENCY` を短くすると独立 DragonflyDB のキャッシュ陳腐化時間は短くなりますが、有効な SID ごと、ノードごと、TTL ごとにデータベースへの主キー照会が 1 回増えます。この保証は Session 認証の陳腐化時間を限定するものです。レート制限や DragonflyDB を使うその他のコントロールプレーンキャッシュは、引き続きトポロジーに依存します。
 
 Token、Origin 検証、PAT の契約については[ユーザー認証とログインセッション](./docs/authentication.md)を参照してください。
 
@@ -429,7 +429,7 @@ Token、Origin 検証、PAT の契約については[ユーザー認証とログ
 **リトライ設定:** `設定 → 運営設定 → 一般設定 → 失敗リトライ回数`
 
 **キャッシュ設定:**
-- `REDIS_CONN_STRING`：Redisキャッシュ（推奨）
+- `REDIS_CONN_STRING`：DragonflyDBキャッシュ（推奨）
 - `MEMORY_CACHE_ENABLED`：メモリキャッシュ
 
 ---

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
@@ -311,28 +313,8 @@ func writeUserSessionCache(entry *userSessionCacheEntry, cacheDeadline time.Time
 		}
 	}
 	entry.CacheSchema = userSessionCacheSchema
-	const script = `
-local current_status = redis.call('HGET', KEYS[1], 'Status')
-local current_version = tonumber(redis.call('HGET', KEYS[1], 'Version') or '0')
-if ARGV[5] == 'active' and (current_status == 'revoking' or current_status == 'revoked') then
-  return 0
-end
-if current_version > tonumber(ARGV[3]) then
-  return 0
-end
-redis.call('HSET', KEYS[1],
-  'SID', ARGV[1], 'UserID', ARGV[2], 'Version', ARGV[3],
-  'UserAuthVersion', ARGV[4], 'Status', ARGV[5],
-  'LoginMethod', ARGV[6], 'IP', ARGV[7], 'UserAgent', ARGV[8],
-  'CreatedAt', ARGV[9], 'LastActiveAt', ARGV[10], 'ExpiresAt', ARGV[11],
-  'RevokedAt', ARGV[12], 'RevokedReason', ARGV[13], 'CacheSchema', ARGV[14])
-if ARGV[5] == 'active' then
-  redis.call('PEXPIREAT', KEYS[1], ARGV[15])
-else
-  redis.call('PEXPIRE', KEYS[1], ARGV[15])
-end
-return 1`
-	result, err := common.RDB.Eval(context.Background(), script, []string{userSessionCacheKey(entry.SID)},
+
+	result, err := writeUserSessionCacheScript.Run(context.Background(), common.RDB, []string{userSessionCacheKey(entry.SID)},
 		entry.SID, entry.UserID, entry.Version, entry.UserAuthVersion, entry.Status,
 		entry.LoginMethod, entry.IP, entry.UserAgent, entry.CreatedAt, entry.LastActiveAt,
 		entry.ExpiresAt, entry.RevokedAt, entry.RevokedReason, entry.CacheSchema, redisExpiration,
@@ -867,3 +849,25 @@ func deleteRevokedUserSessionsBefore(revokedBefore, issuanceCutoff int64) error 
 		}
 	}
 }
+
+var writeUserSessionCacheScript = redis.NewScript(`
+local current_status = redis.call('HGET', KEYS[1], 'Status')
+local current_version = tonumber(redis.call('HGET', KEYS[1], 'Version') or '0')
+if ARGV[5] == 'active' and (current_status == 'revoking' or current_status == 'revoked') then
+  return 0
+end
+if current_version > tonumber(ARGV[3]) then
+  return 0
+end
+redis.call('HSET', KEYS[1],
+  'SID', ARGV[1], 'UserID', ARGV[2], 'Version', ARGV[3],
+  'UserAuthVersion', ARGV[4], 'Status', ARGV[5],
+  'LoginMethod', ARGV[6], 'IP', ARGV[7], 'UserAgent', ARGV[8],
+  'CreatedAt', ARGV[9], 'LastActiveAt', ARGV[10], 'ExpiresAt', ARGV[11],
+  'RevokedAt', ARGV[12], 'RevokedReason', ARGV[13], 'CacheSchema', ARGV[14])
+if ARGV[5] == 'active' then
+  redis.call('PEXPIREAT', KEYS[1], ARGV[15])
+else
+  redis.call('PEXPIRE', KEYS[1], ARGV[15])
+end
+return 1`)

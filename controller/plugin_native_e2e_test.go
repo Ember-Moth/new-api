@@ -129,8 +129,8 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 		Key:     "sk-test",
 		BaseURL: &upstream.URL,
 		Status:  common.ChannelStatusEnabled,
-		Models:  "kling-v1",
-		Group:   "default",
+		Models:  model.StringList{"kling-v1"},
+		Group:   model.StringList{"default"},
 	}
 	require.NoError(t, database.Create(&channel).Error)
 

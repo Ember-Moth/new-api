@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -214,8 +213,8 @@ func identityFilterRequiresKey(filters []dto.ChannelFilter) bool {
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
+	models_ := channel.GetModels()
+	groups_ := channel.GetGroups()
 	abilitySet := make(map[string]struct{})
 	abilities := make([]Ability, 0, len(models_))
 	for _, model := range models_ {
@@ -261,73 +260,13 @@ func (channel *Channel) DeleteAbilities() error {
 // UpdateAbilities updates abilities of this channel.
 // Make sure the channel is completed before calling this function.
 func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
-	isNewTx := false
-	// 如果没有传入事务，创建新的事务
 	if tx == nil {
-		tx = DB.Begin()
-		if tx.Error != nil {
-			return tx.Error
-		}
-		isNewTx = true
-		defer func() {
-			if r := recover(); r != nil {
-				tx.Rollback()
-			}
-		}()
+		return DB.Transaction(func(tx *gorm.DB) error { return channel.UpdateAbilities(tx) })
 	}
-
-	// First delete all abilities of this channel
-	err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error
-	if err != nil {
-		if isNewTx {
-			tx.Rollback()
-		}
+	if err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error; err != nil {
 		return err
 	}
-
-	// Then add new abilities
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
-	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
-		for _, group := range groups_ {
-			key := group + "|" + model
-			if _, exists := abilitySet[key]; exists {
-				continue
-			}
-			abilitySet[key] = struct{}{}
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
-			}
-			abilities = append(abilities, ability)
-		}
-	}
-
-	if len(abilities) > 0 {
-		for _, chunk := range lo.Chunk(abilities, 50) {
-			err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
-			if err != nil {
-				if isNewTx {
-					tx.Rollback()
-				}
-				return err
-			}
-		}
-	}
-
-	// 如果是新创建的事务，需要提交
-	if isNewTx {
-		return tx.Commit().Error
-	}
-
-	return nil
+	return channel.AddAbilities(tx)
 }
 
 func UpdateAbilityStatus(channelId int, status bool) error {
@@ -338,18 +277,21 @@ func UpdateAbilityStatusByTag(tag string, status bool) error {
 	return DB.Model(&Ability{}).Where("tag = ?", tag).Select("enabled").Update("enabled", status).Error
 }
 
-func UpdateAbilityByTag(tag string, newTag *string, priority *int64, weight *uint) error {
-	ability := Ability{}
+func UpdateAbilityByTag(tag string, newTag *string, priority *int64, weight *uint, tx *gorm.DB) error {
+	updates := map[string]any{}
 	if newTag != nil {
-		ability.Tag = newTag
+		updates["tag"] = *newTag
 	}
 	if priority != nil {
-		ability.Priority = priority
+		updates["priority"] = *priority
 	}
 	if weight != nil {
-		ability.Weight = *weight
+		updates["weight"] = *weight
 	}
-	return DB.Model(&Ability{}).Where("tag = ?", tag).Updates(ability).Error
+	if len(updates) == 0 {
+		return nil
+	}
+	return tx.Model(&Ability{}).Where("tag = ?", tag).Updates(updates).Error
 }
 
 var fixLock = sync.Mutex{}

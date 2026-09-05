@@ -14,6 +14,7 @@ import (
 	"gorm.io/driver/postgres"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -50,19 +51,11 @@ func TestMain(m *testing.M) {
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
 
-	if err := db.AutoMigrate(
-		&model.Task{},
-		&model.User{},
-		&model.Token{},
-		&model.Log{},
-		&model.Channel{},
-		&model.Midjourney{},
-		&model.TopUp{},
-		&model.UserSubscription{},
-		&model.SystemTask{},
-		&model.SystemTaskLock{},
-	); err != nil {
-		panic("failed to migrate: " + err.Error())
+	if err := schema.UpPostgres(sqlDB, schema.Main); err != nil {
+		panic(err)
+	}
+	if err := schema.UpPostgres(sqlDB, schema.Logs); err != nil {
+		panic(err)
 	}
 
 	code := m.Run()

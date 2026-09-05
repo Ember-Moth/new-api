@@ -70,8 +70,8 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 
-	taskPluginBody := `{"mode":"single","channel":{"type":61,"name":"plugin-channel","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind\"}"}}`
-	openaiBody := `{"mode":"single","channel":{"type":1,"name":"openai-channel","key":"sk","models":"gpt","group":"default"}}`
+	taskPluginBody := `{"mode":"single","channel":{"type":61,"name":"plugin-channel","key":"sk","models":["doc"],"group":["default"],"base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind\"}"}}`
+	openaiBody := `{"mode":"single","channel":{"type":1,"name":"openai-channel","key":"sk","models":["gpt"],"group":["default"]}}`
 
 	adminDenied := postAddChannel(t, 2, common.RoleAdminUser, taskPluginBody)
 	assert.Contains(t, adminDenied.Body.String(), "task plugin channels require the task_plugin.bind permission")
@@ -106,8 +106,8 @@ export function parseTaskResult() { return {}; }
 		Type:    constant.ChannelTypeTaskPlugin,
 		Status:  common.ChannelStatusEnabled,
 		Name:    "existing-plugin",
-		Models:  "doc",
-		Group:   "default",
+		Models:  model.StringList{"doc"},
+		Group:   model.StringList{"default"},
 		Key:     "sk",
 		BaseURL: &baseURL,
 		Setting: &setting,
@@ -115,7 +115,7 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, channel.Insert())
 
 	payload := fmt.Sprintf(
-		`{"id":%d,"type":61,"name":"existing-plugin","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind-update\"}"}`,
+		`{"id":%d,"type":61,"name":"existing-plugin","key":"sk","models":["doc"],"group":["default"],"base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind-update\"}"}`,
 		channel.Id,
 	)
 	gin.SetMode(gin.TestMode)

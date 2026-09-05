@@ -16,7 +16,7 @@ func TestTokenAutoGroupsRoundTripThroughRedisHashCache(t *testing.T) {
 		Key:        "token-auto-groups-cache-key",
 		Name:       "auto-cache",
 		Group:      "auto",
-		AutoGroups: `["vip","default"]`,
+		AutoGroups: StringList{"vip", "default"},
 	}
 
 	require.NoError(t, cacheSetTokenForTest(token))
@@ -40,14 +40,14 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 		UnlimitedQuota:  true,
 		Group:           "auto",
 		CrossGroupRetry: true,
-		AutoGroups:      `["default","vip"]`,
+		AutoGroups:      StringList{"default", "vip"},
 	}
 	require.NoError(t, token.Insert())
 	require.NoError(t, cacheSetTokenForTest(token))
 
 	preheated, err := cacheGetTokenByKey(token.Key)
 	require.NoError(t, err)
-	assert.JSONEq(t, `["default","vip"]`, preheated.AutoGroups)
+	assert.Equal(t, StringList{"default", "vip"}, preheated.AutoGroups)
 
 	require.NoError(t, token.SetAutoGroups([]string{"vip"}))
 	require.NoError(t, token.Update())
@@ -57,7 +57,7 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 	require.Error(t, cacheErr, "the pre-update cache entry must be invalidated")
 	reloaded, err := GetTokenByKey(token.Key, false)
 	require.NoError(t, err)
-	assert.JSONEq(t, `["vip"]`, reloaded.AutoGroups)
+	assert.Equal(t, StringList{"vip"}, reloaded.AutoGroups)
 }
 
 // cacheSetTokenForTest 以测试身份写入完整 token 缓存（含额度字段），

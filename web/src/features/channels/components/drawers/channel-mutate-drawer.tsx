@@ -1272,9 +1272,7 @@ export function ChannelMutateDrawer({
         readAdvancedSettingsPreference() || hasAdvancedSettingsValues(defaults)
       )
       // Store initial values for comparison
-      initialModelsRef.current = parseModelsString(
-        channelData.data.models || ''
-      )
+      initialModelsRef.current = [...channelData.data.models]
       initialModelMappingRef.current = channelData.data.model_mapping || ''
       initialStatusCodeMappingRef.current =
         channelData.data.status_code_mapping || ''
@@ -3323,7 +3321,7 @@ export function ChannelMutateDrawer({
                                           {multiKeyType === 'polling' ? (
                                             <span className='text-warning'>
                                               {t(
-                                                'Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded'
+                                                'Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded'
                                               )}
                                             </span>
                                           ) : (

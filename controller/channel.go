@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -794,15 +795,15 @@ func DeleteDisabledChannel(c *gin.Context) {
 }
 
 type ChannelTag struct {
-	Tag            string  `json:"tag"`
-	NewTag         *string `json:"new_tag"`
-	Priority       *int64  `json:"priority"`
-	Weight         *uint   `json:"weight"`
-	ModelMapping   *string `json:"model_mapping"`
-	Models         *string `json:"models"`
-	Groups         *string `json:"groups"`
-	ParamOverride  *string `json:"param_override"`
-	HeaderOverride *string `json:"header_override"`
+	Tag            string            `json:"tag"`
+	NewTag         *string           `json:"new_tag"`
+	Priority       *int64            `json:"priority"`
+	Weight         *uint             `json:"weight"`
+	ModelMapping   *string           `json:"model_mapping"`
+	Models         *model.StringList `json:"models"`
+	Groups         *model.StringList `json:"groups"`
+	ParamOverride  *string           `json:"param_override"`
+	HeaderOverride *string           `json:"header_override"`
 }
 
 func DisableTagChannels(c *gin.Context) {
@@ -1128,10 +1129,10 @@ func UpdateChannel(c *gin.Context) {
 	}
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
-	if channel.Models != originChannel.Models {
+	if !slices.Equal(channel.Models, originChannel.Models) {
 		changedFields = append(changedFields, "models")
 	}
-	if channel.Group != originChannel.Group {
+	if !slices.Equal(channel.Group, originChannel.Group) {
 		changedFields = append(changedFields, "group")
 	}
 	if channel.Type != originChannel.Type {
@@ -1408,17 +1409,10 @@ func GetTagModels(c *gin.Context) {
 		return
 	}
 
-	var longestModels string
-	maxLength := 0
-
-	// Find the longest models string among all channels with the given tag
+	longestModels := []string{}
 	for _, channel := range channels {
-		if channel.Models != "" {
-			currentModels := strings.Split(channel.Models, ",")
-			if len(currentModels) > maxLength {
-				maxLength = len(currentModels)
-				longestModels = channel.Models
-			}
+		if len(channel.Models) > len(longestModels) {
+			longestModels = channel.GetModels()
 		}
 	}
 

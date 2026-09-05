@@ -20,7 +20,7 @@ func newTokenAutoGroupsContext() *gin.Context {
 
 func TestSetupContextForTokenPreservesCustomAutoGroupsOrder(t *testing.T) {
 	ctx := newTokenAutoGroupsContext()
-	token := &model.Token{Id: 1, UserId: 2, AutoGroups: `["vip","default"]`}
+	token := &model.Token{Id: 1, UserId: 2, AutoGroups: model.StringList{"vip", "default"}}
 
 	require.NoError(t, SetupContextForToken(ctx, token))
 	value, ok := common.GetContextKey(ctx, constant.ContextKeyTokenAutoGroups)
@@ -30,19 +30,15 @@ func TestSetupContextForTokenPreservesCustomAutoGroupsOrder(t *testing.T) {
 
 func TestSetupContextForTokenTreatsStoredEmptyArrayAsInheritance(t *testing.T) {
 	ctx := newTokenAutoGroupsContext()
-	token := &model.Token{Id: 1, UserId: 2, AutoGroups: `[]`}
+	token := &model.Token{Id: 1, UserId: 2, AutoGroups: model.StringList{}}
 
 	require.NoError(t, SetupContextForToken(ctx, token))
 	_, ok := common.GetContextKey(ctx, constant.ContextKeyTokenAutoGroups)
 	assert.False(t, ok)
 }
 
-func TestSetupContextForTokenMalformedAutoGroupsFailsClosed(t *testing.T) {
-	ctx := newTokenAutoGroupsContext()
-	token := &model.Token{Id: 1, UserId: 2, AutoGroups: `not-json`}
-
-	require.NoError(t, SetupContextForToken(ctx, token))
-	value, ok := common.GetContextKey(ctx, constant.ContextKeyTokenAutoGroups)
-	require.True(t, ok)
-	assert.Equal(t, []string{}, value)
+func TestTokenRejectsMalformedAutoGroupArray(t *testing.T) {
+	var token model.Token
+	err := common.Unmarshal([]byte(`{"model_limits":"not-an-array"}`), &token)
+	require.Error(t, err)
 }

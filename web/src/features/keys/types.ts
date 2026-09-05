@@ -44,7 +44,7 @@ export const apiKeySchema = z.object({
     .optional()
     .default(false),
   model_limits_enabled: z.boolean(),
-  model_limits: z.string().nullish().default(''),
+  model_limits: z.array(z.string()).default([]),
   allow_ips: z.string().nullish().default(''),
 })
 
@@ -89,7 +89,7 @@ export interface ApiKeyFormData {
   expired_time: number
   unlimited_quota: boolean
   model_limits_enabled: boolean
-  model_limits: string
+  model_limits: string[]
   allow_ips: string
   group: string
   auto_groups: string[]

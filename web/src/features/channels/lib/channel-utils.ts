@@ -221,12 +221,11 @@ export function countKeys(key: string): number {
 /**
  * Parse comma-separated models list
  */
-export function parseModelsList(models: string): string[] {
+export function parseModelsList(models: string | readonly string[]): string[] {
   if (!models) {
     return []
   }
-  return models
-    .split(',')
+  return (typeof models === 'string' ? models.split(',') : models)
     .map((m) => m.trim())
     .filter((m) => m.length > 0)
 }
@@ -235,12 +234,11 @@ export function parseModelsList(models: string): string[] {
  * Parse comma-separated groups list.
  * Sorts with 'default' group first, then locale-sorted alphabetically.
  */
-export function parseGroupsList(groups: string): string[] {
+export function parseGroupsList(groups: string | readonly string[]): string[] {
   if (!groups) {
     return []
   }
-  const list = groups
-    .split(',')
+  const list = (typeof groups === 'string' ? groups.split(',') : groups)
     .map((g) => g.trim())
     .filter((g) => g.length > 0)
   return list.sort((a, b) => {
@@ -649,7 +647,7 @@ export function aggregateChannelsByTag(
         name: tag,
         type: 0,
         status: undefined as unknown as number,
-        group: '',
+        group: [],
         used_quota: 0,
         response_time: 0,
         priority: -1 as unknown as number | null,
@@ -658,7 +656,7 @@ export function aggregateChannelsByTag(
         test_time: 0,
         created_time: 0,
         balance_updated_time: 0,
-        models: '',
+        models: [],
         children: [],
       } as TagRow
       tagMap.set(tag, tagRow)
@@ -696,18 +694,8 @@ export function aggregateChannelsByTag(
       tagRow.weight = null
     }
 
-    // Aggregate group (concatenate and deduplicate)
-    if (tagRow.group === '') {
-      tagRow.group = channel.group
-    } else {
-      const existingGroups = new Set(tagRow.group.split(',').filter(Boolean))
-      const newGroups = channel.group.split(',').filter(Boolean)
-      newGroups.forEach((g) => {
-        if (!existingGroups.has(g)) {
-          tagRow.group += `,${g}`
-        }
-      })
-    }
+    // Group membership stays an array throughout aggregation.
+    tagRow.group = [...new Set([...tagRow.group, ...channel.group])]
 
     // Aggregate status (enabled if any child is enabled)
     if (channel.status === 1) {

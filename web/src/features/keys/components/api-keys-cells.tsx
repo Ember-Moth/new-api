@@ -190,7 +190,7 @@ export function ModelLimitsCell({ apiKey }: { apiKey: ApiKey }) {
     )
   }
 
-  const models = apiKey.model_limits.split(',').filter(Boolean)
+  const models = apiKey.model_limits.filter(Boolean)
 
   return (
     <Tooltip>

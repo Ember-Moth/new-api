@@ -121,7 +121,7 @@ func TestAddTokenPersistsOrderedAutoGroupsSnapshot(t *testing.T) {
 
 	var token model.Token
 	require.NoError(t, model.DB.Where("name = ?", "ordered-snapshot").First(&token).Error)
-	assert.JSONEq(t, `["vip","default"]`, token.AutoGroups)
+	assert.Equal(t, model.StringList{"vip", "default"}, token.AutoGroups)
 
 	getCtx, getRecorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/"+stringInt(token.Id), nil, user.Id)
 	getCtx.Params = append(getCtx.Params, gin.Param{Key: "id", Value: stringInt(token.Id)})
@@ -141,10 +141,10 @@ func TestUpdateTokenAutoGroupsTriStateAndNonAutoCleanup(t *testing.T) {
 		includeField       bool
 		value              any
 		group              string
-		expectedAutoGroups string
+		expectedAutoGroups model.StringList
 		expectedRetry      bool
 	}{
-		{name: "omitted preserves", group: "auto", expectedAutoGroups: `["vip","default"]`, expectedRetry: true},
+		{name: "omitted preserves", group: "auto", expectedAutoGroups: model.StringList{"vip", "default"}, expectedRetry: true},
 		{name: "null inherits", includeField: true, value: nil, group: "auto", expectedRetry: true},
 		{name: "empty inherits", includeField: true, value: []string{}, group: "auto", expectedRetry: true},
 		{name: "non auto clears and disables retry", includeField: true, value: []string{"vip"}, group: "default"},
@@ -174,10 +174,10 @@ func TestUpdateTokenAutoGroupsTriStateAndNonAutoCleanup(t *testing.T) {
 
 			var updated model.Token
 			require.NoError(t, model.DB.First(&updated, token.Id).Error)
-			if test.expectedAutoGroups == "" {
+			if len(test.expectedAutoGroups) == 0 {
 				assert.Empty(t, updated.AutoGroups)
 			} else {
-				assert.JSONEq(t, test.expectedAutoGroups, updated.AutoGroups)
+				assert.Equal(t, test.expectedAutoGroups, updated.AutoGroups)
 			}
 			assert.Equal(t, test.expectedRetry, updated.CrossGroupRetry)
 		})

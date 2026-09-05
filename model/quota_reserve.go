@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
@@ -17,7 +19,7 @@ const (
 	cacheQuotaMiss
 )
 
-const userQuotaReserveScript = `
+var userQuotaReserveScript = redis.NewScript(`
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   or tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') ~= tonumber(ARGV[3])
   or redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
@@ -28,18 +30,18 @@ if quota == nil or quota < tonumber(ARGV[1]) then
   return 0
 end
 redis.call('HINCRBY', KEYS[1], 'Quota', -tonumber(ARGV[1]))
-return 1`
+return 1`)
 
-const userQuotaDeltaScript = `
+var userQuotaDeltaScript = redis.NewScript(`
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   or tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') ~= tonumber(ARGV[3])
   or redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
   return -1
 end
 redis.call('HINCRBY', KEYS[1], 'Quota', tonumber(ARGV[1]))
-return 1`
+return 1`)
 
-const tokenQuotaReserveScript = `
+var tokenQuotaReserveScript = redis.NewScript(`
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   or redis.call('HEXISTS', KEYS[1], 'RemainQuota') == 0
   or redis.call('HEXISTS', KEYS[1], 'UsedQuota') == 0 then
@@ -52,9 +54,9 @@ end
 redis.call('HINCRBY', KEYS[1], 'RemainQuota', -tonumber(ARGV[1]))
 redis.call('HINCRBY', KEYS[1], 'UsedQuota', tonumber(ARGV[1]))
 redis.call('HSET', KEYS[1], 'AccessedTime', ARGV[3])
-return 1`
+return 1`)
 
-const tokenQuotaDeltaScript = `
+var tokenQuotaDeltaScript = redis.NewScript(`
 if tonumber(redis.call('HGET', KEYS[1], 'Id') or '0') ~= tonumber(ARGV[2])
   or redis.call('HEXISTS', KEYS[1], 'RemainQuota') == 0
   or redis.call('HEXISTS', KEYS[1], 'UsedQuota') == 0 then
@@ -63,7 +65,7 @@ end
 redis.call('HINCRBY', KEYS[1], 'RemainQuota', tonumber(ARGV[1]))
 redis.call('HINCRBY', KEYS[1], 'UsedQuota', -tonumber(ARGV[1]))
 redis.call('HSET', KEYS[1], 'AccessedTime', ARGV[3])
-return 1`
+return 1`)
 
 func quotaResultFromLua(result int, err error) (cacheQuotaResult, error) {
 	if err != nil {
@@ -80,25 +82,25 @@ func quotaResultFromLua(result int, err error) (cacheQuotaResult, error) {
 }
 
 func cacheTryReserveUserQuota(userID int, amount int64) (cacheQuotaResult, error) {
-	result, err := common.RDB.Eval(context.Background(), userQuotaReserveScript,
+	result, err := userQuotaReserveScript.Run(context.Background(), common.RDB,
 		[]string{getUserCacheKey(userID)}, amount, userID, userCacheSchemaVersion).Int()
 	return quotaResultFromLua(result, err)
 }
 
 func cacheApplyUserQuotaDelta(userID int, delta int64) (cacheQuotaResult, error) {
-	result, err := common.RDB.Eval(context.Background(), userQuotaDeltaScript,
+	result, err := userQuotaDeltaScript.Run(context.Background(), common.RDB,
 		[]string{getUserCacheKey(userID)}, delta, userID, userCacheSchemaVersion).Int()
 	return quotaResultFromLua(result, err)
 }
 
 func cacheTryReserveTokenQuota(id int, key string, amount int64) (cacheQuotaResult, error) {
-	result, err := common.RDB.Eval(context.Background(), tokenQuotaReserveScript,
+	result, err := tokenQuotaReserveScript.Run(context.Background(), common.RDB,
 		[]string{getTokenCacheKey(key)}, amount, id, common.GetTimestamp()).Int()
 	return quotaResultFromLua(result, err)
 }
 
 func cacheApplyTokenQuotaDelta(id int, key string, delta int64) (cacheQuotaResult, error) {
-	result, err := common.RDB.Eval(context.Background(), tokenQuotaDeltaScript,
+	result, err := tokenQuotaDeltaScript.Run(context.Background(), common.RDB,
 		[]string{getTokenCacheKey(key)}, delta, id, common.GetTimestamp()).Int()
 	return quotaResultFromLua(result, err)
 }

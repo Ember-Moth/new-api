@@ -72,24 +72,6 @@ func TestClickHouseLogTTLExpression(t *testing.T) {
 	assert.Equal(t, "toDateTime(created_at) + INTERVAL 30 DAY DELETE", clickHouseLogTTLExpression(30))
 }
 
-func TestClickHouseLogTTLClause(t *testing.T) {
-	assert.Equal(t, "", clickHouseLogTTLClause(0))
-	assert.Equal(t, "\nTTL toDateTime(created_at) + INTERVAL 7 DAY DELETE", clickHouseLogTTLClause(7))
-}
-
-func TestClickHouseLogCreateTableSQL(t *testing.T) {
-	withoutTTL := clickHouseLogCreateTableSQL(0)
-	assert.Contains(t, withoutTTL, "CREATE TABLE IF NOT EXISTS logs")
-	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
-	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
-	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
-	assert.NotContains(t, withoutTTL, "TTL ")
-
-	withTTL := clickHouseLogCreateTableSQL(30)
-	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")
-	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
-}
-
 func TestClickHouseCreateTableHasTTL(t *testing.T) {
 	assert.True(t, clickHouseCreateTableHasTTL("CREATE TABLE logs (...)\nTTL toDateTime(created_at) + INTERVAL 30 DAY DELETE"))
 	assert.True(t, clickHouseCreateTableHasTTL("CREATE TABLE logs (...) TTL toDateTime(created_at)"))

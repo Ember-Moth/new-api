@@ -39,30 +39,6 @@ type tokenKeyResponse struct {
 	Key string `json:"key"`
 }
 
-type legacyToken struct {
-	Id                 int    `gorm:"primaryKey"`
-	UserId             int    `gorm:"index"`
-	Key                string `gorm:"column:key;type:char(48);uniqueIndex"`
-	Status             int    `gorm:"default:1"`
-	Name               string `gorm:"index"`
-	CreatedTime        int64  `gorm:"bigint"`
-	AccessedTime       int64  `gorm:"bigint"`
-	ExpiredTime        int64  `gorm:"bigint;default:-1"`
-	RemainQuota        int    `gorm:"default:0"`
-	UnlimitedQuota     bool
-	ModelLimitsEnabled bool
-	ModelLimits        string  `gorm:"type:text"`
-	AllowIps           *string `gorm:"default:''"`
-	UsedQuota          int     `gorm:"default:0"`
-	Group              string  `gorm:"column:group;default:''"`
-	CrossGroupRetry    bool
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
-}
-
-func (legacyToken) TableName() string {
-	return "tokens"
-}
-
 func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -206,112 +182,15 @@ func getTokenAutoGroupsColumnType(t *testing.T, db *gorm.DB, dialect string) str
 	}
 }
 
-func runTokenMigrationCompatibilityTest(t *testing.T, db *gorm.DB, dialect string, managedTokensTable *bool) {
-	t.Helper()
-
-	legacyKey := strings.Repeat("a", 48)
-	longKey := strings.Repeat("b", 64)
-
-	if err := db.AutoMigrate(&legacyToken{}); err != nil {
-		t.Fatalf("failed to create legacy token schema: %v", err)
-	}
-	if managedTokensTable != nil {
-		*managedTokensTable = true
-	}
-	if err := db.Create(&legacyToken{
-		UserId:             7,
-		Key:                legacyKey,
-		Status:             common.TokenStatusEnabled,
-		Name:               "legacy-token",
-		CreatedTime:        1,
-		AccessedTime:       1,
-		ExpiredTime:        -1,
-		RemainQuota:        100,
-		UnlimitedQuota:     true,
-		ModelLimitsEnabled: false,
-		ModelLimits:        "",
-		AllowIps:           common.GetPointer(""),
-		UsedQuota:          0,
-		Group:              "default",
-		CrossGroupRetry:    false,
-	}).Error; err != nil {
-		t.Fatalf("failed to seed legacy token row: %v", err)
-	}
-
-	if got := getTokenKeyColumnType(t, db, dialect); got != "char(48)" {
-		t.Fatalf("expected legacy key column type char(48), got %q", got)
-	}
-
-	migrateTokenControllerTestDB(t, db)
-
-	if got := getTokenKeyColumnType(t, db, dialect); got != "varchar(128)" {
-		t.Fatalf("expected migrated key column type varchar(128), got %q", got)
-	}
-	if !db.Migrator().HasColumn(&model.Token{}, "auto_groups") {
-		t.Fatal("expected migration to add auto_groups column")
-	}
-	if got := getTokenAutoGroupsColumnType(t, db, dialect); got != "text" {
-		t.Fatalf("expected migrated auto_groups column type text, got %q", got)
-	}
-
-	var migratedToken model.Token
-	if err := db.First(&migratedToken, "name = ?", "legacy-token").Error; err != nil {
-		t.Fatalf("failed to load migrated token row: %v", err)
-	}
-	if migratedToken.Key != legacyKey {
-		t.Fatalf("expected migrated token key %q, got %q", legacyKey, migratedToken.Key)
-	}
-	if migratedToken.Name != "legacy-token" {
-		t.Fatalf("expected migrated token name to be preserved, got %q", migratedToken.Name)
-	}
-	if migratedToken.AutoGroups != "" {
-		t.Fatalf("expected legacy token to inherit global Auto groups, got %q", migratedToken.AutoGroups)
-	}
-
-	inserted := model.Token{
-		UserId:             8,
-		Name:               "long-token",
-		Key:                longKey,
-		Status:             common.TokenStatusEnabled,
-		CreatedTime:        1,
-		AccessedTime:       1,
-		ExpiredTime:        -1,
-		RemainQuota:        200,
-		UnlimitedQuota:     true,
-		ModelLimitsEnabled: false,
-		ModelLimits:        "",
-		AllowIps:           common.GetPointer(""),
-		UsedQuota:          0,
-		Group:              "default",
-		CrossGroupRetry:    false,
-	}
-	if err := db.Create(&inserted).Error; err != nil {
-		t.Fatalf("failed to insert long token after migration: %v", err)
-	}
-
-	var fetched model.Token
-	if err := db.First(&fetched, "id = ?", inserted.Id).Error; err != nil {
-		t.Fatalf("failed to fetch long token after migration: %v", err)
-	}
-	if fetched.Key != longKey {
-		t.Fatalf("expected long token key %q, got %q", longKey, fetched.Key)
-	}
-}
-
 func TestTokenAutoMigrateUsesVarchar128KeyColumn(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 
 	if got := getTokenKeyColumnType(t, db, "postgres"); got != "varchar(128)" {
 		t.Fatalf("expected key column type varchar(128), got %q", got)
 	}
-	if got := getTokenAutoGroupsColumnType(t, db, "postgres"); got != "text" {
-		t.Fatalf("expected auto_groups column type text, got %q", got)
+	if got := getTokenAutoGroupsColumnType(t, db, "postgres"); got != "array" {
+		t.Fatalf("expected auto_groups column type array, got %q", got)
 	}
-}
-
-func TestTokenMigrationFromChar48ToVarchar128(t *testing.T) {
-	db := openTokenControllerTestDB(t)
-	runTokenMigrationCompatibilityTest(t, db, "postgres", nil)
 }
 
 func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
@@ -405,7 +284,7 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 		"remain_quota":         100,
 		"unlimited_quota":      true,
 		"model_limits_enabled": false,
-		"model_limits":         "",
+		"model_limits":         []string{},
 		"group":                "default",
 		"cross_group_retry":    false,
 	}

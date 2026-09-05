@@ -341,8 +341,8 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 		Key:    "advanced-custom-key",
 		Status: common.ChannelStatusEnabled,
 		Name:   "advanced-custom-channel",
-		Group:  "default",
-		Models: "gemini-3.5-flash",
+		Group:  model.StringList{"default"},
+		Models: model.StringList{"gemini-3.5-flash"},
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{
 		AdvancedCustom: &dto.AdvancedCustomConfig{

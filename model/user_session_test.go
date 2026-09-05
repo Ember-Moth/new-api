@@ -23,7 +23,7 @@ type setMiniRedisTimeOnEvalHook struct {
 }
 
 func (hook setMiniRedisTimeOnEvalHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
-	if cmd.Name() == "eval" {
+	if cmd.Name() == "eval" || cmd.Name() == "evalsha" {
 		hook.server.SetTime(hook.at)
 	}
 	return ctx, nil

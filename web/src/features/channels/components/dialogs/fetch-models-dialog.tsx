@@ -45,7 +45,6 @@ import {
   categorizeModelsWithRedirect,
   channelsQueryKeys,
   normalizeModelName,
-  parseModelsString,
 } from '../../lib'
 import { useChannels } from '../channels-provider'
 
@@ -96,8 +95,7 @@ export function FetchModelsDialog({
 
   // Parse existing models
   const existingModels = useMemo(
-    () =>
-      existingModelsOverride ?? parseModelsString(activeChannel?.models || ''),
+    () => existingModelsOverride ?? activeChannel?.models ?? [],
     [existingModelsOverride, activeChannel?.models]
   )
 
@@ -184,9 +182,8 @@ export function FetchModelsDialog({
     if (!activeChannel) return
     setIsSaving(true)
     try {
-      const modelsString = selectedModels.join(',')
       const response = await updateChannel(activeChannel.id, {
-        models: modelsString,
+        models: selectedModels,
       })
       if (response.success) {
         toast.success(t('Models updated successfully'))

@@ -380,6 +380,7 @@ export interface TaskArtifactsResponse {
 // ============================================================================
 
 export interface GetLogsParams {
+  cursor?: string
   p?: number
   page_size?: number
   type?: number
@@ -399,8 +400,10 @@ export interface GetLogsResponse {
   message?: string
   data?: {
     items: UsageLog[] | MidjourneyLog[] | TaskLog[]
-    total: number
-    page: number
+    total?: number
+    next_cursor?: string
+    has_more?: boolean
+    page?: number
     page_size: number
   }
 }
@@ -458,6 +461,7 @@ export interface GetTaskLogsParams {
  * Configuration for fetching logs by category
  */
 export interface FetchLogsConfig {
+  cursor?: string
   logCategory: LogCategory
   isAdmin: boolean
   page: number

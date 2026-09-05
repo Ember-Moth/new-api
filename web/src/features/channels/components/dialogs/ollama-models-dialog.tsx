@@ -47,7 +47,7 @@ import {
   fetchUpstreamModels,
   updateChannel,
 } from '../../api'
-import { channelsQueryKeys, parseModelsString } from '../../lib'
+import { channelsQueryKeys } from '../../lib'
 import {
   formatBytes,
   normalizeOllamaModels,
@@ -94,7 +94,7 @@ export function OllamaModelsDialog({
   }, [models, search])
 
   const existingModels = useMemo(
-    () => parseModelsString(currentRow?.models ?? ''),
+    () => currentRow?.models ?? [],
     [currentRow?.models]
   )
 
@@ -207,7 +207,7 @@ export function OllamaModelsDialog({
         : [...new Set([...existingModels, ...selected])]
 
     try {
-      const res = await updateChannel(currentRow.id, { models: next.join(',') })
+      const res = await updateChannel(currentRow.id, { models: next })
       if (res.success) {
         toast.success(
           mode === 'replace'

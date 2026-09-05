@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/gin-gonic/gin"
@@ -19,7 +21,7 @@ const redisRateLimitNamespace = "rateLimit:v2"
 // simple fixed-window behavior: traffic at a window boundary can burst up to
 // twice the configured limit. Do not replace this with a sliding-window ZSET
 // unless that externally visible behavior is intentionally changed.
-const redisFixedWindowScript = `
+var redisFixedWindowScript = redis.NewScript(`
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[2])
@@ -33,7 +35,7 @@ if count > tonumber(ARGV[1]) then
   return {0, count, ttl}
 end
 return {1, count, ttl}
-`
+`)
 
 var inMemoryRateLimiter common.InMemoryRateLimiter
 
@@ -76,9 +78,9 @@ func redisFixedWindowTake(ctx context.Context, key string, maxRequestNum int, du
 		return false, 0, 0, errors.New("rate limit duration must be positive")
 	}
 
-	values, err := common.RDB.Eval(
+	values, err := redisFixedWindowScript.Run(
 		ctx,
-		redisFixedWindowScript,
+		common.RDB,
 		[]string{key},
 		maxRequestNum,
 		duration,

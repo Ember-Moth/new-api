@@ -79,7 +79,7 @@ func TestDeleteThirdPartyPluginReportsAssociatedChannelsAndInFlightTasks(t *test
 	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{Key: loaded.Meta.Key, APIVersion: 1, Version: "1", Source: lifecyclePluginSource, SourceHash: "hash", Enabled: true}))
 	baseURL := "https://example.com"
 	setting := `{"task_plugin_key":"lifecycle-only"}`
-	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked", Models: "doc", Group: "default", BaseURL: &baseURL, Setting: &setting}
+	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked", Models: model.StringList{"doc"}, Group: model.StringList{"default"}, BaseURL: &baseURL, Setting: &setting}
 	require.NoError(t, channel.Insert())
 	require.NoError(t, model.DB.Create(&model.Task{Platform: "lifecycle-only", Status: model.TaskStatusInProgress}).Error)
 
@@ -101,7 +101,7 @@ func TestDisableThirdPartyPluginSupportsCascadeAndForce(t *testing.T) {
 	require.NoError(t, model.SaveTaskPlugin(&model.TaskPlugin{Key: loaded.Meta.Key, APIVersion: 1, Version: "1", Source: lifecyclePluginSource, SourceHash: "hash", Enabled: true}))
 	baseURL := "https://example.com"
 	setting := `{"task_plugin_key":"lifecycle-only"}`
-	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked", Models: "doc", Group: "default", BaseURL: &baseURL, Setting: &setting}
+	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked", Models: model.StringList{"doc"}, Group: model.StringList{"default"}, BaseURL: &baseURL, Setting: &setting}
 	require.NoError(t, channel.Insert())
 	require.NoError(t, model.DB.Create(&model.Task{Platform: "lifecycle-only", Status: model.TaskStatusSubmitted}).Error)
 
@@ -237,7 +237,7 @@ func TestDisableFactoryPluginRespectsInUseGuard(t *testing.T) {
 	const key = "kling"
 	baseURL := "https://example.com"
 	channelSetting := `{"task_plugin_key":"kling"}`
-	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked-factory", Models: "doc", Group: "default", BaseURL: &baseURL, Setting: &channelSetting}
+	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Name: "linked-factory", Models: model.StringList{"doc"}, Group: model.StringList{"default"}, BaseURL: &baseURL, Setting: &channelSetting}
 	require.NoError(t, channel.Insert())
 
 	recorder := postTaskPluginStatus(t, key, "", `{"enabled":false}`)

@@ -3622,7 +3622,7 @@
     "Plugin version deleted": "Версия плагина удалена",
     "Policy JSON": "JSON политики",
     "Polling": "Опрос",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Режим опроса требует Redis и кэш памяти, в противном случае производительность будет значительно снижена",
+    "Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded": "Режим опроса требует DragonflyDB и кэш памяти, в противном случае производительность будет значительно снижена",
     "Poor": "Плохо",
     "Port": "Порт",
     "Port must be a positive integer": "Порт должен быть положительным целым числом",

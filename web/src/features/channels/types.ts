@@ -50,8 +50,8 @@ export const channelSchema = z.object({
   other: z.string().default(''),
   balance: z.number().default(0), // in USD
   balance_updated_time: z.number(),
-  models: z.string().default(''),
-  group: z.string().default('default'),
+  models: z.array(z.string()).default([]),
+  group: z.array(z.string()).default(['default']),
   used_quota: z.number().default(0),
   model_mapping: z.string().nullish(),
   status_code_mapping: z.string().nullish(),
@@ -332,8 +332,8 @@ export interface TagOperationParams {
   priority?: number
   weight?: number
   model_mapping?: string
-  models?: string
-  groups?: string
+  models?: string[]
+  groups?: string[]
 }
 
 // ============================================================================
@@ -346,8 +346,8 @@ export interface ChannelFormData {
   base_url: string
   key: string
   openai_organization?: string
-  models: string
-  group: string
+  models: string[]
+  group: string[]
   model_mapping?: string
   priority?: number
   weight?: number

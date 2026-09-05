@@ -3622,7 +3622,7 @@
     "Plugin version deleted": "Đã xóa phiên bản plugin",
     "Policy JSON": "JSON chính sách",
     "Polling": "Thăm dò",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Chế độ thăm dò yêu cầu Redis và bộ nhớ đệm, nếu không hiệu suất sẽ bị suy giảm đáng kể.",
+    "Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded": "Chế độ thăm dò yêu cầu DragonflyDB và bộ nhớ đệm, nếu không hiệu suất sẽ bị suy giảm đáng kể.",
     "Poor": "Nghèo",
     "Port": "Cảng",
     "Port must be a positive integer": "Cổng phải là số nguyên dương",

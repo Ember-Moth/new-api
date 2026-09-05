@@ -304,7 +304,7 @@ docker run --name new-api -d --restart always \
 
 | 組件 | 要求 |
 |------|------|
-| **資料庫** | PostgreSQL ≥ 9.6 |
+| **資料庫** | PostgreSQL ≥ 18 |
 | **容器引擎** | Docker / Docker Compose |
 | **系統架構** | 僅支援 64 位元系統（amd64 / arm64），不支援 32 位元系統 |
 
@@ -324,9 +324,9 @@ docker run --name new-api -d --restart always \
 | `USER_SESSION_ISSUANCE_WINDOW_SECONDS` | Session 簽發計數視窗（秒）；高於 revoked 保留期時自動限制 | `86400` |
 | `USER_SESSION_REVOKED_RETENTION_DAYS` | revoked Session 用於稽核與簽發計數的保留天數 | `7` |
 | `USER_SESSION_HOURLY_ALERT_THRESHOLD` | 全域每小時 Session 簽發告警門檻；只告警，不拒絕登入 | `5000` |
-| `CRYPTO_SECRET` | 快取鍵 HMAC 密鑰；共用 Redis 的節點必須使用相同有效值 | 預設跟隨 `SESSION_SECRET` |
+| `CRYPTO_SECRET` | 快取鍵 HMAC 密鑰；共用 DragonflyDB 的節點必須使用相同有效值 | 預設跟隨 `SESSION_SECRET` |
 | `SQL_DSN` | 資料庫連接字符串                                                     | - |
-| `REDIS_CONN_STRING` | Redis 連接字符串                                                  | - |
+| `REDIS_CONN_STRING` | DragonflyDB 連接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超時時間（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式掃描器單行最大緩衝（MB），圖像生成等超大 `data:` 片段（如 4K 圖片 base64）需適當調大 | `64` |
 | `MAX_REQUEST_BODY_MB` | 請求體最大大小（MB，**解壓縮後**計；防止超大請求/zip bomb 導致記憶體暴漲），超過將返回 `413` | `32` |
@@ -409,17 +409,17 @@ docker run --name new-api -d --restart always \
 
 > [!WARNING]
 > - 所有節點必須使用同一個主資料庫，並設定相同的 `SESSION_SECRET`；否則 Access Token、Refresh 工作階段和臨時鑑權流程無法一致驗證。
-> - 連線至同一個 Redis 的節點還必須設定相同的 `CRYPTO_SECRET`，否則節點產生的快取鍵摘要不一致，無法正確共用快取。
+> - 連線至同一個 DragonflyDB 的節點還必須設定相同的 `CRYPTO_SECRET`，否則節點產生的快取鍵摘要不一致，無法正確共用快取。
 
-登入 Session 和單一使用者的活躍數／簽發數限制均以資料庫為權威。Redis 中的 Session 僅為短期快取，TTL 跟隨 `SYNC_FREQUENCY`（預設 60 秒），且不會超過 Session 的剩餘有效期。
+登入 Session 和單一使用者的活躍數／簽發數限制均以資料庫為權威。DragonflyDB 中的 Session 僅為短期快取，TTL 跟隨 `SYNC_FREQUENCY`（預設 60 秒），且不會超過 Session 的剩餘有效期。
 
-| Redis 拓撲 | Session 狀態傳播 | 限流語義 |
+| DragonflyDB 拓撲 | Session 狀態傳播 | 限流語義 |
 | --- | --- | --- |
-| 所有節點共用 Redis | 撤銷和版本發布通常即時傳播 | Redis 限流額度在節點間共用 |
-| 每個節點使用獨立 Redis | 最遲在有效 `SYNC_FREQUENCY` 內回源資料庫並收斂；版本輪換後，新 Token 在持有舊快取的節點上可能短暫傳回 401 | 每個節點獨立計數，叢集總額度最壞約為單一節點門檻乘以節點數 |
-| 不使用 Redis | 每次 Session 驗證都直接讀取資料庫 | 各節點使用獨立的記憶體限流額度 |
+| 所有節點共用 DragonflyDB | 撤銷和版本發布通常即時傳播 | DragonflyDB 限流額度在節點間共用 |
+| 每個節點使用獨立 DragonflyDB | 最遲在有效 `SYNC_FREQUENCY` 內回源資料庫並收斂；版本輪換後，新 Token 在持有舊快取的節點上可能短暫傳回 401 | 每個節點獨立計數，叢集總額度最壞約為單一節點門檻乘以節點數 |
+| 不使用 DragonflyDB | 每次 Session 驗證都直接讀取資料庫 | 各節點使用獨立的記憶體限流額度 |
 
-縮短 `SYNC_FREQUENCY` 可減少獨立 Redis 的陳舊視窗，但每個活躍 SID 在每個節點上會依該 TTL 增加一次資料庫主鍵查詢。上述保證只讓 Session 鑑權在不同拓撲下維持有界陳舊；限流和其他 Redis 控制面快取仍受拓撲影響。
+縮短 `SYNC_FREQUENCY` 可減少獨立 DragonflyDB 的陳舊視窗，但每個活躍 SID 在每個節點上會依該 TTL 增加一次資料庫主鍵查詢。上述保證只讓 Session 鑑權在不同拓撲下維持有界陳舊；限流和其他 DragonflyDB 控制面快取仍受拓撲影響。
 
 Token、Origin 驗證和 PAT 契約請參閱[使用者鑑權與登入工作階段](./docs/authentication.md)。
 
@@ -428,7 +428,7 @@ Token、Origin 驗證和 PAT 契約請參閱[使用者鑑權與登入工作階�
 **重試配置：** `設置 → 運營設置 → 通用設置 → 失敗重試次數`
 
 **快取配置：**
-- `REDIS_CONN_STRING`：Redis 快取（推薦）
+- `REDIS_CONN_STRING`：DragonflyDB 快取（推薦）
 - `MEMORY_CACHE_ENABLED`：記憶體快取
 
 ---

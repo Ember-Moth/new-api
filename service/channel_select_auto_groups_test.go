@@ -73,8 +73,8 @@ func createChannelSelectAutoGroupsChannel(t *testing.T, db *gorm.DB, id int, gro
 		Status:   common.ChannelStatusEnabled,
 		Name:     fmt.Sprintf("channel-%d", id),
 		Weight:   &weight,
-		Models:   modelName,
-		Group:    group,
+		Models:   model.StringList{modelName},
+		Group:    model.StringList{group},
 		Priority: &priority,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{

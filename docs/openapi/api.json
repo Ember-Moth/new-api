@@ -4149,27 +4149,28 @@
         ],
         "parameters": [
           {
-            "name": "p",
+            "name": "cursor",
             "in": "query",
-            "description": "",
             "required": false,
+            "description": "上一页返回的 opaque next_cursor；首次请求省略。",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
             "name": "page_size",
             "in": "query",
-            "description": "",
             "required": false,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "成功",
+            "description": "返回 items、page_size、next_cursor、has_more；游标分页不计算总数。",
             "headers": {}
           }
         },
@@ -4311,10 +4312,30 @@
         "tags": [
           "日志"
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "上一页返回的 opaque next_cursor；首次请求省略。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "成功",
+            "description": "返回 items、page_size、next_cursor、has_more；游标分页不计算总数。",
             "headers": {}
           }
         },
@@ -5360,10 +5381,16 @@
             "type": "integer"
           },
           "models": {
-            "type": "string"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
-          "groups": {
-            "type": "string"
+          "group": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "priority": {
             "type": "integer"

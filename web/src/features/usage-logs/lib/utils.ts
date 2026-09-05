@@ -254,6 +254,7 @@ export async function fetchLogsByCategory(
       columnFilters,
       isAdmin,
     })
+    params.cursor = config.cursor
     return isAdmin ? await getAllLogs(params) : await getUserLogs(params)
   }
 

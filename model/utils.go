@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/google/uuid"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
@@ -24,6 +25,8 @@ const (
 
 var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
+var batchFlushMutex sync.Mutex
+var pendingQuotaBatch *quotaBatch
 
 func init() {
 	for i := 0; i < BatchUpdateTypeCount; i++ {
@@ -62,67 +65,59 @@ func addNewRecord(type_ int, id int, value int) {
 	batchUpdateStores[type_][id] = sum
 }
 
-func batchUpdate() {
-	// check if there's any data to update
-	hasData := false
-	for i := 0; i < BatchUpdateTypeCount; i++ {
-		batchUpdateLocks[i].Lock()
-		if len(batchUpdateStores[i]) > 0 {
-			hasData = true
+func batchUpdate() error {
+	batchFlushMutex.Lock()
+	defer batchFlushMutex.Unlock()
+	if pendingQuotaBatch == nil {
+		id, err := uuid.NewV7()
+		if err != nil {
+			common.SysError("cannot identify quota batch: " + err.Error())
+			return err
+		}
+		stores := make([]map[int]int, BatchUpdateTypeCount)
+		hasData := false
+		for i := range stores {
+			batchUpdateLocks[i].Lock()
+			stores[i] = batchUpdateStores[i]
+			batchUpdateStores[i] = make(map[int]int)
 			batchUpdateLocks[i].Unlock()
-			break
+			hasData = hasData || len(stores[i]) > 0
 		}
-		batchUpdateLocks[i].Unlock()
-	}
-
-	if !hasData {
-		return
-	}
-
-	common.SysLog("batch update started")
-	stores := make([]map[int]int, BatchUpdateTypeCount)
-	for i := 0; i < BatchUpdateTypeCount; i++ {
-		batchUpdateLocks[i].Lock()
-		stores[i] = batchUpdateStores[i]
-		batchUpdateStores[i] = make(map[int]int)
-		batchUpdateLocks[i].Unlock()
-	}
-
-	for i, store := range stores {
-		if i == BatchUpdateTypeUserQuota || i == BatchUpdateTypeUsedQuota || i == BatchUpdateTypeRequestCount {
-			continue
+		if !hasData {
+			return nil
 		}
-		for key, value := range store {
-			switch i {
-			case BatchUpdateTypeTokenQuota:
-				err := increaseTokenQuota(key, value)
-				if err != nil {
-					common.SysLog("failed to batch update token quota: " + err.Error())
-				}
-			case BatchUpdateTypeChannelUsedQuota:
-				updateChannelUsedQuota(key, value)
-			}
+		pendingQuotaBatch = &quotaBatch{ID: id.String(), Stores: stores}
+	}
+	if err := applyQuotaBatch(pendingQuotaBatch); err != nil {
+		common.SysError(fmt.Sprintf("quota batch %s retained for retry: %v", pendingQuotaBatch.ID, err))
+		return err
+	}
+	id := pendingQuotaBatch.ID
+	pendingQuotaBatch = nil
+	// Once COMMIT has been acknowledged this process will never retry this ID.
+	// Failed cleanup is harmless; an orphan receipt cannot apply a charge again.
+	if err := DB.Exec("DELETE FROM quota_batch_receipts WHERE id = ?::uuid", id).Error; err != nil {
+		common.SysError(fmt.Sprintf("quota batch %s receipt cleanup failed: %v", id, err))
+	}
+	return nil
+}
+
+// FlushQuotaUpdates drains pending deltas after request handling has quiesced.
+func FlushQuotaUpdates() error {
+	for {
+		if err := batchUpdate(); err != nil {
+			return err
+		}
+		pending := false
+		for i := range batchUpdateStores {
+			batchUpdateLocks[i].Lock()
+			pending = pending || len(batchUpdateStores[i]) > 0
+			batchUpdateLocks[i].Unlock()
+		}
+		if !pending {
+			return nil
 		}
 	}
-
-	userQuotaStore := stores[BatchUpdateTypeUserQuota]
-	usedQuotaStore := stores[BatchUpdateTypeUsedQuota]
-	requestCountStore := stores[BatchUpdateTypeRequestCount]
-
-	userIDs := make(map[int]struct{}, len(userQuotaStore)+len(usedQuotaStore)+len(requestCountStore))
-	for key := range userQuotaStore {
-		userIDs[key] = struct{}{}
-	}
-	for key := range usedQuotaStore {
-		userIDs[key] = struct{}{}
-	}
-	for key := range requestCountStore {
-		userIDs[key] = struct{}{}
-	}
-	for key := range userIDs {
-		updateUserQuotaUsedQuotaAndRequestCount(key, userQuotaStore[key], usedQuotaStore[key], requestCountStore[key])
-	}
-	common.SysLog("batch update finished")
 }
 
 func RecordExist(err error) (bool, error) {

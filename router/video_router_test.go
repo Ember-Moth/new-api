@@ -64,8 +64,8 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 		Key:    "unused",
 		Status: common.ChannelStatusEnabled,
 		Name:   "jimeng fetch",
-		Models: "jimeng_vgfm_t2v_l20",
-		Group:  "default",
+		Models: model.StringList{"jimeng_vgfm_t2v_l20"},
+		Group:  model.StringList{"default"},
 	}).Error)
 
 	task := &model.Task{

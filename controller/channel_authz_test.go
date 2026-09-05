@@ -23,14 +23,14 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		Key:            "old-key",
 		BaseURL:        &baseURL,
 		HeaderOverride: &headerOverride,
-		Models:         "gpt-4o",
-		Group:          "default",
+		Models:         model.StringList{"gpt-4o"},
+		Group:          model.StringList{"default"},
 	}
 
 	t.Run("non-sensitive routing fields", func(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
-		updated.Models = "gpt-4o,gpt-4o-mini"
-		updated.Group = "vip"
+		updated.Models = model.StringList{"gpt-4o", "gpt-4o-mini"}
+		updated.Group = model.StringList{"vip"}
 
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
 			"models": updated.Models,
@@ -104,8 +104,8 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 		Balance:            44.5,
 		BalanceUpdatedTime: 55,
 		UsedQuota:          66,
-		Models:             "gpt-4o",
-		Group:              "default",
+		Models:             model.StringList{"gpt-4o"},
+		Group:              model.StringList{"default"},
 	}}
 
 	clearChannelReadOnlyFields(&channel, map[string]any{
@@ -125,8 +125,8 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 	assert.Zero(t, channel.Balance)
 	assert.Zero(t, channel.BalanceUpdatedTime)
 	assert.Zero(t, channel.UsedQuota)
-	assert.Equal(t, "gpt-4o", channel.Models)
-	assert.Equal(t, "default", channel.Group)
+	assert.Equal(t, model.StringList{"gpt-4o"}, channel.Models)
+	assert.Equal(t, model.StringList{"default"}, channel.Group)
 }
 
 func TestUpdateChannelRejectsStatusField(t *testing.T) {

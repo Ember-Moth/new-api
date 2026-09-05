@@ -3622,7 +3622,7 @@
     "Plugin version deleted": "Plugin version deleted",
     "Policy JSON": "Policy JSON",
     "Polling": "Polling",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded",
+    "Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded": "Polling mode requires DragonflyDB and memory cache, otherwise performance will be significantly degraded",
     "Poor": "Poor",
     "Port": "Port",
     "Port must be a positive integer": "Port must be a positive integer",

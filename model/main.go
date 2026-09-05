@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 
 	"gorm.io/driver/clickhouse"
 	"gorm.io/driver/postgres"
@@ -144,198 +145,89 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 		DSN:                  dsn,
 		PreferSimpleProtocol: true,
 	}), newGormConfig(false))
-	return db, common.DatabaseTypePostgreSQL, err
+	if err != nil {
+		return nil, common.DatabaseTypePostgreSQL, err
+	}
+	var serverVersion int
+	err = db.Raw("SELECT current_setting('server_version_num')::integer").Scan(&serverVersion).Error
+	if err == nil && serverVersion < 180000 {
+		err = fmt.Errorf("%s requires PostgreSQL 18 or newer; connected server is PostgreSQL %d", envName, serverVersion/10000)
+	}
+	if err != nil {
+		if connection, closeErr := db.DB(); closeErr == nil {
+			_ = connection.Close()
+		}
+		return nil, common.DatabaseTypePostgreSQL, err
+	}
+	return db, common.DatabaseTypePostgreSQL, nil
 }
 
-func InitDB() (err error) {
+func InitDB() error {
 	db, dbType, err := chooseDB("SQL_DSN", false)
-	if err == nil {
-		common.SetMainDatabaseType(dbType)
-		if os.Getenv("LOG_SQL_DSN") == "" {
-			common.SetLogDatabaseType(dbType)
-		}
-		initCol()
-		if common.DebugEnabled {
-			db = db.Debug()
-		}
-		DB = db
-		if err := ensureUserQuotaColumns(DB, common.MainDatabaseType()); err != nil {
-			return err
-		}
-		sqlDB, err := DB.DB()
-		if err != nil {
-			return err
-		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
-		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
-
-		if !common.IsMasterNode {
-			return nil
-		}
-		common.SysLog("database migration started")
-		err = migrateDB()
+	if err != nil {
 		return err
 	}
-	return err
+	common.SetMainDatabaseType(dbType)
+	if os.Getenv("LOG_SQL_DSN") == "" {
+		common.SetLogDatabaseType(dbType)
+	}
+	initCol()
+	if common.DebugEnabled {
+		db = db.Debug()
+	}
+	DB = db
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
+	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+	if !common.IsMasterNode {
+		return nil
+	}
+	common.SysLog("applying PostgreSQL schema migrations")
+	return schema.UpPostgres(sqlDB, schema.Main)
 }
 
-func InitLogDB() (err error) {
+func InitLogDB() error {
 	if os.Getenv("LOG_SQL_DSN") == "" {
 		LOG_DB = DB
 		common.SetLogDatabaseType(common.MainDatabaseType())
-		initCol()
-		return
-	}
-	db, dbType, err := chooseDB("LOG_SQL_DSN", true)
-	if err == nil {
+	} else {
+		db, dbType, err := chooseDB("LOG_SQL_DSN", true)
+		if err != nil {
+			return err
+		}
 		common.SetLogDatabaseType(dbType)
-		initCol()
 		if common.DebugEnabled {
 			db = db.Debug()
 		}
 		LOG_DB = db
-		sqlDB, err := LOG_DB.DB()
+	}
+	initCol()
+	sqlDB, err := LOG_DB.DB()
+	if err != nil {
+		return err
+	}
+	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
+	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+	if !common.IsMasterNode {
+		return nil
+	}
+	common.SysLog("applying log schema migrations")
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		coordinator, err := DB.DB()
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
-		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
-
-		if !common.IsMasterNode {
-			return nil
+		if err := schema.UpClickHouse(normalizeClickHouseDSN(os.Getenv("LOG_SQL_DSN")), coordinator); err != nil {
+			return err
 		}
-		common.SysLog("database migration started")
-		err = migrateLOGDB()
-		return err
+		return syncClickHouseLogTTL(clickHouseLogTTLDays())
 	}
-	return err
-}
-
-var userQuotaColumns = []string{"quota", "used_quota", "aff_quota", "aff_history"}
-
-// ensureUserQuotaColumns rejects a legacy 32-bit wallet schema before any
-// migrations run. The 64-bit-only build intentionally does not auto-upgrade
-// an existing wallet; operators must migrate it explicitly before starting.
-func ensureUserQuotaColumns(db *gorm.DB, dbType common.DatabaseType) error {
-	if common.GetEnvOrDefaultBool("SKIP_64BIT_QUOTA_SCHEMA_CHECK", false) {
-		common.SysLog("SKIP_64BIT_QUOTA_SCHEMA_CHECK=true; skipping user quota schema check")
-		return nil
-	}
-	if db == nil {
-		return nil
-	}
-	if !db.Migrator().HasTable(&User{}) {
-		return nil
-	}
-	columnTypes, err := db.Migrator().ColumnTypes(&User{})
-	if err != nil {
-		return fmt.Errorf("failed to inspect users schema: %w", err)
-	}
-	for _, expected := range userQuotaColumns {
-		for _, actual := range columnTypes {
-			if !strings.EqualFold(actual.Name(), expected) {
-				continue
-			}
-			dataType := actual.DatabaseTypeName()
-			if !is64BitIntegerType(dbType, dataType) {
-				return fmt.Errorf("users.%s uses %s; 32-bit is not supported", expected, dataType)
-			}
-		}
-	}
-	return nil
-}
-
-func is64BitIntegerType(dbType common.DatabaseType, dataType string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(dataType))
-	switch dbType {
-	case common.DatabaseTypePostgreSQL:
-		return normalized == "bigint" || normalized == "int8"
-	default:
-		return false
-	}
-}
-
-func migrateDB() error {
-	if err := migrateTokenKeyUniqueness(DB); err != nil {
-		return err
-	}
-	if err := migratePrefillGroupUniqueness(DB); err != nil {
-		return err
-	}
-	// Migrate price_amount column from float/double to decimal for existing tables
-	migrateSubscriptionPlanPriceAmount()
-	// Migrate model_limits column from varchar to text for existing tables
-	if err := migrateTokenModelLimitsToText(); err != nil {
-		return err
-	}
-
-	err := DB.AutoMigrate(
-		&Channel{},
-		&Token{},
-		&User{},
-		&UserSession{},
-		&AuthFlow{},
-		&ExternalIdentityClaim{},
-		&PasskeyCredential{},
-		&Option{},
-		&LoginEncryptionKey{},
-		&Redemption{},
-		&Ability{},
-		&Log{},
-		&Midjourney{},
-		&TopUp{},
-		&QuotaData{},
-		&Task{},
-		&TaskPlugin{},
-		&Model{},
-		&Vendor{},
-		&PrefillGroup{},
-		&Setup{},
-		&TwoFA{},
-		&TwoFABackupCode{},
-		&Checkin{},
-		&SubscriptionOrder{},
-		&UserSubscription{},
-		&SubscriptionPreConsumeRecord{},
-		&CustomOAuthProvider{},
-		&UserOAuthBinding{},
-		&PerfMetric{},
-		&SystemInstance{},
-		&SystemTask{},
-		&SystemTaskLock{},
-		&CasbinRule{},
-		&AuthzRole{},
-	)
-	if err != nil {
-		return err
-	}
-	if err := InitializeUserAuthVersions(); err != nil {
-		return err
-	}
-	if err := InitializeExternalIdentityClaims(); err != nil {
-		return err
-	}
-	if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func migrateLOGDB() error {
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		return migrateClickHouseLogDB()
-	}
-	return LOG_DB.AutoMigrate(&Log{})
-}
-
-func migrateClickHouseLogDB() error {
-	ttlDays := clickHouseLogTTLDays()
-	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
-		return err
-	}
-	return syncClickHouseLogTTL(ttlDays)
+	return schema.UpPostgres(sqlDB, schema.Logs)
 }
 
 func clickHouseLogTTLDays() int {
@@ -351,43 +243,6 @@ func clickHouseLogTTLExpression(ttlDays int) string {
 		return ""
 	}
 	return fmt.Sprintf("toDateTime(created_at) + INTERVAL %d DAY DELETE", ttlDays)
-}
-
-func clickHouseLogTTLClause(ttlDays int) string {
-	expression := clickHouseLogTTLExpression(ttlDays)
-	if expression == "" {
-		return ""
-	}
-	return "\nTTL " + expression
-}
-
-func clickHouseLogCreateTableSQL(ttlDays int) string {
-	return fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS logs (
-	id Int64 DEFAULT 0,
-	user_id Int32 DEFAULT 0,
-	created_at Int64 DEFAULT 0,
-	type Int32 DEFAULT 0,
-	content String DEFAULT '',
-	username String DEFAULT '',
-	token_name String DEFAULT '',
-	model_name String DEFAULT '',
-	quota Int32 DEFAULT 0,
-	prompt_tokens Int32 DEFAULT 0,
-	completion_tokens Int32 DEFAULT 0,
-	use_time Int32 DEFAULT 0,
-	is_stream UInt8 DEFAULT 0,
-	channel_id Int32 DEFAULT 0,
-	token_id Int32 DEFAULT 0,
-	`+"`group`"+` String DEFAULT '',
-	ip String DEFAULT '',
-	request_id String DEFAULT '',
-	upstream_request_id String DEFAULT '',
-	other String DEFAULT ''
-)
-ENGINE = MergeTree()
-PARTITION BY toYYYYMM(toDateTime(created_at))
-ORDER BY (created_at, request_id)%s`, clickHouseLogTTLClause(ttlDays))
 }
 
 func syncClickHouseLogTTL(ttlDays int) error {
@@ -417,49 +272,6 @@ func clickHouseLogTableHasTTL() (bool, error) {
 func clickHouseCreateTableHasTTL(createTableSQL string) bool {
 	upperSQL := strings.ToUpper(createTableSQL)
 	return strings.Contains(upperSQL, "\nTTL ") || strings.Contains(upperSQL, " TTL ")
-}
-
-// migrateTokenModelLimitsToText migrates model_limits column from varchar(1024) to text
-// This is safe to run multiple times - it checks the column type first
-func migrateTokenModelLimitsToText() error {
-	if !DB.Migrator().HasTable(&Token{}) || !DB.Migrator().HasColumn(&Token{}, "model_limits") {
-		return nil
-	}
-	var dataType string
-	if err := DB.Raw(`SELECT data_type FROM information_schema.columns
-		WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
-		"tokens", "model_limits").Scan(&dataType).Error; err != nil {
-		return fmt.Errorf("failed to inspect tokens.model_limits: %w", err)
-	}
-	if dataType == "text" {
-		return nil
-	}
-	if err := DB.Exec("ALTER TABLE tokens ALTER COLUMN model_limits TYPE text").Error; err != nil {
-		return fmt.Errorf("failed to migrate tokens.model_limits to text: %w", err)
-	}
-	return nil
-}
-
-// migrateSubscriptionPlanPriceAmount migrates price_amount column from float/double to decimal(10,6)
-// This is safe to run multiple times - it checks the column type first
-func migrateSubscriptionPlanPriceAmount() {
-	if !DB.Migrator().HasTable(&SubscriptionPlan{}) || !DB.Migrator().HasColumn(&SubscriptionPlan{}, "price_amount") {
-		return
-	}
-	var dataType string
-	if err := DB.Raw(`SELECT data_type FROM information_schema.columns
-		WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
-		"subscription_plans", "price_amount").Scan(&dataType).Error; err != nil {
-		common.SysLog(fmt.Sprintf("Warning: failed to inspect subscription_plans.price_amount: %v", err))
-		return
-	}
-	if dataType == "numeric" {
-		return
-	}
-	if err := DB.Exec(`ALTER TABLE subscription_plans ALTER COLUMN price_amount TYPE decimal(10,6)
-		USING price_amount::decimal(10,6)`).Error; err != nil {
-		common.SysLog(fmt.Sprintf("Warning: failed to migrate subscription_plans.price_amount to decimal: %v", err))
-	}
 }
 
 func closeDB(db *gorm.DB) error {

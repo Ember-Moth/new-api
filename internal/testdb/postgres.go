@@ -38,6 +38,15 @@ func NewSchema() (string, func() error, error) {
 		return "", nil, err
 	}
 	connection.SetMaxOpenConns(1)
+	var serverVersion int
+	if err := admin.Raw("SELECT current_setting('server_version_num')::integer").Scan(&serverVersion).Error; err != nil {
+		_ = connection.Close()
+		return "", nil, err
+	}
+	if serverVersion < 180000 {
+		_ = connection.Close()
+		return "", nil, fmt.Errorf("TEST_POSTGRES_DSN requires PostgreSQL 18 or newer")
+	}
 	schema := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE SCHEMA ?", clause.Table{Name: schema}).Error; err != nil {
 		_ = connection.Close()

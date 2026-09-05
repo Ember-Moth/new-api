@@ -156,8 +156,8 @@ export function parseTaskResult() { return {}; }
 		Key:          "key-1",
 		Status:       common.ChannelStatusEnabled,
 		Name:         "ch-1",
-		Group:        "default",
-		Models:       "alias-model,declared-model",
+		Group:        model.StringList{"default"},
+		Models:       model.StringList{"alias-model", "declared-model"},
 		ModelMapping: &mapping,
 	}).Error)
 	model.InitChannelCache()

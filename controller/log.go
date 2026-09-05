@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,11 @@ import (
 
 func GetAllLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
+	cursor, err := model.NewLogCursorPage(c.Query("cursor"), fmt.Sprintf("admin:%d:%d", c.GetInt("id"), c.GetInt("role")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
@@ -22,7 +28,7 @@ func GetAllLogs(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId)
+	logs, _, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId, cursor)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -32,14 +38,17 @@ func GetAllLogs(c *gin.Context) {
 	} else {
 		model.FormatRootLogs(logs)
 	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(logs)
-	common.ApiSuccess(c, pageInfo)
+	common.ApiSuccess(c, gin.H{"items": logs, "page_size": pageInfo.GetPageSize(), "next_cursor": cursor.NextCursor, "has_more": cursor.HasMore})
 	return
 }
 
 func GetUserLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
+	cursor, err := model.NewLogCursorPage(c.Query("cursor"), fmt.Sprintf("self:%d:%d", c.GetInt("id"), c.GetInt("role")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
 	userId := c.GetInt("id")
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
@@ -49,14 +58,12 @@ func GetUserLogs(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
-	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId)
+	logs, _, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId, cursor)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(logs)
-	common.ApiSuccess(c, pageInfo)
+	common.ApiSuccess(c, gin.H{"items": logs, "page_size": pageInfo.GetPageSize(), "next_cursor": cursor.NextCursor, "has_more": cursor.HasMore})
 	return
 }
 

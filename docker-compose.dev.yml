@@ -28,7 +28,7 @@ services:
       - dev_data:/data
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
-      - REDIS_CONN_STRING=redis://redis
+      - REDIS_CONN_STRING=redis://dragonfly
       - TZ=Asia/Shanghai
       - BATCH_UPDATE_ENABLED=true
       # Local HTTP dev mode: keep Secure=false and leave TRUSTED_URL unset. This disables the refresh/logout OriginGuard so the :5173 -> :3000 dev proxy works.
@@ -37,30 +37,35 @@ services:
       # - SESSION_COOKIE_SECURE=true
       # - SESSION_COOKIE_TRUSTED_URL=https://example.com,https://admin.example.com
     depends_on:
-      redis:
+      dragonfly:
         condition: service_started
       postgres:
         condition: service_healthy
     networks:
       - dev-network
 
-  redis:
-    image: redis:7-alpine
-    container_name: new-api-dev-redis
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.2
+    ulimits:
+      memlock: -1
+    container_name: new-api-dev-dragonfly
     restart: unless-stopped
+    command: ["--cache_mode=false"]
     networks:
       - dev-network
 
   postgres:
-    image: postgres:15-alpine
+    # PostgreSQL 18 stores cluster data under /var/lib/postgresql/18/docker.
+    image: postgres:18-alpine
     container_name: new-api-dev-pg
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "io_method=worker"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: 123456
       POSTGRES_DB: new-api
     volumes:
-      - dev_pg_data:/var/lib/postgresql/data
+      - dev_pg_data:/var/lib/postgresql
     networks:
       - dev-network
     healthcheck:

@@ -1,0 +1,127 @@
+{
+  "log_offset": {
+    "execution_ms": 7.459,
+    "shared_hit_blocks": 2187,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Limit",
+        "Actual Rows": 100.0
+      },
+      {
+        "Node Type": "Index Only Scan",
+        "Index Name": "idx_created_at_id",
+        "Actual Rows": 90100.0,
+        "Index Searches": 1
+      }
+    ]
+  },
+  "log_cursor": {
+    "execution_ms": 0.033,
+    "shared_hit_blocks": 5,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Limit",
+        "Actual Rows": 100.0
+      },
+      {
+        "Node Type": "Index Only Scan",
+        "Index Name": "idx_created_at_id",
+        "Actual Rows": 100.0,
+        "Index Searches": 1
+      }
+    ]
+  },
+  "group_csv": {
+    "execution_ms": 0.571,
+    "shared_hit_blocks": 115,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Seq Scan",
+        "Actual Rows": 100.0,
+        "Rows Removed by Filter": 9900
+      }
+    ]
+  },
+  "group_array": {
+    "execution_ms": 0.303,
+    "shared_hit_blocks": 127,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Bitmap Heap Scan",
+        "Actual Rows": 100.0
+      },
+      {
+        "Node Type": "Bitmap Index Scan",
+        "Index Name": "idx_channels_groups",
+        "Actual Rows": 100.0,
+        "Index Searches": 1
+      }
+    ]
+  },
+  "name_btree": {
+    "execution_ms": 0.538,
+    "shared_hit_blocks": 115,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Seq Scan",
+        "Actual Rows": 10.0,
+        "Rows Removed by Filter": 9990
+      }
+    ]
+  },
+  "name_trigram": {
+    "execution_ms": 0.679,
+    "shared_hit_blocks": 233,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Seq Scan",
+        "Actual Rows": 10.0,
+        "Rows Removed by Filter": 9990
+      }
+    ]
+  },
+  "ability_skip_scan": {
+    "execution_ms": 0.067,
+    "shared_hit_blocks": 54,
+    "shared_read_blocks": 0,
+    "nodes": [
+      {
+        "Node Type": "Bitmap Heap Scan",
+        "Actual Rows": 20.0
+      },
+      {
+        "Node Type": "Bitmap Index Scan",
+        "Index Name": "abilities_pkey",
+        "Actual Rows": 20.0,
+        "Index Searches": 9
+      }
+    ]
+  },
+  "io_method": "worker",
+  "name_trigram_after_vacuum": {
+    "execution_ms": 0.061,
+    "shared_hit_blocks": 19,
+    "index": "idx_channels_name"
+  },
+  "quota_batch": {
+    "users": 100,
+    "direct_update_statements": 200,
+    "batch_update_statements": 1,
+    "final_quota": 99800,
+    "final_used_quota": 200,
+    "final_request_count": 200
+  },
+  "dataset": {
+    "logs": 100000,
+    "channels": 10000,
+    "abilities": 40000,
+    "postgresql": "18.6",
+    "notes": "Warm-cache local measurements. Trigram GIN pending list cleaned with VACUUM ANALYZE before the steady-state measurement. Not production throughput claims."
+  }
+}

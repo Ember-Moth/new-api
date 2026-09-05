@@ -149,7 +149,7 @@ export function transformFormDataToPayload(
       : -1,
     unlimited_quota: data.unlimited_quota,
     model_limits_enabled: data.model_limits.length > 0,
-    model_limits: data.model_limits.join(','),
+    model_limits: [...data.model_limits],
     allow_ips: data.allow_ips || '',
     group: data.group || '',
     auto_groups:
@@ -185,9 +185,7 @@ export function transformApiKeyToFormDefaults(
         ? new Date(apiKey.expired_time * 1000)
         : undefined,
     unlimited_quota: apiKey.unlimited_quota,
-    model_limits: apiKey.model_limits
-      ? apiKey.model_limits.split(',').filter(Boolean)
-      : [],
+    model_limits: [...apiKey.model_limits],
     allow_ips: apiKey.allow_ips || '',
     group: apiKey.group || DEFAULT_GROUP,
     auto_groups_mode: autoGroupsMode,

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
@@ -58,33 +60,8 @@ func writeUserCache(user *UserBase, includeQuota bool) error {
 		includeQuotaArg = "1"
 	}
 	ttl := userCacheTTLSeconds()
-	const script = `
-local incoming = tonumber(ARGV[1])
-local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
-local committed = tonumber(redis.call('GET', KEYS[3]) or '0')
-local current = tonumber(redis.call('HGET', KEYS[1], 'AuthVersion') or '0')
-if pending > incoming or committed > incoming or current > incoming then
-  return 0
-end
-if committed < incoming then
-  redis.call('SET', KEYS[3], ARGV[1])
-end
-if pending > 0 and pending <= incoming then
-  redis.call('DEL', KEYS[2])
-end
-if ARGV[10] == '0' and redis.call('EXISTS', KEYS[1]) == 0 then
-  return 1
-end
-redis.call('HSET', KEYS[1],
-  'Id', ARGV[2], 'Group', ARGV[3], 'Email', ARGV[4],
-  'Status', ARGV[5], 'Role', ARGV[6], 'Username', ARGV[7],
-  'Setting', ARGV[8], 'AuthVersion', ARGV[1], 'CacheSchema', ARGV[9])
-if ARGV[10] == '1' and redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
-  redis.call('HSET', KEYS[1], 'Quota', ARGV[11])
-end
-redis.call('EXPIRE', KEYS[1], ARGV[12])
-return 1`
-	result, err := common.RDB.Eval(context.Background(), script,
+
+	result, err := writeUserCacheScript.Run(context.Background(), common.RDB,
 		[]string{getUserCacheKey(user.Id), getUserAuthFenceKey(user.Id), getUserAuthVersionKey(user.Id)},
 		user.AuthVersion, user.Id, user.Group, user.Email, user.Status, user.Role,
 		user.Username, user.Setting, user.CacheSchema, includeQuotaArg, user.Quota, ttl,
@@ -133,18 +110,8 @@ func SetUserAuthVersionFence(userId int, authVersion int64) error {
 	if userId <= 0 || authVersion <= 0 {
 		return fmt.Errorf("invalid user auth fence")
 	}
-	const script = `
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-local incoming = tonumber(ARGV[1])
-if current < incoming then
-  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-elseif current == incoming then
-  redis.call('EXPIRE', KEYS[1], ARGV[2])
-elseif redis.call('TTL', KEYS[1]) < 0 then
-  redis.call('EXPIRE', KEYS[1], ARGV[2])
-end
-return 1`
-	return common.RDB.Eval(context.Background(), script, []string{getUserAuthFenceKey(userId)}, authVersion, userAuthFenceTTLSeconds()).Err()
+
+	return setUserAuthVersionFenceScript.Run(context.Background(), common.RDB, []string{getUserAuthFenceKey(userId)}, authVersion, userAuthFenceTTLSeconds()).Err()
 }
 
 // publishCommittedUserAuthVersion records the durable lower bound used to
@@ -157,18 +124,8 @@ func publishCommittedUserAuthVersion(userId int, authVersion int64) error {
 	if userId <= 0 || authVersion <= 0 {
 		return fmt.Errorf("invalid committed user auth version")
 	}
-	const script = `
-local incoming = tonumber(ARGV[1])
-local committed = tonumber(redis.call('GET', KEYS[1]) or '0')
-local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
-if committed < incoming then
-  redis.call('SET', KEYS[1], ARGV[1])
-end
-if pending > 0 and pending <= incoming then
-  redis.call('DEL', KEYS[2])
-end
-return 1`
-	return common.RDB.Eval(context.Background(), script,
+
+	return publishCommittedUserAuthVersionScript.Run(context.Background(), common.RDB,
 		[]string{getUserAuthVersionKey(userId), getUserAuthFenceKey(userId)}, authVersion,
 	).Err()
 }
@@ -234,12 +191,6 @@ func PublishUserAuthCache(userId int) error {
 	return updateUserCache(*user)
 }
 
-// InitializeUserAuthVersions must run after AutoMigrate when upgrading an
-// existing database. It is idempotent and portable across all supported DBs.
-func InitializeUserAuthVersions() error {
-	return DB.Model(&User{}).Where("auth_version IS NULL OR auth_version < ?", 1).Update("auth_version", 1).Error
-}
-
 func updateUserCacheFieldAtVersion(userId int, field string, value interface{}, authVersion int64) error {
 	if !common.RedisEnabled {
 		return nil
@@ -247,7 +198,72 @@ func updateUserCacheFieldAtVersion(userId int, field string, value interface{}, 
 	if userId <= 0 || authVersion <= 0 {
 		return fmt.Errorf("invalid user auth version")
 	}
-	const script = `
+
+	result, err := updateUserCacheFieldAtVersionScript.Run(context.Background(), common.RDB,
+		[]string{getUserCacheKey(userId), getUserAuthFenceKey(userId), getUserAuthVersionKey(userId)},
+		authVersion, field, value, userCacheSchemaVersion,
+	).Int()
+	if err != nil {
+		return err
+	}
+	if result == 0 {
+		return ErrUserAuthCachePending
+	}
+	return nil
+}
+
+var writeUserCacheScript = redis.NewScript(`
+local incoming = tonumber(ARGV[1])
+local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
+local committed = tonumber(redis.call('GET', KEYS[3]) or '0')
+local current = tonumber(redis.call('HGET', KEYS[1], 'AuthVersion') or '0')
+if pending > incoming or committed > incoming or current > incoming then
+  return 0
+end
+if committed < incoming then
+  redis.call('SET', KEYS[3], ARGV[1])
+end
+if pending > 0 and pending <= incoming then
+  redis.call('DEL', KEYS[2])
+end
+if ARGV[10] == '0' and redis.call('EXISTS', KEYS[1]) == 0 then
+  return 1
+end
+redis.call('HSET', KEYS[1],
+  'Id', ARGV[2], 'Group', ARGV[3], 'Email', ARGV[4],
+  'Status', ARGV[5], 'Role', ARGV[6], 'Username', ARGV[7],
+  'Setting', ARGV[8], 'AuthVersion', ARGV[1], 'CacheSchema', ARGV[9])
+if ARGV[10] == '1' and redis.call('HEXISTS', KEYS[1], 'Quota') == 0 then
+  redis.call('HSET', KEYS[1], 'Quota', ARGV[11])
+end
+redis.call('EXPIRE', KEYS[1], ARGV[12])
+return 1`)
+
+var setUserAuthVersionFenceScript = redis.NewScript(`
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local incoming = tonumber(ARGV[1])
+if current < incoming then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+elseif current == incoming then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+elseif redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 1`)
+
+var publishCommittedUserAuthVersionScript = redis.NewScript(`
+local incoming = tonumber(ARGV[1])
+local committed = tonumber(redis.call('GET', KEYS[1]) or '0')
+local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
+if committed < incoming then
+  redis.call('SET', KEYS[1], ARGV[1])
+end
+if pending > 0 and pending <= incoming then
+  redis.call('DEL', KEYS[2])
+end
+return 1`)
+
+var updateUserCacheFieldAtVersionScript = redis.NewScript(`
 local incoming = tonumber(ARGV[1])
 local pending = tonumber(redis.call('GET', KEYS[2]) or '0')
 local committed = tonumber(redis.call('GET', KEYS[3]) or '0')
@@ -268,16 +284,4 @@ if current ~= incoming then
   return 1
 end
 redis.call('HSET', KEYS[1], ARGV[2], ARGV[3], 'CacheSchema', ARGV[4])
-return 1`
-	result, err := common.RDB.Eval(context.Background(), script,
-		[]string{getUserCacheKey(userId), getUserAuthFenceKey(userId), getUserAuthVersionKey(userId)},
-		authVersion, field, value, userCacheSchemaVersion,
-	).Int()
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return ErrUserAuthCachePending
-	}
-	return nil
-}
+return 1`)

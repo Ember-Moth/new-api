@@ -23,36 +23,35 @@ type Token struct {
 	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
 	UnlimitedQuota     bool           `json:"unlimited_quota"`
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
-	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
+	ModelLimits        StringList     `json:"model_limits" gorm:"type:text[];not null;default:'{}'"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
-	AutoGroups         string         `json:"-" gorm:"type:text"`
+	AutoGroups         StringList     `json:"-" gorm:"type:text[]"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
-	if token.AutoGroups == "" {
+	if token.AutoGroups == nil {
 		return nil, nil
 	}
-	var groups []string
-	if err := common.UnmarshalJsonStr(token.AutoGroups, &groups); err != nil {
-		return nil, err
-	}
-	return groups, nil
+	return append([]string{}, token.AutoGroups...), nil
 }
 
 func (token *Token) SetAutoGroups(groups []string) error {
 	if len(groups) == 0 {
-		token.AutoGroups = ""
+		token.AutoGroups = nil
 		return nil
 	}
-	data, err := common.Marshal(groups)
-	if err != nil {
-		return err
+	token.AutoGroups = StringList(groups).Normalized()
+	return nil
+}
+
+func (token *Token) BeforeCreate(tx *gorm.DB) error {
+	if token.ModelLimits == nil {
+		token.ModelLimits = StringList{}
 	}
-	token.AutoGroups = string(data)
 	return nil
 }
 
@@ -308,6 +307,9 @@ func (token *Token) Insert() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
+	if token.ModelLimits == nil {
+		token.ModelLimits = StringList{}
+	}
 	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
 	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before update: " + cacheErr.Error())
@@ -336,10 +338,10 @@ func (token *Token) IsModelLimitsEnabled() bool {
 }
 
 func (token *Token) GetModelLimits() []string {
-	if token.ModelLimits == "" {
+	if len(token.ModelLimits) == 0 {
 		return []string{}
 	}
-	return strings.Split(token.ModelLimits, ",")
+	return append([]string{}, token.ModelLimits...)
 }
 
 func (token *Token) GetModelLimitsMap() map[string]bool {
@@ -357,7 +359,7 @@ func DisableModelLimits(tokenId int) error {
 		return err
 	}
 	token.ModelLimitsEnabled = false
-	token.ModelLimits = ""
+	token.ModelLimits = StringList{}
 	return token.Update()
 }
 

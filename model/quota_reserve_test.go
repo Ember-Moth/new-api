@@ -59,6 +59,9 @@ func resetBatchUpdateTestState(t *testing.T) {
 	t.Helper()
 	oldBatchEnabled := common.BatchUpdateEnabled
 	common.BatchUpdateEnabled = false
+	batchFlushMutex.Lock()
+	pendingQuotaBatch = nil
+	batchFlushMutex.Unlock()
 	for i := 0; i < BatchUpdateTypeCount; i++ {
 		batchUpdateLocks[i].Lock()
 		batchUpdateStores[i] = make(map[int]int)
@@ -66,6 +69,9 @@ func resetBatchUpdateTestState(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		common.BatchUpdateEnabled = oldBatchEnabled
+		batchFlushMutex.Lock()
+		pendingQuotaBatch = nil
+		batchFlushMutex.Unlock()
 		for i := 0; i < BatchUpdateTypeCount; i++ {
 			batchUpdateLocks[i].Lock()
 			batchUpdateStores[i] = make(map[int]int)
@@ -138,6 +144,24 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	assert.Equal(t, 7, reloadedToken.UsedQuota)
 }
 
+func TestCachedQuotaScriptReloadKeepsBalanceAfterScriptCacheFlush(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	useUserCacheMiniRedis(t)
+	user := createReserveTestUser(t, 20)
+	reserved, err := TryReserveUserQuota(user.Id, 5)
+	require.NoError(t, err)
+	require.True(t, reserved)
+	require.NoError(t, common.RDB.ScriptFlush(t.Context()).Err())
+	reserved, err = TryReserveUserQuota(user.Id, 4)
+	require.NoError(t, err)
+	assert.True(t, reserved)
+	cached, err := GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 11, cached.Quota)
+	assert.Equal(t, 11, getUserQuotaFromDB(t, user.Id))
+}
+
 func TestBatchUpdateAccumulatesTwoMaximumRequestCharges(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
@@ -149,6 +173,71 @@ func TestBatchUpdateAccumulatesTwoMaximumRequestCharges(t *testing.T) {
 
 	batchUpdate()
 	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id))
+}
+
+func TestBatchFailureRetainsAllCountersAndRetriesWithoutDoubleCharging(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	common.BatchUpdateEnabled = true
+	user := createReserveTestUser(t, 100)
+	token := createReserveTestToken(t, 100)
+	channel := Channel{Name: "batch-channel", Key: "fixture", Status: common.ChannelStatusEnabled}
+	require.NoError(t, DB.Create(&channel).Error)
+	require.NoError(t, DecreaseUserQuota(user.Id, 10, false))
+	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 10))
+	UpdateUserUsedQuotaAndRequestCount(user.Id, 10)
+	UpdateChannelUsedQuota(channel.Id, 10)
+	require.NoError(t, DB.Exec(`
+CREATE FUNCTION fail_quota_batch() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'injected final batch update failure'; END;
+$$;
+CREATE TRIGGER fail_quota_batch BEFORE UPDATE ON channels FOR EACH ROW EXECUTE FUNCTION fail_quota_batch();`).Error)
+	batchUpdate()
+	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id))
+	assert.Equal(t, 100, getTokenFromDB(t, token.Id).RemainQuota)
+	require.NoError(t, DB.Exec("DROP FUNCTION fail_quota_batch() CASCADE").Error)
+	batchUpdate()
+	batchUpdate()
+	require.NoError(t, DB.First(&user, user.Id).Error)
+	assert.Equal(t, 90, user.Quota)
+	assert.Equal(t, 10, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+	updated := getTokenFromDB(t, token.Id)
+	assert.Equal(t, 90, updated.RemainQuota)
+	assert.Equal(t, 10, updated.UsedQuota)
+	require.NoError(t, DB.First(&channel, channel.Id).Error)
+	assert.EqualValues(t, 10, channel.UsedQuota)
+}
+
+func TestQuotaBatchReplayDoesNotRepeatCommittedDeltas(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	user := createReserveTestUser(t, 100)
+	stores := make([]map[int]int, BatchUpdateTypeCount)
+	stores[BatchUpdateTypeUserQuota] = map[int]int{user.Id: -10}
+	stores[BatchUpdateTypeUsedQuota] = map[int]int{user.Id: 10}
+	stores[BatchUpdateTypeRequestCount] = map[int]int{user.Id: 1}
+	batch := &quotaBatch{ID: "00000000-0000-4000-8000-000000000001", Stores: stores}
+	require.NoError(t, applyQuotaBatch(batch))
+	require.NoError(t, applyQuotaBatch(batch))
+	require.NoError(t, DB.First(&user, user.Id).Error)
+	assert.Equal(t, 90, user.Quota)
+	assert.Equal(t, 10, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+}
+
+func TestQuotaBatchRejectsWalletOverflowWithoutApplyingOtherDeltas(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	user := createReserveTestUser(t, common.MaxWalletQuota)
+	stores := make([]map[int]int, BatchUpdateTypeCount)
+	stores[BatchUpdateTypeUserQuota] = map[int]int{user.Id: 1}
+	stores[BatchUpdateTypeUsedQuota] = map[int]int{user.Id: 10}
+	batch := &quotaBatch{ID: "00000000-0000-4000-8000-000000000002", Stores: stores}
+	require.ErrorIs(t, applyQuotaBatch(batch), ErrWalletQuotaLimitExceeded)
+	require.NoError(t, DB.First(&user, user.Id).Error)
+	assert.Equal(t, common.MaxWalletQuota, user.Quota)
+	assert.Zero(t, user.UsedQuota)
 }
 
 func TestBatchUpdateAccumulatorSaturatesOverflow(t *testing.T) {

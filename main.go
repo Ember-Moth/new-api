@@ -236,6 +236,9 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
+	if err := model.FlushQuotaUpdates(); err != nil {
+		common.SysError("failed to flush quota updates during shutdown: " + err.Error())
+	}
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()
@@ -328,11 +331,7 @@ func InitResources() error {
 	model.CheckSetup()
 
 	// Initialize options, should after model.InitDB()
-	if common.IsMasterNode {
-		if err := model.MigrateRetiredFrontendOptions(); err != nil {
-			common.SysError("failed to migrate retired frontend options: " + err.Error())
-		}
-	}
+
 	model.InitOptionMap()
 
 	// 清理旧的磁盘缓存文件

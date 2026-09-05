@@ -58,8 +58,8 @@ func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.
 		Name:        "single-key-status",
 		Key:         "original-key",
 		Status:      common.ChannelStatusEnabled,
-		Models:      "original-model",
-		Group:       "default",
+		Models:      StringList{"original-model"},
+		Group:       StringList{"default"},
 		UsedQuota:   100,
 		ChannelInfo: ChannelInfo{},
 	}
@@ -77,7 +77,7 @@ func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.
 	require.NoError(t, DB.Model(&Channel{}).Where("id = ?", channel.Id).Updates(map[string]any{
 		"key":          "rotated-key",
 		"used_quota":   gorm.Expr("used_quota + ?", 250),
-		"models":       "concurrent-model",
+		"models":       StringList{"concurrent-model"},
 		"channel_info": concurrentChannelInfo,
 	}).Error)
 
@@ -93,7 +93,7 @@ func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.
 	assert.Equal(t, common.ChannelStatusManuallyDisabled, stored.Status)
 	assert.Equal(t, "rotated-key", stored.Key)
 	assert.Equal(t, int64(350), stored.UsedQuota)
-	assert.Equal(t, "concurrent-model", stored.Models)
+	assert.Equal(t, StringList{"concurrent-model"}, stored.Models)
 	assert.Equal(t, concurrentChannelInfo, stored.ChannelInfo)
 
 	otherInfo := stored.GetOtherInfo()

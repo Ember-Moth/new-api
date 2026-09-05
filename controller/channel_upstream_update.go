@@ -535,7 +535,7 @@ func checkAndPersistChannelUpstreamModelUpdates(
 		originModels := normalizeModelNames(channel.GetModels())
 		mergedModels := mergeModelNames(originModels, pendingAddModels)
 		if len(mergedModels) > len(originModels) {
-			channel.Models = strings.Join(mergedModels, ",")
+			channel.Models = model.StringList(mergedModels)
 			autoAdded = len(mergedModels) - len(originModels)
 			modelsChanged = true
 		}
@@ -977,7 +977,7 @@ func applyChannelUpstreamModelUpdates(
 	nextModels := applySelectedModelChanges(originModels, addModels, removeModels)
 	modelsChanged = !slices.Equal(originModels, nextModels)
 	if modelsChanged {
-		channel.Models = strings.Join(nextModels, ",")
+		channel.Models = model.StringList(nextModels)
 	}
 
 	settings.UpstreamModelUpdateIgnoredModels = mergeModelNames(settings.UpstreamModelUpdateIgnoredModels, ignoreModels)

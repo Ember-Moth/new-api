@@ -22,6 +22,8 @@ type Option struct {
 	Value string `json:"value"`
 }
 
+const retiredThemeOptionKey = "theme.frontend"
+
 func AllOption() ([]*Option, error) {
 	var options []*Option
 	var err error

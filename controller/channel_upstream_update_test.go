@@ -252,7 +252,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 
 	savedChannel := newAdvancedCustomModelListChannel("http://127.0.0.1:1", "disabled-saved-key\nenabled-saved-key", "/saved/models", nil)
 	savedChannel.Name = "saved advanced channel"
-	savedChannel.Models = "old-model"
+	savedChannel.Models = model.StringList{"old-model"}
 	savedChannel.ChannelInfo = model.ChannelInfo{
 		IsMultiKey: true,
 		MultiKeyStatusList: map[int]int{
@@ -268,7 +268,7 @@ func TestFetchModelsAdvancedCustomEditPreviewUsesSavedKeyAndExplicitClears(t *te
 	preserved, err := buildAdvancedCustomModelPreviewChannel(fetchModelsRequest{ChannelID: savedChannel.Id})
 	require.NoError(t, err)
 	require.Equal(t, "http://127.0.0.1:1", preserved.GetBaseURL())
-	require.Equal(t, savedHeaderOverride, *preserved.HeaderOverride)
+	require.JSONEq(t, savedHeaderOverride, *preserved.HeaderOverride)
 	require.Equal(t, "http://127.0.0.1:1", preserved.GetSetting().Proxy)
 
 	previewConfig := dto.AdvancedCustomConfig{Routes: []dto.AdvancedCustomRoute{{
@@ -338,7 +338,7 @@ func TestFailedAdvancedCustomDetectionDoesNotStageFullRemoval(t *testing.T) {
 
 	channel := newAdvancedCustomModelListChannel(server.URL, "secret-key", "/v1/models", nil)
 	channel.Name = "empty discovery response"
-	channel.Models = "gpt-4.1,o3"
+	channel.Models = model.StringList{"gpt-4.1", "o3"}
 	settings := channel.GetOtherSettings()
 	settings.UpstreamModelUpdateCheckEnabled = true
 	settings.UpstreamModelUpdateAutoSyncEnabled = true
@@ -357,7 +357,7 @@ func TestFailedAdvancedCustomDetectionDoesNotStageFullRemoval(t *testing.T) {
 	persistedSettings := reloaded.GetOtherSettings()
 	require.Empty(t, persistedSettings.UpstreamModelUpdateLastDetectedModels)
 	require.Empty(t, persistedSettings.UpstreamModelUpdateLastRemovedModels)
-	require.Equal(t, "gpt-4.1,o3", reloaded.Models)
+	require.Equal(t, model.StringList{"gpt-4.1", "o3"}, reloaded.Models)
 }
 
 func TestFetchModelsUsesSharedChannelFetchBehavior(t *testing.T) {
