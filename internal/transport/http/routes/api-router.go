@@ -320,9 +320,9 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		systemInfoRoute := apiRouter.Group("/system-info")
 		systemInfoRoute.Use(middleware.RootAuth())
 		{
-			systemInfoRoute.GET("/instances", controller.ListSystemInstances)
-			systemInfoRoute.DELETE("/stale-instances", controller.DeleteStaleSystemInstances)
-			systemInfoRoute.DELETE("/instances/:node_name", controller.DeleteStaleSystemInstance)
+			systemInfoRoute.GET("/instances", systemHandler.ListSystemInstances)
+			systemInfoRoute.DELETE("/stale-instances", systemHandler.DeleteStaleSystemInstances)
+			systemInfoRoute.DELETE("/instances/:node_name", systemHandler.DeleteStaleSystemInstance)
 		}
 
 		dataRoute := apiRouter.Group("/data")

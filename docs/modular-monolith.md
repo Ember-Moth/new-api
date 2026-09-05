@@ -127,6 +127,10 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 周期任务适配器迁到 `internal/transport/task`。应用层暂以明确回调连接尚未迁移的渠道健康测试与 Midjourney 执行代码；system 核心通过日志操作端口支持 PostgreSQL/ClickHouse，没有依赖旧 model、service 或 controller。节点报告与系统设置仍待继续迁移。
 
+第十四批将节点状态上报、实例列表和过期实例清理迁入 system。节点身份、版本、启动时间及资源采样通过应用配置注入；存储位于模块私有的 `internal/instances`，HTTP 响应与实体分别定义。原 model/service/controller 的实例管理文件已移除。
+
+重复心跳按 node_name 更新同一记录并保留创建时间，过期删除直接使用数据库时间条件，在线节点和已恢复心跳的节点受到保护。上报循环的启动状态归实例所有，接受应用 context 并返回退出信号，应用关闭时等待该循环结束后再关闭数据库。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -320,3 +324,19 @@ GOWORK=off go test ./internal/arch ./internal/module/system/... ./controller ./i
 原任务存储和调度测试迁入模块，改为 SQL 迁移初始化的独立 schema；覆盖任务生命周期、去重、并发抢占只有一个持有者、抢占失败回滚、租约过期、旧执行器写入保护、实例注册表隔离和应用取消传播。日志清理管理接口分别在真实 PostgreSQL 和 ClickHouse 上完成任务，验证进度、删除数量、保留较新日志、终态及租约释放。
 
 输出：`/tmp/new-api-system-tasks-tests.log`、`/tmp/new-api-system-tasks-full-tests.log`、`/tmp/new-api-system-tasks-vet.log`、`/tmp/new-api-system-tasks-startup.log`。
+
+## 第十四批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归与第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test ./internal/arch ./internal/module/system/... ./internal/transport/http/routes -count=1
+```
+
+在正式 SQL 初始化的隔离 schema 中验证重复上报、角色/资源信息序列化、创建时间保留、90 秒过期边界、心跳恢复后的删除保护、列表和清理响应、主机名回退及取消后的上报循环退出。任务调度与日志清理回归继续通过。
+
+输出：`/tmp/new-api-system-instances-tests.log`、`/tmp/new-api-system-instances-full-tests.log`、`/tmp/new-api-system-instances-vet.log`、`/tmp/new-api-system-instances-startup.log`。

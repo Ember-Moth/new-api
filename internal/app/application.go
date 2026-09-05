@@ -134,7 +134,6 @@ func Run(assets router.WebAssets) {
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
-	service.StartSystemInstanceReporter()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle).
 	// Must run before the system task runner starts: the async_task_poll handler
@@ -153,8 +152,11 @@ func Run(assets router.WebAssets) {
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	systemService := system.New(system.Dependencies{DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
-		Logs: system.LogOperations{Count: model.CountOldLog, DeleteBatch: model.DeleteOldLogBatch},
+		Logs:           system.LogOperations{Count: model.CountOldLog, DeleteBatch: model.DeleteOldLogBatch},
+		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})
+	instanceReporterDone := systemService.StartSystemInstanceReporter(runCtx)
+	defer func() { cancelRun(); <-instanceReporterDone }()
 	tasktransport.RegisterScheduledSystemTasks(systemService, tasktransport.ScheduledWorkloads{
 		ChannelTest: func(ctx context.Context, mode string, notify bool, progress func(int, int)) (any, error) {
 			return controller.RunChannelTestTask(ctx, mode, notify, progress)

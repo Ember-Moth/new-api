@@ -4,11 +4,26 @@ import (
 	"context"
 
 	"github.com/QuantumNous/new-api/internal/module/system/entity"
+	"github.com/QuantumNous/new-api/internal/module/system/internal/instances"
 	implementation "github.com/QuantumNous/new-api/internal/module/system/internal/tasks"
+	"gorm.io/gorm"
 )
 
-type Service = implementation.Runtime
-type Dependencies = implementation.Dependencies
+type Service struct {
+	*implementation.Runtime
+	*instances.Registry
+	*instances.Reporter
+}
+
+type InstanceReportConfig = instances.ReportConfig
+type Dependencies struct {
+	DB             *gorm.DB
+	NodeName       string
+	Master         bool
+	Logs           LogOperations
+	InstanceReport InstanceReportConfig
+}
+
 type LogOperations = implementation.LogOperations
 type SystemTaskHandler = implementation.SystemTaskHandler
 type ScheduledSystemTaskHandler = implementation.ScheduledSystemTaskHandler
@@ -35,7 +50,13 @@ const (
 
 var ErrSystemTaskLockLost = entity.ErrSystemTaskLockLost
 
-func New(deps Dependencies) *Service        { return implementation.New(deps) }
+func New(deps Dependencies) *Service {
+	registry := instances.NewRegistry(deps.DB)
+	return &Service{
+		Runtime:  implementation.New(implementation.Dependencies{DB: deps.DB, NodeName: deps.NodeName, Master: deps.Master, Logs: deps.Logs}),
+		Registry: registry, Reporter: instances.NewReporter(registry, deps.InstanceReport, deps.Master),
+	}
+}
 func GenerateSystemTaskID() (string, error) { return implementation.GenerateSystemTaskID() }
 
 type contextKey struct{}

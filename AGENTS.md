@@ -30,7 +30,7 @@ internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetchi
 internal/module/channel/ — Channel management, provider operations, catalog/discovery, persistence and routing; health testing and remaining callers are still being migrated
 internal/module/identity/ — Account CRUD, OAuth provider configuration and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; login, security factors and session runtime are still being migrated
 internal/module/billing/ — Redemption CRUD and administrative wallet commands; wallet credit/debit runtime, pricing and settlement are still being migrated
-internal/module/system/ — Background task management, PostgreSQL leases and instance-owned scheduler; node reporting and other system configuration are still being migrated
+internal/module/system/ — Background tasks, PostgreSQL leases, node reporting and instance management; other system configuration is still being migrated
 internal/module/subscription/ — Plan configuration CRUD, validation, contracts and storage; purchases and user subscriptions are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules
