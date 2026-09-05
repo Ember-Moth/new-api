@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -385,6 +386,37 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.NoError(t, authentication.RevokeByRefreshToken(recovered.RefreshToken, login.Session.SID, "logout"))
 		_, _, err = authentication.ValidateLoginSession(identity)
 		require.ErrorIs(t, err, service.ErrLoginSessionRevoked)
+	})
+
+	t.Run("user metadata publication preserves quota and rejects stale security", func(t *testing.T) {
+		user := model.User{Username: "dragonfly-usercache", AffCode: "dragonfly-usercache", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 100}
+		require.NoError(t, database.Create(&user).Error)
+		cache := usercache.New(database)
+		_, err := cache.GetUserCache(user.Id)
+		require.NoError(t, err)
+		stale := entity.User(user)
+		reserved, err := model.TryReserveUserQuota(user.Id, 7)
+		require.NoError(t, err)
+		assert.True(t, reserved)
+		stale.Username = "metadata-updated"
+		require.NoError(t, cache.Publish(stale))
+		current, err := cache.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 93, current.Quota)
+		assert.Equal(t, "metadata-updated", current.Username)
+		require.NoError(t, database.Transaction(func(tx *gorm.DB) error {
+			if _, err := cache.IncrementUserAuthVersionWithTx(tx, user.Id); err != nil {
+				return err
+			}
+			return tx.Model(&model.User{}).Where("id = ?", user.Id).Update("status", common.UserStatusDisabled).Error
+		}))
+		require.NoError(t, cache.PublishUserAuthCache(user.Id))
+		require.ErrorIs(t, cache.Publish(stale), usercache.ErrUserAuthCachePending)
+		current, err = cache.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.EqualValues(t, 2, current.AuthVersion)
+		assert.Equal(t, common.UserStatusDisabled, current.Status)
+		assert.Equal(t, 93, current.Quota)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

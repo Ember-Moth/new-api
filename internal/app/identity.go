@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/QuantumNous/new-api/internal/module/identity"
+	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -40,14 +41,15 @@ func tokenPolicy() identity.TokenPolicy {
 }
 
 func userSecurity() identity.UserSecurity {
+	cache := usercache.New(model.DB)
 	return identity.UserSecurity{
 		IssueProof:            service.IssueSecurityProof,
 		AdvanceCurrentSession: service.AdvanceCurrentSessionToUserVersion,
-		AdvanceVersion:        model.IncrementUserAuthVersionWithTx,
-		PublishAuth:           model.PublishUserAuthCache,
-		PublishDeletedVersion: model.PublishCommittedUserAuthVersion,
+		AdvanceVersion:        cache.IncrementUserAuthVersionWithTx,
+		PublishAuth:           cache.PublishUserAuthCache,
+		PublishDeletedVersion: cache.PublishCommittedUserAuthVersion,
 		RevokeSessions:        func(id int, reason string) error { _, err := model.RevokeAllUserSessions(id, reason); return err },
-		InvalidateUser:        model.InvalidateUserCache,
+		InvalidateUser:        cache.InvalidateUserCache,
 		InvalidateTokens:      model.InvalidateUserTokensCache,
 		DeleteCredentials:     model.DeleteUserAuthenticationData,
 	}

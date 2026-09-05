@@ -28,3 +28,21 @@ func (user *UserBase) GetSetting() dto.UserSetting {
 	}
 	return setting
 }
+
+const UserCacheSchemaVersion = 2
+
+func (user *User) ToBaseUser() *UserBase {
+	cache := &UserBase{
+		Id:          user.Id,
+		Group:       user.Group,
+		Quota:       user.Quota,
+		Status:      user.Status,
+		Role:        user.Role,
+		Username:    user.Username,
+		Setting:     user.Setting,
+		Email:       user.Email,
+		AuthVersion: user.AuthVersion,
+		CacheSchema: UserCacheSchemaVersion,
+	}
+	return cache
+}

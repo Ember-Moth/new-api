@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/authn"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/sessions"
+	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -30,15 +31,12 @@ var ErrRefreshRace = authn.ErrRefreshRace
 // AuthenticationRuntime adapts storage until user/session caches move into identity.
 func AuthenticationRuntime() *authn.Runtime {
 	return authn.New(authn.Dependencies{
-		GetUserCache: func(id int) (*entity.UserBase, error) {
-			user, err := model.GetUserCache(id)
-			return (*entity.UserBase)(user), err
-		},
+		GetUserCache: usercache.New(model.DB).GetUserCache,
 		GetUserById: func(id int, all bool) (*entity.User, error) {
 			user, err := model.GetUserById(id, all)
 			return (*entity.User)(user), err
 		},
-		BumpUserAuthVersion: model.BumpUserAuthVersion,
+		BumpUserAuthVersion: usercache.New(model.DB).BumpUserAuthVersion,
 		Sessions:            sessions.New(model.DB),
 	})
 }

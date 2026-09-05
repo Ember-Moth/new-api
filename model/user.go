@@ -22,19 +22,7 @@ const UserNameMaxLength = identityentity.UserNameMaxLength
 type User identityentity.User
 
 func (user *User) ToBaseUser() *UserBase {
-	cache := &UserBase{
-		Id:          user.Id,
-		Group:       user.Group,
-		Quota:       user.Quota,
-		Status:      user.Status,
-		Role:        user.Role,
-		Username:    user.Username,
-		Setting:     user.Setting,
-		Email:       user.Email,
-		AuthVersion: user.AuthVersion,
-		CacheSchema: userCacheSchemaVersion,
-	}
-	return cache
+	return (*UserBase)((*identityentity.User)(user).ToBaseUser())
 }
 
 func (user *User) GetAccessToken() string { return (*identityentity.User)(user).GetAccessToken() }
