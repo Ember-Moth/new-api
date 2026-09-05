@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/system"
+
 	_ "net/http/pprof"
 
 	"github.com/QuantumNous/new-api/common"
@@ -150,9 +152,19 @@ func Run(assets router.WebAssets) {
 	// (DB-lease dedup across masters + run history), then start the runner that
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
-	controller.RegisterScheduledSystemTasks()
-	tasktransport.RegisterChannelUpdates(model.ChannelService())
-	service.StartSystemTaskRunner()
+	systemService := system.New(system.Dependencies{DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
+		Logs: system.LogOperations{Count: model.CountOldLog, DeleteBatch: model.DeleteOldLogBatch},
+	})
+	tasktransport.RegisterScheduledSystemTasks(systemService, tasktransport.ScheduledWorkloads{
+		ChannelTest: func(ctx context.Context, mode string, notify bool, progress func(int, int)) (any, error) {
+			return controller.RunChannelTestTask(ctx, mode, notify, progress)
+		},
+		MidjourneyPoll: func(ctx context.Context, progress func(int, int)) any {
+			return controller.RunMidjourneyTaskUpdateOnce(ctx, progress)
+		},
+	})
+	tasktransport.RegisterChannelUpdates(systemService, model.ChannelService())
+	systemService.StartSystemTaskRunner(runCtx)
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -180,6 +192,7 @@ func Run(assets router.WebAssets) {
 		},
 	})
 	server, err := httpserver.New(assets, router.Dependencies{
+		System:        systemService,
 		Authorization: authorization,
 		IdentityHooks: identityhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, SessionIdentity: middleware.GetSessionAuthIdentity},
 		Billing:       billingService,
@@ -203,7 +216,7 @@ func Run(assets router.WebAssets) {
 			},
 			Audit: controller.RecordManageAudit,
 			EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {
-				task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
+				task, created, err := systemService.EnqueueSystemTask(runCtx, system.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
 				if err != nil {
 					return channelhttp.TaskSubmission{}, err
 				}

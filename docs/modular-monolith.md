@@ -121,6 +121,12 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 主节点的角色/基线初始化改为一个事务，失败会保留原有基线和用户覆盖；副本仅加载策略。SQL 集成测试验证两个独立数据库实例的权限互不影响，同库副本在重载后才观察到已提交修改，初始化失败后角色和授权保持完整。权限目录保留现有能力，没有新增角色管理接口。
 
+第十三批将后台任务管理接口、任务/租约存储、调度、抢占执行、进度报告和日志清理迁入 system。公开入口是模块服务，私有实现位于 `internal/tasks`；任务实体与响应归模块所有。原 `model/system_task.go`、`service/system_task.go` 及控制器管理接口已移除。
+
+注册表、启动状态和唤醒通道由服务实例持有。查询和写入携带 context，应用取消会传给执行中的任务和租约心跳。保留 PostgreSQL 18 的原子租约抢占、同类型去重、过期锁处理及旧执行器写入保护。
+
+周期任务适配器迁到 `internal/transport/task`。应用层暂以明确回调连接尚未迁移的渠道健康测试与 Midjourney 执行代码；system 核心通过日志操作端口支持 PostgreSQL/ClickHouse，没有依赖旧 model、service 或 controller。节点报告与系统设置仍待继续迁移。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -298,3 +304,19 @@ GOWORK=off go test ./internal/arch ./internal/module/identity/... ./internal/tra
 权限测试使用正式 SQL 迁移并重复初始化，保留角色基线、用户覆盖、事务回滚和任务插件绑定权限回归，补充实例隔离、跨实例重载和初始化失败回滚。现有用户管理、渠道和请求中间件集成测试已改为显式持有权限实例。
 
 输出：`/tmp/new-api-authz-module-tests.log`、`/tmp/new-api-authz-module-full-tests.log`、`/tmp/new-api-authz-module-vet.log`、`/tmp/new-api-authz-module-startup.log`。
+
+## 第十三批验证（2026-09-05）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、第四批完整后端回归，以及第一批三种日志配置的新库/两次重启均通过。
+
+专项命令：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test ./internal/arch ./internal/module/system/... ./controller ./internal/transport/task -count=1
+```
+
+原任务存储和调度测试迁入模块，改为 SQL 迁移初始化的独立 schema；覆盖任务生命周期、去重、并发抢占只有一个持有者、抢占失败回滚、租约过期、旧执行器写入保护、实例注册表隔离和应用取消传播。日志清理管理接口分别在真实 PostgreSQL 和 ClickHouse 上完成任务，验证进度、删除数量、保留较新日志、终态及租约释放。
+
+输出：`/tmp/new-api-system-tasks-tests.log`、`/tmp/new-api-system-tasks-full-tests.log`、`/tmp/new-api-system-tasks-vet.log`、`/tmp/new-api-system-tasks-startup.log`。

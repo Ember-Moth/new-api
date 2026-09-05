@@ -29,11 +29,11 @@ type midjourneyPollSummary struct {
 	NullTasksFailed int `json:"null_tasks_failed"`
 }
 
-// runMidjourneyTaskUpdateOnce performs one Midjourney polling pass synchronously.
+// RunMidjourneyTaskUpdateOnce performs one Midjourney polling pass synchronously.
 // It honors ctx cancellation (the system-task runner cancels it when the lease
 // is lost) and, when report is non-nil, reports progress as (processedChannels,
 // totalChannels) so the system task surfaces a percentage.
-func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, total int)) midjourneyPollSummary {
+func RunMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, total int)) midjourneyPollSummary {
 	summary := midjourneyPollSummary{}
 	if ctx == nil {
 		ctx = context.Background()

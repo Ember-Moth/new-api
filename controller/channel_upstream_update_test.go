@@ -7,12 +7,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/module/system"
+
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 
 	"github.com/QuantumNous/new-api/internal/app/channelprovider"
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
-	"github.com/QuantumNous/new-api/service"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -380,17 +381,19 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 
 func TestDetectAllChannelUpstreamModelUpdatesRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
+	require.NoError(t, db.AutoMigrate(&system.SystemTask{}, &system.SystemTaskLock{}))
 
-	existing, err := model.CreateSystemTask(model.SystemTaskTypeModelUpdate, nil, nil)
+	tasks := system.New(system.Dependencies{DB: db})
+	existing, err := tasks.CreateSystemTask(t.Context(), system.SystemTaskTypeModelUpdate, nil, nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/upstream-models/detect-all", nil)
+	ctx.Request = ctx.Request.WithContext(system.WithService(ctx.Request.Context(), tasks))
 
 	channelhttp.New(discoveryTestService(), channelhttp.ManagementHooks{EnqueueModelUpdate: func() (channelhttp.TaskSubmission, error) {
-		task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
+		task, created, err := tasks.EnqueueSystemTask(t.Context(), system.SystemTaskTypeModelUpdate, contract.UpstreamUpdateTask{Manual: true})
 		if err != nil {
 			return channelhttp.TaskSubmission{}, err
 		}

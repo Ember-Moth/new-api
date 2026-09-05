@@ -14,6 +14,10 @@ import (
 	"sync"
 	"time"
 
+	channelcontract "github.com/QuantumNous/new-api/internal/module/channel/contract"
+
+	"github.com/QuantumNous/new-api/internal/module/system"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
@@ -1078,7 +1082,7 @@ func performChannelTests(ctx context.Context, channels []*model.Channel, testUse
 	)
 }
 
-// runChannelTestTask runs one synchronous channel test cycle for the system task
+// RunChannelTestTask runs one synchronous channel test cycle for the system task
 // runner (both the scheduled job and the manual "test all channels" trigger go
 // through here). It honors ctx cancellation so a runner that loses its lease
 // stops promptly. mode selects the channel set: an empty mode falls back to the
@@ -1086,7 +1090,7 @@ func performChannelTests(ctx context.Context, channels []*model.Channel, testUse
 // trigger passes ChannelTestModeScheduledAll to test every channel. When notify
 // is set the root user is notified on completion. Cross-instance execution is
 // guarded by the system task per-type lock, so no process-local guard is needed.
-func runChannelTestTask(ctx context.Context, mode string, notify bool, report func(processed, total int)) (channelTestSummary, error) {
+func RunChannelTestTask(ctx context.Context, mode string, notify bool, report func(processed, total int)) (channelTestSummary, error) {
 	testUserID, err := resolveChannelTestUserID(nil)
 	if err != nil {
 		return channelTestSummary{}, err
@@ -1129,7 +1133,7 @@ func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*m
 // test loop inline. If any channel_test task is already active, the manual run is
 // rejected so the caller does not mistake a scheduled run for this manual one.
 func TestAllChannels(c *gin.Context) {
-	task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeChannelTest, channelTestTaskPayload{
+	task, created, err := system.FromContext(c.Request.Context()).EnqueueSystemTask(c.Request.Context(), system.SystemTaskTypeChannelTest, channelcontract.ChannelTestTask{
 		Mode:   operation_setting.ChannelTestModeScheduledAll,
 		Notify: true,
 	})

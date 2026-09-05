@@ -1,17 +1,16 @@
-package controller
+package systemhttp
 
 import (
 	"net/http"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/internal/module/system"
 
 	"github.com/gin-gonic/gin"
 )
 
-func CreateLogCleanupSystemTask(c *gin.Context) {
+func (h *Handler) CreateLogCleanupSystemTask(c *gin.Context) {
 	targetTimestamp, _ := strconv.ParseInt(c.Query("target_timestamp"), 10, 64)
 	if targetTimestamp == 0 {
 		c.JSON(http.StatusOK, gin.H{
@@ -21,7 +20,7 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 		return
 	}
 
-	task, err := service.StartLogCleanupTask(targetTimestamp)
+	task, err := h.service.StartLogCleanupTask(c.Request.Context(), targetTimestamp)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -34,7 +33,7 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 	})
 }
 
-func GetCurrentSystemTask(c *gin.Context) {
+func (h *Handler) GetCurrentSystemTask(c *gin.Context) {
 	taskType := c.Query("type")
 	if taskType == "" {
 		c.JSON(http.StatusOK, gin.H{
@@ -44,7 +43,7 @@ func GetCurrentSystemTask(c *gin.Context) {
 		return
 	}
 
-	task, err := model.GetActiveSystemTask(taskType)
+	task, err := h.service.GetActiveSystemTask(c.Request.Context(), taskType)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -65,16 +64,16 @@ func GetCurrentSystemTask(c *gin.Context) {
 	})
 }
 
-func ListSystemTasks(c *gin.Context) {
+func (h *Handler) ListSystemTasks(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
 
-	tasks, err := model.ListSystemTasks(limit)
+	tasks, err := h.service.ListSystemTasks(c.Request.Context(), limit)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	responses := make([]model.SystemTaskResponse, 0, len(tasks))
+	responses := make([]system.SystemTaskResponse, 0, len(tasks))
 	for _, task := range tasks {
 		responses = append(responses, task.ToResponse())
 	}
@@ -86,7 +85,7 @@ func ListSystemTasks(c *gin.Context) {
 	})
 }
 
-func GetSystemTask(c *gin.Context) {
+func (h *Handler) GetSystemTask(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
 		c.JSON(http.StatusOK, gin.H{
@@ -96,7 +95,7 @@ func GetSystemTask(c *gin.Context) {
 		return
 	}
 
-	task, err := model.GetSystemTaskByTaskID(taskID)
+	task, err := h.service.GetSystemTaskByTaskID(c.Request.Context(), taskID)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -115,3 +114,7 @@ func GetSystemTask(c *gin.Context) {
 		"data":    task.ToResponse(),
 	})
 }
+
+type Handler struct{ service *system.Service }
+
+func New(service *system.Service) *Handler { return &Handler{service: service} }

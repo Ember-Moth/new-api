@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
+	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
 	// Import oauth package to register providers via init()
@@ -17,12 +18,14 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine, deps Dependencies) {
+	systemHandler := systemhttp.New(deps.System)
 	billingHandler := billinghttp.New(deps.Billing, deps.BillingHooks)
 	subscriptionHandler := subscriptionhttp.New(deps.Subscription)
 	channelHandler := channelhttp.New(deps.Channel, deps.ChannelHooks)
 	identityHandler := identityhttp.New(deps.Identity, deps.IdentityHooks)
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.Authorization(deps.Authorization))
+	apiRouter.Use(middleware.SystemTasks(deps.System))
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
@@ -309,10 +312,10 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
 		{
-			systemTaskRoute.POST("/log-cleanup", controller.CreateLogCleanupSystemTask)
-			systemTaskRoute.GET("/list", controller.ListSystemTasks)
-			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)
-			systemTaskRoute.GET("/:task_id", controller.GetSystemTask)
+			systemTaskRoute.POST("/log-cleanup", systemHandler.CreateLogCleanupSystemTask)
+			systemTaskRoute.GET("/list", systemHandler.ListSystemTasks)
+			systemTaskRoute.GET("/current", systemHandler.GetCurrentSystemTask)
+			systemTaskRoute.GET("/:task_id", systemHandler.GetSystemTask)
 		}
 		systemInfoRoute := apiRouter.Group("/system-info")
 		systemInfoRoute.Use(middleware.RootAuth())

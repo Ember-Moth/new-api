@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/QuantumNous/new-api/internal/module/system"
+
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,6 +24,7 @@ import (
 )
 
 type Dependencies struct {
+	System        *system.Service
 	Authorization *authz.Engine
 	IdentityHooks identityhttp.ManagementHooks
 	Billing       *billing.Service

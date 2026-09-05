@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/module/system"
+
 	channelcontract "github.com/QuantumNous/new-api/internal/module/channel/contract"
 
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
@@ -457,14 +459,16 @@ func TestRunChannelTestWorkersStopsAfterCancellation(t *testing.T) {
 
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
+	require.NoError(t, db.AutoMigrate(&system.SystemTask{}, &system.SystemTaskLock{}))
 
-	existing, err := model.CreateSystemTask(model.SystemTaskTypeChannelTest, nil, nil)
+	tasks := system.New(system.Dependencies{DB: db})
+	existing, err := tasks.CreateSystemTask(t.Context(), system.SystemTaskTypeChannelTest, nil, nil)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/test", nil)
+	ctx.Request = ctx.Request.WithContext(system.WithService(ctx.Request.Context(), tasks))
 
 	TestAllChannels(ctx)
 

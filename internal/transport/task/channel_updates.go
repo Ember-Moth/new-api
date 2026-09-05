@@ -5,22 +5,23 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/system"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 )
 
-func RegisterChannelUpdates(channels *channel.Service) {
-	service.RegisterSystemTaskHandler(channelModelUpdate{channels: channels})
+func RegisterChannelUpdates(tasks *system.Service, channels *channel.Service) {
+	tasks.RegisterSystemTaskHandler(channelModelUpdate{channels: channels, tasks: tasks})
 }
 
 type channelModelUpdate struct {
+	tasks    *system.Service
 	channels *channel.Service
 }
 
-func (channelModelUpdate) Type() string { return model.SystemTaskTypeModelUpdate }
+func (channelModelUpdate) Type() string { return system.SystemTaskTypeModelUpdate }
 func (channelModelUpdate) Enabled() bool {
 	return common.GetEnvOrDefaultBool("CHANNEL_UPSTREAM_MODEL_UPDATE_TASK_ENABLED", true)
 }
@@ -33,21 +34,21 @@ func (channelModelUpdate) Interval() time.Duration {
 }
 func (channelModelUpdate) NewPayload() any { return nil }
 
-func (h channelModelUpdate) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+func (h channelModelUpdate) Run(ctx context.Context, task *system.SystemTask, runnerID string) {
 	var payload contract.UpstreamUpdateTask
-	status := model.SystemTaskStatusSucceeded
+	status := system.SystemTaskStatusSucceeded
 	var result any
 	err := task.DecodePayload(&payload)
 	if err != nil {
-		status = model.SystemTaskStatusFailed
+		status = system.SystemTaskStatusFailed
 	} else {
-		result = h.channels.RunUpstreamModelUpdate(ctx, payload.Manual, !payload.Manual, service.NewSystemTaskProgressReporter(task, runnerID))
+		result = h.channels.RunUpstreamModelUpdate(ctx, payload.Manual, !payload.Manual, h.tasks.NewSystemTaskProgressReporter(ctx, task, runnerID))
 	}
 	message := ""
 	if err != nil {
 		message = err.Error()
 	}
-	if err := model.FinishSystemTask(task.TaskID, runnerID, status, result, message); err != nil {
+	if err := h.tasks.FinishSystemTask(context.Background(), task.TaskID, runnerID, status, result, message); err != nil {
 		common.SysLog(fmt.Sprintf("system task %s failed to persist result: %v", task.TaskID, err))
 	}
 }
