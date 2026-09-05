@@ -209,6 +209,14 @@ PostgreSQL 初始 SQL 为全部汇总维度增加非空和组合唯一约束；�
 
 重置保留“默认推进重置时间、显式 false 保留时间”的接口语义，用户日志与管理员审计继续经应用注入。原重置回归迁入模块；套餐缓存、支付/预扣结算、周期重置任务编排、自助偏好接口及旧审计适配仍待后续归属整理。
 
+第二十八批将套餐/订阅标题缓存、预扣凭据实体、额度预扣/调整/退款/结算、到期额度重置和凭据清理迁入 subscription 的 catalog/quota 实现。原后台重置 service 文件移除，维护任务由模块服务持有实例状态，由应用负责启动、取消和等待；套餐与订阅缓存不再使用模型包的全局单例。
+
+事务中的套餐读取直接使用同一 PostgreSQL 事务，既不读缓存，也不向缓存发布未提交数据。管理员分配和支付完成时复用该读取路径；普通展示查询继续使用 DragonflyDB 或本实例内存缓存。配置名和命名空间保留，缓存容量/TTL 从明确依赖输入，内存缓存不额外启动全局清理协程。
+
+额度操作保留请求幂等、退款原子性、追加预扣可退款及 PostgreSQL numeric 边界保护。自动重置在行锁内重新检查有效期和状态、读取当前套餐，数据库错误返回给维护任务，仅提交成功后计数；关闭重置周期会清理旧的到期时间而不清空已用额度，避免反复处理同一批记录。共享数据库时间读取收进订阅模块内部。
+
+模型层只保留这些能力的旧调用适配；支付订单、余额购买和各支付网关接口仍待迁移，自助订阅偏好与审计适配也尚未清除。完整目标继续推进。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -688,3 +696,34 @@ python3 /tmp/verify-new-api-modular-startup.py
 真实 DragonflyDB 新增分配/取消订阅场景：分组随 SQL 状态更新，缓存余额保留预先扣减后的值，认证版本和既有登录会话保持有效。竞态检查通过。
 
 输出：`/tmp/new-api-memberships-build.log`、`/tmp/new-api-memberships-tests.log`、`/tmp/new-api-memberships-race.log`、`/tmp/new-api-memberships-dragonfly.log`、`/tmp/new-api-memberships-full-tests.log`、`/tmp/new-api-memberships-vet.log`、`/tmp/new-api-memberships-startup.log`。
+
+## 第二十八批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/subscription/... ./model ./service ./controller \
+  -run 'TestModular|TestPlan|TestMembership|TestSubscription|TestBillingSessionRefund' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/subscription/... -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonflyCacheContracts -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+原 SQL 回归随额度实现迁入模块，覆盖重复请求只扣一次、请求归属隔离、退款失败整体回滚、追加预扣可完整退款、大整数不回绕、选择下一有效订阅及自动重置。新增正式 SQL 隔离 schema 测试验证缓存与事务相互隔离、回滚新套餐不污染缓存、标题失效刷新、重置读取最新套餐、关闭周期不清额度、重置失败不计完成数、过期订阅不再重置、维护清理及取消退出；上层 BillingSession 的退款联动回归保留并通过。
+
+真实 DragonflyDB 验证套餐缓存 TTL、事务读取绕过缓存且不发布未提交值、回滚后展示仍读取提交前值、失效后订阅标题刷新。竞态检查通过。
+
+输出：`/tmp/new-api-subscription-quota-build.log`、`/tmp/new-api-subscription-quota-tests.log`、`/tmp/new-api-subscription-quota-race.log`、`/tmp/new-api-subscription-quota-dragonfly.log`、`/tmp/new-api-subscription-quota-full-tests.log`、`/tmp/new-api-subscription-quota-vet.log`、`/tmp/new-api-subscription-quota-startup.log`。

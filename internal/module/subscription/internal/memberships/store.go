@@ -1,7 +1,6 @@
 package memberships
 
 import (
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"gorm.io/gorm"
@@ -31,11 +30,3 @@ type SubscriptionSummary = contract.SubscriptionSummary
 type SubscriptionResetResult = contract.SubscriptionResetResult
 
 func New(deps Dependencies) *Store { return &Store{db: deps.DB, plan: deps.Plan, groups: deps.Groups} }
-
-func timestamp(db *gorm.DB) int64 {
-	var now int64
-	if err := db.Raw("SELECT EXTRACT(EPOCH FROM NOW())::bigint").Scan(&now).Error; err != nil || now <= 0 {
-		return common.GetTimestamp()
-	}
-	return now
-}

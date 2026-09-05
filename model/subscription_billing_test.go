@@ -2,7 +2,6 @@ package model_test
 
 import (
 	"context"
-	"math"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -44,123 +43,6 @@ func useSubscriptionBillingDB(t *testing.T) (*gorm.DB, model.UserSubscription) {
 	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100, StartTime: now - 10, EndTime: now + 3600, NextResetTime: now + 1800, Status: "active"}
 	require.NoError(t, db.Create(&sub).Error)
 	return db, sub
-}
-
-func TestSubscriptionConcurrentDuplicateReservationChargesOnce(t *testing.T) {
-	db, sub := useSubscriptionBillingDB(t)
-	start := make(chan struct{})
-	type outcome struct {
-		result *model.SubscriptionPreConsumeResult
-		err    error
-	}
-	results := make(chan outcome, 2)
-	for range 2 {
-		go func() {
-			<-start
-			result, err := model.PreConsumeUserSubscription("same-request", sub.UserId, "model", 0, 30)
-			results <- outcome{result, err}
-		}()
-	}
-	close(start)
-	for range 2 {
-		result := <-results
-		require.NoError(t, result.err)
-		require.NotNil(t, result.result)
-		assert.Equal(t, sub.Id, result.result.UserSubscriptionId)
-		assert.EqualValues(t, 30, result.result.PreConsumed)
-	}
-	require.NoError(t, db.First(&sub, sub.Id).Error)
-	assert.EqualValues(t, 30, sub.AmountUsed)
-	var count int64
-	require.NoError(t, db.Model(&model.SubscriptionPreConsumeRecord{}).Count(&count).Error)
-	assert.EqualValues(t, 1, count)
-}
-
-func TestSubscriptionRefundFailureRollsBackUsageAndReservationTogether(t *testing.T) {
-	db, sub := useSubscriptionBillingDB(t)
-	_, err := model.PreConsumeUserSubscription("refund-request", sub.UserId, "model", 0, 30)
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(`
-CREATE FUNCTION fail_subscription_refund() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-    IF NEW.status = 'refunded' THEN RAISE EXCEPTION 'injected refund failure'; END IF;
-    RETURN NEW;
-END;
-$$;
-CREATE TRIGGER fail_subscription_refund BEFORE UPDATE ON subscription_pre_consume_records
-FOR EACH ROW EXECUTE FUNCTION fail_subscription_refund();`).Error)
-	require.Error(t, model.RefundSubscriptionPreConsume("refund-request"))
-	require.NoError(t, db.First(&sub, sub.Id).Error)
-	assert.EqualValues(t, 30, sub.AmountUsed)
-	var record model.SubscriptionPreConsumeRecord
-	require.NoError(t, db.Where("request_id = ?", "refund-request").First(&record).Error)
-	assert.Equal(t, "consumed", record.Status)
-	require.NoError(t, db.Exec("DROP FUNCTION fail_subscription_refund() CASCADE").Error)
-	require.NoError(t, model.RefundSubscriptionPreConsume("refund-request"))
-	require.NoError(t, model.RefundSubscriptionPreConsume("refund-request"))
-	require.NoError(t, db.First(&sub, sub.Id).Error)
-	assert.Zero(t, sub.AmountUsed)
-}
-
-func TestSubscriptionUsageOverflowCannotResetAccumulatedCharges(t *testing.T) {
-	db, sub := useSubscriptionBillingDB(t)
-	require.NoError(t, db.Model(&sub).Updates(map[string]any{"amount_total": 0, "amount_used": int64(math.MaxInt64 - 1)}).Error)
-	require.Error(t, model.PostConsumeUserSubscriptionDelta(sub.Id, 10))
-	require.NoError(t, db.First(&sub, sub.Id).Error)
-	assert.EqualValues(t, math.MaxInt64-1, sub.AmountUsed)
-}
-
-func TestSubscriptionReservationAdjustmentsRemainFullyRefundable(t *testing.T) {
-	db, sub := useSubscriptionBillingDB(t)
-	_, err := model.PreConsumeUserSubscription("adjusted", sub.UserId, "model", 0, 30)
-	require.NoError(t, err)
-	adjusted, err := model.AdjustSubscriptionPreConsume("adjusted", 20)
-	require.NoError(t, err)
-	assert.EqualValues(t, 50, adjusted.PreConsumed)
-	assert.EqualValues(t, 30, adjusted.AmountUsedBefore)
-	assert.EqualValues(t, 50, adjusted.AmountUsedAfter)
-	adjusted, err = model.AdjustSubscriptionPreConsume("adjusted", -10)
-	require.NoError(t, err)
-	assert.EqualValues(t, 40, adjusted.PreConsumed)
-	_, err = model.PreConsumeUserSubscription("adjusted", sub.UserId+1, "model", 0, 30)
-	require.Error(t, err)
-	_, err = model.AdjustSubscriptionPreConsume("adjusted", math.MaxInt64)
-	require.Error(t, err)
-	require.NoError(t, model.RefundSubscriptionPreConsume("adjusted"))
-	require.NoError(t, db.First(&sub, sub.Id).Error)
-	assert.Zero(t, sub.AmountUsed)
-	_, err = model.AdjustSubscriptionPreConsume("adjusted", 1)
-	require.Error(t, err)
-}
-
-func TestSubscriptionReservationUsesNextEligiblePlanAndResetsDueQuota(t *testing.T) {
-	db, first := useSubscriptionBillingDB(t)
-	require.NoError(t, db.Model(&first).Update("amount_used", 80).Error)
-	second := first
-	second.Id = 0
-	second.EndTime += 3600
-	second.AmountUsed = 0
-	require.NoError(t, db.Create(&second).Error)
-	reservation, err := model.PreConsumeUserSubscription("next-plan", first.UserId, "model", 0, 30)
-	require.NoError(t, err)
-	assert.Equal(t, second.Id, reservation.UserSubscriptionId)
-	require.NoError(t, db.First(&first, first.Id).Error)
-	assert.EqualValues(t, 80, first.AmountUsed)
-
-	now := common.GetTimestamp()
-	require.NoError(t, db.Model(&model.SubscriptionPlan{}).Where("id = ?", first.PlanId).
-		Updates(map[string]any{"quota_reset_period": model.SubscriptionResetCustom, "quota_reset_custom_seconds": 60}).Error)
-	model.InvalidateSubscriptionPlanCache(first.PlanId)
-	require.NoError(t, db.Model(&first).Updates(map[string]any{"last_reset_time": now - 120, "next_reset_time": now - 60}).Error)
-	reservation, err = model.PreConsumeUserSubscription("reset-plan", first.UserId, "model", 0, 30)
-	require.NoError(t, err)
-	assert.Equal(t, first.Id, reservation.UserSubscriptionId)
-	assert.Zero(t, reservation.AmountUsedBefore)
-	assert.EqualValues(t, 30, reservation.AmountUsedAfter)
-	require.NoError(t, db.First(&first, first.Id).Error)
-	assert.Greater(t, first.NextResetTime, now)
-	_, err = model.PreConsumeUserSubscription("oversized", first.UserId, "model", 0, int64(common.MaxQuota)+1)
-	require.Error(t, err)
 }
 
 func TestBillingSessionRefundIncludesExtraReservationExactlyOnce(t *testing.T) {

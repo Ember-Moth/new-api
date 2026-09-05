@@ -2,9 +2,11 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -457,6 +459,47 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.EqualValues(t, 1, cached.AuthVersion)
 		_, _, err = service.ValidateLoginSession(auth)
 		require.NoError(t, err)
+	})
+
+	t.Run("subscription catalog transactions do not publish uncommitted plans", func(t *testing.T) {
+		user := model.User{Username: "dragonfly-catalog", AffCode: "dragonfly-catalog"}
+		require.NoError(t, database.Create(&user).Error)
+		plan := model.SubscriptionPlan{Title: "cached title", Enabled: true, DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1}
+		require.NoError(t, database.Create(&plan).Error)
+		sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, Status: "active", EndTime: time.Now().Add(time.Hour).Unix()}
+		require.NoError(t, database.Create(&sub).Error)
+		catalog := model.SubscriptionCatalog()
+		cached, err := catalog.Plan(t.Context(), nil, plan.Id)
+		require.NoError(t, err)
+		assert.True(t, cached.Enabled)
+		info, err := catalog.PlanInfo(t.Context(), sub.Id)
+		require.NoError(t, err)
+		assert.Equal(t, "cached title", info.PlanTitle)
+		ttl, err := client.TTL(t.Context(), cachex.Namespace("new-api:subscription_plan:v1").FullKey(strconv.Itoa(plan.Id))).Result()
+		require.NoError(t, err)
+		assert.Greater(t, ttl, time.Duration(0))
+		assert.LessOrEqual(t, ttl, 5*time.Minute)
+		rollback := errors.New("catalog rollback")
+		err = database.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]any{"title": "private transaction", "enabled": false}).Error; err != nil {
+				return err
+			}
+			transactional, err := catalog.Plan(t.Context(), tx, plan.Id)
+			require.NoError(t, err)
+			assert.False(t, transactional.Enabled)
+			assert.Equal(t, "private transaction", transactional.Title)
+			return rollback
+		})
+		require.ErrorIs(t, err, rollback)
+		cached, err = catalog.Plan(t.Context(), nil, plan.Id)
+		require.NoError(t, err)
+		assert.True(t, cached.Enabled)
+		assert.Equal(t, "cached title", cached.Title)
+		require.NoError(t, database.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Update("title", "committed title").Error)
+		require.NoError(t, catalog.Invalidate(plan.Id))
+		info, err = catalog.PlanInfo(t.Context(), sub.Id)
+		require.NoError(t, err)
+		assert.Equal(t, "committed title", info.PlanTitle)
 	})
 
 	t.Run("session revocation and auth version publication invalidate cached access", func(t *testing.T) {

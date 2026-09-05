@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/QuantumNous/new-api/internal/module/subscription/internal/dbtime"
+
 	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/common"
@@ -15,7 +17,7 @@ func (s *Store) ExpireDueSubscriptions(ctx context.Context, limit int) (int, err
 	if limit <= 0 {
 		limit = 200
 	}
-	now := timestamp(s.db.WithContext(ctx))
+	now := dbtime.Timestamp(s.db.WithContext(ctx))
 	var subs []UserSubscription
 	if err := s.db.WithContext(ctx).Where("status = ? AND end_time > 0 AND end_time <= ?", "active", now).
 		Order("end_time asc, id asc").

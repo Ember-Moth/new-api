@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/subscription/internal/dbtime"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -93,7 +95,7 @@ func (s *Store) AdminResetUserSubscriptionsByPlan(ctx context.Context, userId in
 		return nil, errors.New("invalid userId or planId")
 	}
 	var result *SubscriptionResetResult
-	now := timestamp(s.db.WithContext(ctx))
+	now := dbtime.Timestamp(s.db.WithContext(ctx))
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		plan, err := s.plan(tx, planId)
 		if err != nil {
@@ -113,7 +115,7 @@ func (s *Store) AdminResetPlanSubscriptions(ctx context.Context, planId int, adv
 		return nil, errors.New("invalid planId")
 	}
 	var result *SubscriptionResetResult
-	now := timestamp(s.db.WithContext(ctx))
+	now := dbtime.Timestamp(s.db.WithContext(ctx))
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		plan, err := s.plan(tx, planId)
 		if err != nil {

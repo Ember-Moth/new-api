@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/subscription/internal/dbtime"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
@@ -49,7 +51,7 @@ func (s *Store) CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *
 			return nil, errors.New("已达到该套餐购买上限")
 		}
 	}
-	nowUnix := timestamp(tx)
+	nowUnix := dbtime.Timestamp(tx)
 	now := time.Unix(nowUnix, 0)
 	endUnix, err := plan.EndTime(now)
 	if err != nil {
@@ -104,12 +106,14 @@ func (s *Store) AdminBindSubscription(ctx context.Context, userId int, planId in
 	if userId <= 0 || planId <= 0 {
 		return "", errors.New("invalid userId or planId")
 	}
-	plan, err := s.plan(nil, planId)
-	if err != nil {
-		return "", err
-	}
+	var plan *SubscriptionPlan
 	groupChanged := false
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		plan, err = s.plan(tx, planId)
+		if err != nil {
+			return err
+		}
 		subscription, err := s.CreateUserSubscriptionFromPlanTx(tx, userId, plan, "admin")
 		if err == nil {
 			groupChanged = subscription.PrevUserGroup != ""

@@ -140,7 +140,19 @@ func Run(assets router.WebAssets) {
 	service.StartCodexCredentialAutoRefreshTask()
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
-	service.StartSubscriptionQuotaResetTask()
+	subscriptionService := subscription.New(subscription.Dependencies{
+		Members:        model.SubscriptionMemberships(),
+		Quota:          model.SubscriptionQuota(),
+		DB:             model.DB,
+		PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
+		GroupExists: func(group string) bool {
+			_, ok := ratio_setting.GetGroupRatioCopy()[group]
+			return ok
+		},
+		InvalidatePlan: model.InvalidateSubscriptionPlanCache,
+	})
+	subscriptionDone := subscriptionService.StartMaintenance(runCtx, common.IsMasterNode)
+	defer func() { cancelRun(); <-subscriptionDone }()
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
@@ -218,16 +230,7 @@ func Run(assets router.WebAssets) {
 		Billing:           billingService,
 		BillingHooks:      billinghttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		SubscriptionHooks: subscriptionhttp.ManagementHooks{Audit: controller.RecordManageAuditFor, ResetLogs: controller.RecordSubscriptionResetUserLogs},
-		Subscription: subscription.New(subscription.Dependencies{
-			Members:        model.SubscriptionMemberships(),
-			DB:             model.DB,
-			PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
-			GroupExists: func(group string) bool {
-				_, ok := ratio_setting.GetGroupRatioCopy()[group]
-				return ok
-			},
-			InvalidatePlan: model.InvalidateSubscriptionPlanCache,
-		}),
+		Subscription:      subscriptionService,
 		Identity: identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 			return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 		}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant}),
