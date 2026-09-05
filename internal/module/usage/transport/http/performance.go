@@ -1,17 +1,15 @@
-package controller
+package usagehttp
 
 import (
 	"net/http"
 	"strconv"
 
-	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
 
-func GetPerfMetricsSummary(c *gin.Context) {
+func (h *Handler) GetPerfMetricsSummary(c *gin.Context) {
 	hours := 24
 	if rawHours := c.Query("hours"); rawHours != "" {
 		if parsed, err := strconv.Atoi(rawHours); err == nil {
@@ -19,8 +17,7 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		}
 	}
 
-	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
-	result, err := perfmetrics.QuerySummaryAll(hours, activeGroups)
+	result, err := h.service.Performance.QuerySummary(c.Request.Context(), hours)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -35,7 +32,7 @@ func GetPerfMetricsSummary(c *gin.Context) {
 	})
 }
 
-func GetPerfMetrics(c *gin.Context) {
+func (h *Handler) GetPerfMetrics(c *gin.Context) {
 	modelName := c.Query("model")
 	if modelName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -52,7 +49,7 @@ func GetPerfMetrics(c *gin.Context) {
 		}
 	}
 
-	result, err := perfmetrics.Query(perfmetrics.QueryParams{
+	result, err := h.service.Performance.Query(c.Request.Context(), contract.QueryParams{
 		Model: modelName,
 		Group: c.Query("group"),
 		Hours: hours,
@@ -65,18 +62,8 @@ func GetPerfMetrics(c *gin.Context) {
 		return
 	}
 
-	result.Groups = filterActiveGroups(result.Groups)
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    result,
-	})
-}
-
-func filterActiveGroups(groups []perfmetrics.GroupResult) []perfmetrics.GroupResult {
-	activeRatios := ratio_setting.GetGroupRatioCopy()
-	return lo.Filter(groups, func(g perfmetrics.GroupResult, _ int) bool {
-		_, ok := activeRatios[g.Group]
-		return ok || g.Group == "auto"
 	})
 }

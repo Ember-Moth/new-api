@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/usage/performance"
+
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 	"github.com/QuantumNous/new-api/internal/module/usage/internal/rankings"
 
@@ -16,6 +18,7 @@ import (
 )
 
 type Service struct {
+	Performance *performance.Store
 	*rankings.Reader
 	Aggregates *aggregation.Store
 	*implementation.Store
@@ -24,6 +27,7 @@ type Service struct {
 
 type WriterPolicy = implementation.WriterPolicy
 type Dependencies struct {
+	Performance     *performance.Store
 	RankingMetadata func(context.Context) map[string]contract.RankingModelMetadata
 	Aggregates      *aggregation.Store
 	DB              *gorm.DB
@@ -40,7 +44,7 @@ var ErrInvalidLogCursor = implementation.ErrInvalidLogCursor
 
 func New(deps Dependencies) *Service {
 	store := implementation.New(implementation.Dependencies{DB: deps.DB, Kind: deps.Kind, ChannelNames: deps.ChannelNames})
-	return &Service{Reader: rankings.New(deps.Aggregates, deps.RankingMetadata, time.Now), Aggregates: deps.Aggregates, Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
+	return &Service{Performance: deps.Performance, Reader: rankings.New(deps.Aggregates, deps.RankingMetadata, time.Now), Aggregates: deps.Aggregates, Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
 }
 
 func FormatAdminLogs(logs []*Log) { implementation.FormatAdminLogs(logs) }

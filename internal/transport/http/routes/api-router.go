@@ -50,8 +50,8 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		perfMetricsRoute := apiRouter.Group("/perf-metrics")
 		perfMetricsRoute.Use(middleware.HeaderNavModulePublicOrUserAuth("pricing"))
 		{
-			perfMetricsRoute.GET("/summary", controller.GetPerfMetricsSummary)
-			perfMetricsRoute.GET("", controller.GetPerfMetrics)
+			perfMetricsRoute.GET("/summary", usageHandler.GetPerfMetricsSummary)
+			perfMetricsRoute.GET("", usageHandler.GetPerfMetrics)
 		}
 		apiRouter.GET("/rankings", middleware.HeaderNavModuleAuth("rankings"), usageHandler.GetRankings)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)

@@ -195,6 +195,14 @@ PostgreSQL 初始 SQL 为全部汇总维度增加非空和组合唯一约束；�
 
 供应商元数据暂时仍来自旧定价目录，定价运行时将在 billing 迁移时接管；日志生产者适配及其他统计能力继续按归属消减，usage 的全部外围依赖尚未清除。
 
+第二十六批将性能统计实体、采样计数、时间桶持久化、保留期清理、分组查询与模型摘要迁入 usage 的私有 performance 实现，两个 HTTP 接口和响应契约随模块移动。原 pkg/perf_metrics 已移除；model 只提供同一采集实例的过渡组装，service 保留 RelayInfo 到采样事件的薄适配，查询模块不依赖转发结构。
+
+同一请求的全部计数在一个临界区更新，落库事务失败后整组恢复，期间仍可接收新样本。查询在 SQL 与内存快照之间协调本实例的刷新，避免数据从内存移至 SQL 时被漏算或重复计算。后台任务由应用持有取消和完成信号，关闭 HTTP 后刷新当前桶；关闭采集开关不丢弃此前已接收的数据。统计小时数仍限制在 30 天，保留期/定时间隔的大整数转换不会溢出为误删除或空转。
+
+原 DragonflyDB 性能指标写入没有活跃读取调用，写入及未使用的读取代码均删除。保留原有“主 PostgreSQL 已落库数据 + 当前实例尚未落库数据”的查询范围，近期样本并未变成跨实例共享缓冲；进程异常退出可能丢失内存样本，提交结果不确定时不提供跨重启的恰好一次投递保证。
+
+性能配置仍通过原配置注册表提供，活跃分组仍通过倍率配置投影输入；这些配置与 RelayInfo 适配将随剩余配置/网关模块迁移消减。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -615,3 +623,31 @@ python3 /tmp/verify-new-api-modular-startup.py
 排行榜测试在真实 PostgreSQL 的隔离 schema 上使用正式 SQL 初始化，覆盖 24 小时/周/月/年周期边界、前期排名、并列名次稳定性、模型/供应商份额、增长率、未知供应商回退、历史分桶、20/10/5/6 条展示上限及 Others 汇总。固定时钟验证默认周周期、实例间缓存隔离、5 分钟到期刷新、并发访问、请求取消、SQL 失败后恢复和 HTTP 响应；原导航访问控制回归保持通过。专项测试与竞态检查全部通过。
 
 输出：`/tmp/new-api-rankings-module-build.log`、`/tmp/new-api-rankings-module-tests.log`、`/tmp/new-api-rankings-module-race.log`、`/tmp/new-api-rankings-module-full-tests.log`、`/tmp/new-api-rankings-module-vet.log`、`/tmp/new-api-rankings-module-startup.log`。
+
+## 第二十六批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/usage/... ./model ./service ./controller ./internal/transport/http/middleware \
+  -run 'TestModular|TestPerformance|TestHeaderNav' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/usage -run TestPerformance -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+真实性能统计测试使用正式 SQL 初始化的隔离 PostgreSQL schema，验证 SQL/内存合并后的加权指标、完整字段回滚、刷新期间采样与查询、两个实例原子累加、已完成桶/当前桶区别、分钟/5 分钟/小时粒度、重复刷新、保留期边界、大整数设置、请求取消及关闭时保存。HTTP 测试保留响应缓存标记、隐藏请求计数、过滤停用分组，并验证缺失模型参数及小时数默认/上限；活跃分组提供方返回空集合时不扩大查询范围。
+
+本批没有新增 DragonflyDB 读写协议；删除了没有读取用途的性能指标写入，完整后端回归继续在真实 DragonflyDB 配置下运行通过。
+
+输出：`/tmp/new-api-performance-module-build.log`、`/tmp/new-api-performance-module-tests.log`、`/tmp/new-api-performance-module-race.log`、`/tmp/new-api-performance-module-full-tests.log`、`/tmp/new-api-performance-module-vet.log`、`/tmp/new-api-performance-module-startup.log`。
