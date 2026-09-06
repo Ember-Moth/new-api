@@ -203,3 +203,26 @@ python3 /tmp/verify-new-api-planes.py
 新库双角色各启动两轮。数据面的 PostgreSQL 角色被撤销 options、channels、abilities 权限，仅对 channels 额外授予额度累计所需的 id/used_quota 列权限。运行中创建渠道并发布后，通过真实 API Key 向数据面发送聊天请求，本地测试上游收到正确请求和渠道密钥，返回结果成功；重启后同样通过。该验证针对应用直连端口，尚未覆盖 Nginx/容器入口。
 
 输出：`/tmp/new-api-channel-snapshot-{full-tests,regression,dragonfly,build,vet,startup}.log`。下一批继续插件配置快照，再推进请求级快照、运行状态和可靠结算。
+
+## 第九批：插件配置快照
+
+控制面在事务 advisory lock 内读取活动插件覆盖集合并发布到 DragonflyDB，数据面仅消费共享快照。原有按整批配置编译、原子替换路由运行代、失败保留已有插件的机制保持不变；缓存不可用不清空现有运行代。内容版本与原有数据库语义 revision 分开，节点 `info.extra.plugins_version` 只在完整应用目标配置时上报，部分失败时为空。
+
+应用先配置 HTTP 路由准备器，再同步初始插件快照，随后启动系统任务执行器与节点报告；后台配置订阅可取消，通知丢失由 30 秒周期补偿。控制面管理操作继续同步发布新配置，定期读取可重建丢失快照。
+
+完整测试发现旧模型漂移回归依赖同一个 JavaScript VM 中的可变全局计数，VM 池回收时可能漏测。已改为显式改变最终请求内容，确定性地验证最终解码不能改变已固定的模型。
+
+验证服务：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。沿用前文三个 TEST_*_DSN，以下验证通过：
+
+```sh
+GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+真实 DragonflyDB/PostgreSQL 回归覆盖无 DB 客户端加载与编译、源码保真、重复配置复用运行代、坏源码保留原插件、快照缺失保留运行代、停用移除覆盖及版本报告。既有插件路由冲突、协议与账务回归通过。
+
+新库双角色两轮启动中，数据面账号被禁止读取 `task_plugins`，仍能在运行中加载新增插件的动态路由，重启后继续可用。该路由在数据面进入正常鉴权拦截，在控制面返回 404；没有执行测试插件的业务任务。原生 OpenAI 请求仍通过受限数据面转发到本地测试上游，业务数据、会话、日志和安全凭证保留。
+
+输出：`/tmp/new-api-plugin-snapshot-{tests,dragonfly,adaptor,full-tests,build,vet,startup}.log`。该批完成插件配置传输和初始化顺序，尚未完成所有运行状态、请求级配置隔离、后台任务恢复、可靠结算以及 Nginx/容器入口验证。

@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/config/setting"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
-	"github.com/QuantumNous/new-api/internal/config/setting"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -597,9 +597,11 @@ func GetTaskPluginOptions(c *gin.Context) {
 
 var taskPluginSyncState = struct {
 	sync.Mutex
-	hashes      map[string]string
-	errors      map[string]string
-	lastRebuild taskPluginRebuildOutcome
+	hashes         map[string]string
+	errors         map[string]string
+	lastRebuild    taskPluginRebuildOutcome
+	source         *model.TaskPluginSnapshots
+	appliedVersion string
 }{hashes: map[string]string{}, errors: map[string]string{}}
 
 func syncTaskPluginsOnce() error {
@@ -610,7 +612,13 @@ func syncTaskPluginsOnceContext(ctx context.Context) error {
 	started := time.Now()
 	taskPluginSyncState.Lock()
 	defer taskPluginSyncState.Unlock()
-	databaseSnapshot, err := model.GetTaskPluginSyncSnapshot()
+	var databaseSnapshot model.TaskPluginSyncSnapshot
+	var err error
+	if taskPluginSyncState.source != nil {
+		databaseSnapshot, err = taskPluginSyncState.source.Load(ctx)
+	} else {
+		databaseSnapshot, err = model.GetTaskPluginSyncSnapshot()
+	}
 	if err != nil {
 		syncErr := fmt.Errorf("sync task plugins: %w", err)
 		taskPluginSyncState.lastRebuild = taskPluginRebuildOutcome{
@@ -726,6 +734,10 @@ func syncTaskPluginsOnceContext(ctx context.Context) error {
 	if pluginErrorCount > 0 {
 		status = "partial"
 	}
+	taskPluginSyncState.appliedVersion = ""
+	if status == "success" {
+		taskPluginSyncState.appliedVersion = databaseSnapshot.PublishedVersion
+	}
 	taskPluginSyncState.lastRebuild = taskPluginRebuildOutcome{
 		Status:           status,
 		AttemptedAt:      time.Now(),
@@ -753,9 +765,37 @@ func SyncTaskPluginsOnce() {
 	}
 }
 
-func SyncTaskPlugins() {
-	SyncTaskPluginsOnce()
-	for range time.NewTicker(30 * time.Second).C {
-		SyncTaskPluginsOnce()
+func ConfigureTaskPluginSnapshots(source *model.TaskPluginSnapshots) *model.TaskPluginSnapshots {
+	taskPluginSyncState.Lock()
+	defer taskPluginSyncState.Unlock()
+	previous := taskPluginSyncState.source
+	taskPluginSyncState.source = source
+	return previous
+}
+func TaskPluginSnapshotVersion() string {
+	taskPluginSyncState.Lock()
+	defer taskPluginSyncState.Unlock()
+	return taskPluginSyncState.appliedVersion
+}
+func InitializeTaskPlugins(ctx context.Context) error { return syncTaskPluginsOnceContext(ctx) }
+func SyncTaskPlugins(ctx context.Context) {
+	taskPluginSyncState.Lock()
+	source := taskPluginSyncState.source
+	taskPluginSyncState.Unlock()
+	if source != nil {
+		source.Watch(ctx, syncTaskPluginsOnceContext)
+		return
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := syncTaskPluginsOnceContext(ctx); err != nil {
+				common.SysError(err.Error())
+			}
+		}
 	}
 }

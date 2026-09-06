@@ -119,7 +119,7 @@ func Run(assets router.WebAssets) {
 
 	// 热更新配置
 	go model.OptionManager().SyncOptions(runCtx, common.SyncFrequency)
-	go controller.SyncTaskPlugins()
+	controller.ConfigureTaskPluginSnapshots(model.NewTaskPluginSnapshots(model.DB, common.RDB, !common.IsControlPlane))
 
 	// 周期性重载授权策略，保证权限变更传播到所有控制面实例
 	if common.IsControlPlane {
@@ -197,10 +197,8 @@ func Run(assets router.WebAssets) {
 	logService := usage.New(usage.Dependencies{Performance: performance, RankingMetadata: rankingModelMetadata, Aggregates: aggregates, DB: model.LOG_DB, ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
 	systemService := system.New(system.Dependencies{Cache: common.RDB, Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsControlPlane,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
-		InstanceReport: system.InstanceReportConfig{ChannelsVersion: model.ChannelService().ChannelSnapshotVersion, OptionsVersion: model.OptionManager().AppliedVersion, Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
+		InstanceReport: system.InstanceReportConfig{PluginsVersion: controller.TaskPluginSnapshotVersion, ChannelsVersion: model.ChannelService().ChannelSnapshotVersion, OptionsVersion: model.OptionManager().AppliedVersion, Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})
-	instanceReporterDone := systemService.StartSystemInstanceReporter(runCtx)
-	defer func() { cancelRun(); <-instanceReporterDone }()
 	tasktransport.RegisterScheduledSystemTasks(systemService, tasktransport.ScheduledWorkloads{
 		ChannelTest: func(ctx context.Context, mode string, notify bool, progress func(int, int)) (any, error) {
 			return controller.RunChannelTestTask(ctx, mode, notify, progress)
@@ -210,7 +208,6 @@ func Run(assets router.WebAssets) {
 		},
 	})
 	tasktransport.RegisterChannelUpdates(systemService, model.ChannelService())
-	systemService.StartSystemTaskRunner(runCtx)
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -276,6 +273,16 @@ func Run(assets router.WebAssets) {
 		common.FatalLog("failed to configure HTTP server: " + err.Error())
 		return
 	}
+	if err := controller.InitializeTaskPlugins(runCtx); err != nil {
+		common.FatalLog("failed to initialize task plugin snapshot: " + err.Error())
+		return
+	}
+	model.InvalidatePricingCache()
+	model.GetPricing()
+	go controller.SyncTaskPlugins(runCtx)
+	systemService.StartSystemTaskRunner(runCtx)
+	instanceReporterDone := systemService.StartSystemInstanceReporter(runCtx)
+	defer func() { cancelRun(); <-instanceReporterDone }()
 	var port = os.Getenv("PORT")
 	if port == "" {
 		port = strconv.Itoa(*common.Port)

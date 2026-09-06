@@ -17,6 +17,7 @@ import (
 
 type ReportConfig struct {
 	OptionsVersion  func() string
+	PluginsVersion  func() string
 	ChannelsVersion func() string
 	Node            common.NodeIdentity
 	Version         string
@@ -101,6 +102,12 @@ func (r *Reporter) ReportCurrentSystemInstance(ctx context.Context) error {
 			info.Extra = make(map[string]any)
 		}
 		info.Extra["channels_version"] = r.config.ChannelsVersion()
+	}
+	if r.config.PluginsVersion != nil {
+		if info.Extra == nil {
+			info.Extra = make(map[string]any)
+		}
+		info.Extra["plugins_version"] = r.config.PluginsVersion()
 	}
 	return r.registry.UpsertSystemInstance(ctx, identity.Name, info, r.config.StartedAt, common.GetTimestamp())
 }

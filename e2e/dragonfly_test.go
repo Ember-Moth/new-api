@@ -40,6 +40,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -88,6 +89,58 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("plugin snapshots compile without a database and retain the last good generation", func(t *testing.T) {
+		oldRegistry := jsplugin.DefaultRegistry
+		jsplugin.DefaultRegistry = jsplugin.NewRegistry()
+		writer := model.NewTaskPluginSnapshots(database, client, false)
+		reader := model.NewTaskPluginSnapshots(nil, client, true)
+		previousSource := controller.ConfigureTaskPluginSnapshots(reader)
+		t.Cleanup(func() {
+			controller.ConfigureTaskPluginSnapshots(previousSource)
+			jsplugin.DefaultRegistry = oldRegistry
+			require.NoError(t, client.Del(context.Background(), "config:snapshot:task-plugins").Err())
+			require.NoError(t, database.Where("key = ?", "snapshot-plugin").Delete(&model.TaskPlugin{}).Error)
+		})
+		require.Error(t, controller.InitializeTaskPlugins(t.Context()))
+		source := `export const meta = {apiVersion:1,key:"snapshot-plugin",name:"Snapshot",version:"1.0.0",author:{name:"Test"},models:["snapshot-model"],fetchMode:"per_task"};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {};}`
+		digest := sha256.Sum256([]byte(source))
+		plugin := model.TaskPlugin{Key: "snapshot-plugin", APIVersion: 1, Version: "1.0.0", Source: source, SourceHash: hex.EncodeToString(digest[:]), Enabled: true}
+		require.NoError(t, model.SaveTaskPlugin(&plugin))
+		published, err := writer.Load(t.Context())
+		require.NoError(t, err)
+		loaded, err := reader.Load(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, published.PublishedVersion, loaded.PublishedVersion)
+		require.Len(t, loaded.Plugins, 1)
+		assert.Equal(t, source, loaded.Plugins[0].Source)
+		require.NoError(t, controller.InitializeTaskPlugins(t.Context()))
+		generation := jsplugin.DefaultRegistry.Generation()
+		original := jsplugin.DefaultRegistry.OverridePlugins()["snapshot-plugin"]
+		require.NotNil(t, original)
+		assert.Equal(t, published.PublishedVersion, controller.TaskPluginSnapshotVersion())
+		require.NoError(t, controller.InitializeTaskPlugins(t.Context()))
+		assert.Same(t, generation, jsplugin.DefaultRegistry.Generation())
+		require.NoError(t, database.Model(&model.TaskPlugin{}).Where("id = ?", plugin.Id).Updates(map[string]any{"source": "invalid javascript {", "source_hash": "invalid-source"}).Error)
+		_, err = writer.Load(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, controller.InitializeTaskPlugins(t.Context()))
+		assert.Same(t, original, jsplugin.DefaultRegistry.OverridePlugins()["snapshot-plugin"])
+		assert.Empty(t, controller.TaskPluginSnapshotVersion(), "a partial generation must not advertise complete application")
+		require.NoError(t, client.Del(t.Context(), "config:snapshot:task-plugins").Err())
+		require.Error(t, controller.InitializeTaskPlugins(t.Context()))
+		assert.Same(t, original, jsplugin.DefaultRegistry.OverridePlugins()["snapshot-plugin"])
+		require.NoError(t, database.Model(&model.TaskPlugin{}).Where("id = ?", plugin.Id).Update("enabled", false).Error)
+		published, err = writer.Load(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, controller.InitializeTaskPlugins(t.Context()))
+		assert.Nil(t, jsplugin.DefaultRegistry.OverridePlugins()["snapshot-plugin"])
+		assert.Equal(t, published.PublishedVersion, controller.TaskPluginSnapshotVersion())
+	})
 
 	t.Run("channel routing and pricing load only from published snapshots", func(t *testing.T) {
 		previousMemory := common.MemoryCacheEnabled

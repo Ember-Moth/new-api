@@ -112,16 +112,21 @@ func ListActiveTaskPlugins() ([]TaskPlugin, error) {
 }
 
 type TaskPluginSyncSnapshot struct {
-	Plugins  []TaskPlugin
-	Revision string
+	PublishedVersion string `json:"-"`
+	Plugins          []TaskPlugin
+	Revision         string
 }
 
 // GetTaskPluginSyncSnapshot returns the enabled override set together with a
 // deterministic revision of every active database override. Nodes can compare
 // the revision even though their local routing-generation counters differ.
 func GetTaskPluginSyncSnapshot() (TaskPluginSyncSnapshot, error) {
+	return getTaskPluginSyncSnapshot(DB)
+}
+
+func getTaskPluginSyncSnapshot(db *gorm.DB) (TaskPluginSyncSnapshot, error) {
 	var activePlugins []TaskPlugin
-	if err := DB.Where(&TaskPlugin{Active: true}).
+	if err := db.Where(&TaskPlugin{Active: true}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "version"}}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
