@@ -1,7 +1,10 @@
-package model
+package pricing
 
 import (
 	"context"
+	"maps"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/internal/module/channel"
@@ -73,7 +76,14 @@ var defaultVendorIcons = map[string]string{
 }
 
 // initDefaultVendorMapping 简化的默认供应商映射
-func initDefaultVendorMapping(metaMap map[string]*contract.Model, vendorMap map[int]*contract.Vendor, enableAbilities []AbilityWithChannel) {
+func (s *Service) initDefaultVendorMapping(ctx context.Context, metaMap map[string]*contract.Model, vendorMap map[int]*contract.Vendor, enableAbilities []channel.AbilityWithChannel) error {
+	patterns := slices.Collect(maps.Keys(defaultVendorRules))
+	sort.Slice(patterns, func(i, j int) bool {
+		if len(patterns[i]) != len(patterns[j]) {
+			return len(patterns[i]) > len(patterns[j])
+		}
+		return patterns[i] < patterns[j]
+	})
 	for _, ability := range enableAbilities {
 		modelName := ability.Model
 		if _, exists := metaMap[modelName]; exists {
@@ -83,9 +93,14 @@ func initDefaultVendorMapping(metaMap map[string]*contract.Model, vendorMap map[
 		// 匹配供应商
 		vendorID := 0
 		modelLower := strings.ToLower(modelName)
-		for pattern, vendorName := range defaultVendorRules {
+		for _, pattern := range patterns {
+			vendorName := defaultVendorRules[pattern]
 			if strings.Contains(modelLower, pattern) {
-				vendorID = getOrCreateVendor(vendorName, vendorMap)
+				var err error
+				vendorID, err = s.getOrCreateVendor(ctx, vendorName, vendorMap)
+				if err != nil {
+					return err
+				}
 				break
 			}
 		}
@@ -98,14 +113,15 @@ func initDefaultVendorMapping(metaMap map[string]*contract.Model, vendorMap map[
 			NameRule:  contract.NameRuleExact,
 		}
 	}
+	return nil
 }
 
 // 查找或创建供应商
-func getOrCreateVendor(vendorName string, vendorMap map[int]*contract.Vendor) int {
+func (s *Service) getOrCreateVendor(ctx context.Context, vendorName string, vendorMap map[int]*contract.Vendor) (int, error) {
 	// 查找现有供应商
 	for id, vendor := range vendorMap {
 		if vendor.Name == vendorName {
-			return id
+			return id, nil
 		}
 	}
 
@@ -116,12 +132,17 @@ func getOrCreateVendor(vendorName string, vendorMap map[int]*contract.Vendor) in
 		Icon:   getDefaultVendorIcon(vendorName),
 	}
 
-	if err := channel.New(channel.Dependencies{DB: DB}).CreateVendor(context.Background(), newVendor); err != nil {
-		return 0
+	if err := s.deps.Channels.CreateVendor(ctx, newVendor); err != nil {
+		existing, lookupErr := s.deps.Channels.VendorByName(ctx, vendorName)
+		if lookupErr != nil || existing == nil {
+			return 0, err
+		}
+		vendorMap[existing.Id] = existing
+		return existing.Id, nil
 	}
 
 	vendorMap[newVendor.Id] = newVendor
-	return newVendor.Id
+	return newVendor.Id, nil
 }
 
 // 获取供应商默认图标

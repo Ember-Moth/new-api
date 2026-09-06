@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	identitygroups "github.com/QuantumNous/new-api/internal/module/identity/groups"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/infra/database/value"
@@ -18,7 +20,6 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -60,7 +61,7 @@ func newTokenFixture(t *testing.T) *tokenFixture {
 		TokenPolicy: identity.TokenPolicy{
 			MaxTokens: func() int { return f.maxTokens }, MaxAutoGroups: func() int { return f.maxGroups },
 			UserGroup:         func(ctx context.Context, userID int) (string, error) { return "default", nil },
-			IsSelectableGroup: service.IsUserSelectableGroup, AutoGroups: service.GetUserAutoGroup,
+			IsSelectableGroup: identitygroups.IsUserSelectableGroup, AutoGroups: identitygroups.GetUserAutoGroup,
 		},
 		InvalidateTokenCache: func(key string) error {
 			f.invalidated = append(f.invalidated, key)

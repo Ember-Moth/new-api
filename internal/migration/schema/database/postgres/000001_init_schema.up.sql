@@ -812,7 +812,7 @@ CREATE TABLE vendors (
 
 CREATE INDEX idx_vendors_deleted_at ON vendors USING btree (deleted_at);
 
-CREATE UNIQUE INDEX uk_vendor_name_delete_at ON vendors USING btree (name, deleted_at);
+CREATE UNIQUE INDEX uk_vendor_name_delete_at ON vendors USING btree (name) WHERE deleted_at IS NULL;
 
 INSERT INTO options (key, value) VALUES ('theme.frontend', 'default');
 

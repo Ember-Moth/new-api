@@ -105,3 +105,8 @@ type CheckoutBuyer struct {
 	ID                                     int
 	Username, Email, StripeCustomer, Group string
 }
+
+type GroupChoice struct {
+	Ratio       any    `json:"ratio"`
+	Description string `json:"desc"`
+}

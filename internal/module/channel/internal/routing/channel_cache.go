@@ -88,10 +88,8 @@ func (r *Runtime) InitChannelCache() {
 	r.channelsIDM = newChannelId2channel
 	r.channel2advancedCustomConfig = newChannel2advancedCustomConfig
 	r.channelSyncLock.Unlock()
-	// Lock ordering: InvalidatePricingCache acquires updatePricingLock, and
-	// GetPricing (holding updatePricingLock) nests r.channelSyncLock.RLock via
-	// loadPricingAdvancedCustomConfigs. r.channelSyncLock MUST be released before
-	// invalidating the pricing cache, otherwise the reversed order deadlocks.
+	// Release the routing lock before notifying projections: a pricing rebuild
+	// may read the parsed channel snapshot through AdvancedConfigs.
 	r.changed()
 	r.rebuildTaskAliasView()
 	common.SysLog("channels synced from database")
@@ -291,10 +289,8 @@ func (r *Runtime) CacheUpdateChannel(channel *Channel) {
 		}
 	}
 	logger.LogDebug(nil, "CacheUpdateChannel after: id=%d, name=%s, status=%d, polling_index=%d", channel.Id, channel.Name, channel.Status, channel.ChannelInfo.MultiKeyPollingIndex)
-	// Lock ordering: do NOT hold r.channelSyncLock while calling
-	// InvalidatePricingCache. GetPricing acquires updatePricingLock first and then
-	// r.channelSyncLock.RLock (via loadPricingAdvancedCustomConfigs); acquiring
-	// updatePricingLock while holding r.channelSyncLock would be an AB-BA deadlock.
+	// Notify pricing after releasing the routing lock; a projection refresh may
+	// read AdvancedConfigs and must not re-enter the same lock.
 	r.channelSyncLock.Unlock()
 	r.changed()
 }

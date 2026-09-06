@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -14,12 +15,16 @@ import (
 )
 
 func (r *Runtime) GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
+	return r.EnabledPricingAbilities(context.Background())
+}
+
+func (r *Runtime) EnabledPricingAbilities(ctx context.Context) ([]AbilityWithChannel, error) {
 	var abilities []AbilityWithChannel
-	err := r.db.Table("abilities").
+	err := r.db.WithContext(ctx).Table("abilities").
 		Select("abilities.*, channels.type as channel_type").
 		Joins("left join channels on abilities.channel_id = channels.id").
 		Where("abilities.enabled = ?", true).
-		Scan(&abilities).Error
+		Order("abilities.channel_id, abilities.model, abilities.group").Scan(&abilities).Error
 	return abilities, err
 }
 

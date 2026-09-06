@@ -307,6 +307,15 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 直接按次/任务额度调整同样由模块执行，结果保留 FundingApplied/TokenApplied，供旧任务调用方处理部分提交；单请求金额和调整量在算差额前检查边界。
 - 删除 service/billing_session.go、funding_source.go；service/billing.go 留下转发适配和通知衔接，service/quota.go 不再实现预扣及资金/令牌更新。原 model/subscription_billing_test.go 的退款回归迁至模块，用直接可观察的数据库结果替代异步通知等待。
 
+第四十批迁移模型定价目录、价格展示与分组策略：
+
+- billing/pricing 拥有模型价格、供应商、端点和分组索引。每个实例构建完整快照后原子发布；读者拿到独立副本，不能改写缓存的分组切片、端点、价格指针、插件 usageSchema 或示例。刷新失败返回上一份完整快照和错误，价格 HTTP 接口明确报告失败。
+- 渠道能力查询带 context 并按渠道/模型/分组排序；价格模型、供应商与自定义端点采用确定顺序。渠道变更只发出不阻塞的失效信号；新插件 generation 会立即触发下一次价格读取刷新，保留任务别名的表达式与 usageSchema 继承。
+- 默认供应商匹配采用最长模式优先，显式元数据保持优先。PostgreSQL 初始 SQL 将供应商名称唯一性改为有效记录的部分唯一索引，阻止 deleted_at=NULL 时重复同名供应商；并发默认创建在冲突后读取已存在记录，软删除后仍可复用名称。
+- 价格展示、倍率公开/重置接口迁入 billing transport；分组列表和自助可用分组归 identity。identity/groups 统一默认/特殊可用分组、用户自己的分组、Auto 去重/过滤/上限和用户分组倍率，认证、令牌配置和价格页使用同一策略。
+- 应用层渠道管理和排行榜从 billing 快照获得元数据。删除三个根 controller 文件及 model/pricing.go、pricing_default.go、pricing_refresh.go、model_extra.go；原两个定价回归文件合并至模块，并使用正式 SQL 的隔离数据库。
+- model/pricing_runtime.go 暂为未迁移的模型列表/转发调用方绑定模块实例。上游价格同步与请求实际计价仍在后续拆分范围内。
+
 ## 第一批验证（2026-09-05）
 
 Go **1.27.1**，PostgreSQL **18.6**，ClickHouse **26.9.1.762**。本批没有修改缓存 Lua/TTL/事务行为，未重新启用 DragonflyDB 集成实例。
@@ -1147,3 +1156,32 @@ DragonflyDB 全链路通过真实转发适配器执行预扣 30 → 追加到 50
 资金与令牌仍分两步提交；第二步失败通过错误和日志暴露，已提交资金不会自动回滚。非幂等的钱包/令牌退款仅尝试一次；订阅退款使用请求回执进行有限重试。
 
 输出：`/tmp/new-api-billing-sessions-build.log`、`/tmp/new-api-billing-sessions-tests.log`、`/tmp/new-api-billing-sessions-race.log`、`/tmp/new-api-billing-sessions-dragonfly.log`、`/tmp/new-api-billing-sessions-full-tests.log`、`/tmp/new-api-billing-sessions-vet.log`、`/tmp/new-api-billing-sessions-startup.log`。
+
+## 第四十批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归、定价竞态检查与三种日志配置的新库/两次重启全部通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/module/billing \
+  -run 'TestPricing|TestInitChannelCache|TestCacheUpdateChannelSyncs' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing \
+  -run 'TestPricing|TestInitChannelCache|TestCacheUpdateChannelSyncs' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-pricing-startup.py
+```
+
+模块用正式 SQL 初始化隔离 PostgreSQL schema 两次，覆盖原生/高级自定义端点合并、渠道缓存失效、插件 generation 更新、别名表达式与 usageSchema。新回归验证独立快照及实例、失败刷新保留原快照且可恢复、并发创建默认供应商、重复有效供应商拒绝及软删除名称复用；HTTP 定价结果与用户分组策略同时验证匿名、VIP 倍率覆盖、Auto 顺序和空权限列表。
+
+启动脚本在共享 PostgreSQL 日志、独立 PostgreSQL 日志、ClickHouse 日志三种配置中分别建立新数据库并重启两次；全部启用批处理。在每个主库实际插入重复供应商，要求数据库报 unique_violation，并在重启后验证只有一条有效记录。保留数据和主/日志 schema 版本检查继续通过。完整回归继续覆盖真实 DragonflyDB 与 ClickHouse。
+
+输出：`/tmp/new-api-pricing-build.log`、`/tmp/new-api-pricing-module-tests.log`、`/tmp/new-api-pricing-race.log`、`/tmp/new-api-pricing-full-tests.log`、`/tmp/new-api-pricing-vet.log`、`/tmp/new-api-pricing-startup.log`。

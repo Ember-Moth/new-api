@@ -46,7 +46,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		apiRouter.GET("/about", controller.GetAbout)
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
-		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
+		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), billingHandler.GetPricing)
 		perfMetricsRoute := apiRouter.Group("/perf-metrics")
 		perfMetricsRoute.Use(middleware.HeaderNavModulePublicOrUserAuth("pricing"))
 		{
@@ -68,7 +68,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		apiRouter.GET("/oauth/telegram/bind/:flow_token", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.TelegramBind)
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.TryUserAuth(), controller.HandleOAuth)
-		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
+		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), billingHandler.GetRatioConfig)
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, billingHandler.StripeWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, billingHandler.CreemWebhook)
@@ -93,7 +93,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 			//userRoute.POST("/tokenlog", middleware.CriticalRateLimit(), controller.TokenLog)
 			userRoute.POST("/epay/notify", anonymousRequestBodyLimit, billingHandler.EpayNotify)
 			userRoute.GET("/epay/notify", billingHandler.EpayNotify)
-			userRoute.GET("/groups", controller.GetUserGroups)
+			userRoute.GET("/groups", identityHandler.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.UserAuth())
@@ -101,7 +101,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				selfRoute.GET("/sessions", middleware.DisableCache(), identityHandler.GetLoginSessions)
 				selfRoute.DELETE("/sessions/:sid", middleware.DisableCache(), identityHandler.DeleteLoginSession)
 				selfRoute.POST("/sessions/revoke-others", middleware.DisableCache(), identityHandler.RevokeOtherLoginSessions)
-				selfRoute.GET("/self/groups", controller.GetUserGroups)
+				selfRoute.GET("/self/groups", identityHandler.GetUserGroups)
 				selfRoute.GET("/self", identityHandler.Self)
 				selfRoute.GET("/models", controller.GetUserModels)
 				selfRoute.PUT("/self", middleware.CriticalRateLimit(), middleware.DisableCache(), identityHandler.UpdateSelf)
@@ -212,7 +212,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)
-			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
+			optionRoute.POST("/rest_model_ratio", billingHandler.ResetModelRatio)
 			optionRoute.GET("/waffo-pancake/catalog", billingHandler.ListWaffoPancakeCatalog)
 			optionRoute.POST("/waffo-pancake/pair", billingHandler.CreateWaffoPancakePair)
 			optionRoute.POST("/waffo-pancake/save", billingHandler.SaveWaffoPancake)
@@ -341,7 +341,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		groupRoute := apiRouter.Group("/group")
 		groupRoute.Use(middleware.AdminAuth())
 		{
-			groupRoute.GET("/", controller.GetGroups)
+			groupRoute.GET("/", identityHandler.GetGroups)
 		}
 
 		prefillGroupRoute := apiRouter.Group("/prefill_group")

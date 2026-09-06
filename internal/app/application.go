@@ -153,7 +153,7 @@ func Run(assets router.WebAssets) {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	paymentGateway := checkout.New(checkout.Options{Config: paymentGatewayConfig})
 	ledger := model.AccountingStore()
-	billingService := billing.New(billing.Dependencies{Accounting: ledger, Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{EpayVerifier: paymentGateway.VerifyEpay, Config: paymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed})
+	billingService := billing.New(billing.Dependencies{Pricing: model.PricingService(), Accounting: ledger, Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{EpayVerifier: paymentGateway.VerifyEpay, Config: paymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed})
 	identityService := identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})

@@ -1,19 +1,18 @@
-package model
+package pricing
 
 import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
+	"sort"
 	"strings"
-
-	"github.com/QuantumNous/new-api/internal/module/channel"
-	"github.com/QuantumNous/new-api/internal/module/channel/contract"
-
-	"sync"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+	"github.com/QuantumNous/new-api/internal/module/channel"
+	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -21,101 +20,10 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
-type Pricing struct {
-	ModelName              string                               `json:"model_name"`
-	Description            string                               `json:"description,omitempty"`
-	Icon                   string                               `json:"icon,omitempty"`
-	Tags                   string                               `json:"tags,omitempty"`
-	VendorID               int                                  `json:"vendor_id,omitempty"`
-	QuotaType              int                                  `json:"quota_type"`
-	ModelRatio             float64                              `json:"model_ratio"`
-	ModelPrice             float64                              `json:"model_price"`
-	OwnerBy                string                               `json:"owner_by"`
-	CompletionRatio        float64                              `json:"completion_ratio"`
-	CacheRatio             *float64                             `json:"cache_ratio,omitempty"`
-	CreateCacheRatio       *float64                             `json:"create_cache_ratio,omitempty"`
-	ImageRatio             *float64                             `json:"image_ratio,omitempty"`
-	AudioRatio             *float64                             `json:"audio_ratio,omitempty"`
-	AudioCompletionRatio   *float64                             `json:"audio_completion_ratio,omitempty"`
-	EnableGroup            []string                             `json:"enable_groups"`
-	SupportedEndpointTypes []constant.EndpointType              `json:"supported_endpoint_types"`
-	BillingMode            string                               `json:"billing_mode,omitempty"`
-	BillingExpr            string                               `json:"billing_expr,omitempty"`
-	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
-	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
-	PricingVersion         string                               `json:"pricing_version,omitempty"`
-}
+type Pricing = billingcontract.Pricing
+type PricingVendor = billingcontract.PricingVendor
 
-type PricingVendor struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Icon        string `json:"icon,omitempty"`
-}
-
-var (
-	pricingMap           []Pricing
-	vendorsList          []PricingVendor
-	supportedEndpointMap map[string]common.EndpointInfo
-	lastGetPricingTime   time.Time
-	updatePricingLock    sync.Mutex
-
-	// 缓存映射：模型名 -> 启用分组 / 计费类型
-	modelEnableGroups     = make(map[string][]string)
-	modelQuotaTypeMap     = make(map[string]int)
-	modelEnableGroupsLock = sync.RWMutex{}
-)
-
-var (
-	modelSupportEndpointTypes = make(map[string][]constant.EndpointType)
-	modelSupportEndpointsLock = sync.RWMutex{}
-)
-
-func GetPricing() []Pricing {
-	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-		updatePricingLock.Lock()
-		defer updatePricingLock.Unlock()
-		// Double check after acquiring the lock
-		if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-			modelSupportEndpointsLock.Lock()
-			defer modelSupportEndpointsLock.Unlock()
-			updatePricing()
-		}
-	}
-	return pricingMap
-}
-
-func InvalidatePricingCache() {
-	updatePricingLock.Lock()
-	defer updatePricingLock.Unlock()
-
-	pricingMap = nil
-	vendorsList = nil
-	lastGetPricingTime = time.Time{}
-}
-
-// GetVendors 返回当前定价接口使用到的供应商信息
-func GetVendors() []PricingVendor {
-	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-		// 保证先刷新一次
-		GetPricing()
-	}
-	return vendorsList
-}
-
-func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
-	if model == "" {
-		return make([]constant.EndpointType, 0)
-	}
-	modelSupportEndpointsLock.RLock()
-	defer modelSupportEndpointsLock.RUnlock()
-	if endpoints, ok := modelSupportEndpointTypes[model]; ok {
-		return endpoints
-	}
-	return make([]constant.EndpointType, 0)
-}
-
-func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
+func getPricingEndpointTypesForAbility(ability channel.AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
 	if ability.ChannelType != constant.ChannelTypeAdvancedCustom {
 		return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
 	}
@@ -128,7 +36,7 @@ func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCusto
 // loadPricingAdvancedCustomConfigs reads the channel module's parsed routing
 // snapshot. Routing invalidation runs after the channel module releases its
 // snapshot lock, so pricing and routing never acquire their locks in reverse.
-func loadPricingAdvancedCustomConfigs(enableAbilities []AbilityWithChannel) map[int]*dto.AdvancedCustomConfig {
+func (s *Service) loadPricingAdvancedCustomConfigs(enableAbilities []channel.AbilityWithChannel) (map[int]*dto.AdvancedCustomConfig, error) {
 	channelIDs := make([]int, 0)
 	seen := make(map[int]struct{})
 	for _, ability := range enableAbilities {
@@ -142,19 +50,18 @@ func loadPricingAdvancedCustomConfigs(enableAbilities []AbilityWithChannel) map[
 		channelIDs = append(channelIDs, ability.ChannelId)
 	}
 	if len(channelIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	configs := make(map[int]*dto.AdvancedCustomConfig, len(channelIDs))
 	if common.MemoryCacheEnabled {
-		return ChannelService().AdvancedConfigs(channelIDs)
+		return s.deps.Channels.AdvancedConfigs(channelIDs), nil
 	}
 
 	for _, channelID := range channelIDs {
-		channel, err := CacheGetChannel(channelID)
+		channel, err := s.deps.Channels.CacheGetChannel(channelID)
 		if err != nil {
-			common.SysLog(fmt.Sprintf("load advanced custom channel settings error: channel_id=%d, error=%v", channelID, err))
-			continue
+			return nil, fmt.Errorf("load advanced custom channel settings: channel_id=%d: %w", channelID, err)
 		}
 		if channel.Type != constant.ChannelTypeAdvancedCustom {
 			continue
@@ -163,7 +70,7 @@ func loadPricingAdvancedCustomConfigs(enableAbilities []AbilityWithChannel) map[
 			configs[channelID] = config
 		}
 	}
-	return configs
+	return configs, nil
 }
 
 func appendPricingEndpoint(endpoints []string, endpoint string) []string {
@@ -173,15 +80,16 @@ func appendPricingEndpoint(endpoints []string, endpoint string) []string {
 	return append(endpoints, endpoint)
 }
 
-func updatePricing() {
-	//modelRatios := common.GetModelRatios()
-	enableAbilities, err := GetAllEnableAbilityWithChannels()
+func (s *Service) build(ctx context.Context, pluginGeneration *jsplugin.RoutingGeneration) (*snapshot, error) {
+	enableAbilities, err := s.deps.Channels.EnabledPricingAbilities(ctx)
 	if err != nil {
-		common.SysLog(fmt.Sprintf("GetAllEnableAbilityWithChannels error: %v", err))
-		return
+		return nil, err
 	}
 	// 预加载模型元数据与供应商一次，避免循环查询
-	allMeta, _ := channel.New(channel.Dependencies{DB: DB}).AllModelMetadata(context.Background())
+	allMeta, err := s.deps.Channels.AllModelMetadata(ctx)
+	if err != nil {
+		return nil, err
+	}
 	metaMap := make(map[string]*contract.Model)
 	prefixList := make([]*contract.Model, 0)
 	suffixList := make([]*contract.Model, 0)
@@ -232,17 +140,22 @@ func updatePricing() {
 	}
 
 	// 预加载供应商
-	vendors, _, _ := channel.New(channel.Dependencies{DB: DB}).ListVendors(context.Background(), 0, -1)
+	vendors, _, err := s.deps.Channels.ListVendors(ctx, 0, -1)
+	if err != nil {
+		return nil, err
+	}
 	vendorMap := make(map[int]*contract.Vendor)
 	for i := range vendors {
 		vendorMap[vendors[i].Id] = vendors[i]
 	}
 
 	// 初始化默认供应商映射
-	initDefaultVendorMapping(metaMap, vendorMap, enableAbilities)
+	if err := s.initDefaultVendorMapping(ctx, metaMap, vendorMap, enableAbilities); err != nil {
+		return nil, err
+	}
 
 	// 构建对前端友好的供应商列表
-	vendorsList = make([]PricingVendor, 0, len(vendorMap))
+	vendorsList := make([]PricingVendor, 0, len(vendorMap))
 	for _, v := range vendorMap {
 		vendorsList = append(vendorsList, PricingVendor{
 			ID:          v.Id,
@@ -265,7 +178,10 @@ func updatePricing() {
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
 	modelSupportEndpointsStr := make(map[string][]string)
-	advancedCustomConfigs := loadPricingAdvancedCustomConfigs(enableAbilities)
+	advancedCustomConfigs, err := s.loadPricingAdvancedCustomConfigs(enableAbilities)
+	if err != nil {
+		return nil, err
+	}
 
 	// 先根据已有能力填充原生端点
 	for _, ability := range enableAbilities {
@@ -287,7 +203,8 @@ func updatePricing() {
 		var raw map[string]interface{}
 		if err := common.Unmarshal([]byte(meta.Endpoints), &raw); err == nil {
 			endpoints := modelSupportEndpointsStr[modelName]
-			for k, v := range raw {
+			for _, k := range slices.Sorted(maps.Keys(raw)) {
+				v := raw[k]
 				switch v.(type) {
 				case string, map[string]interface{}:
 					endpoints = appendPricingEndpoint(endpoints, k)
@@ -299,7 +216,7 @@ func updatePricing() {
 		}
 	}
 
-	modelSupportEndpointTypes = make(map[string][]constant.EndpointType)
+	modelSupportEndpointTypes := make(map[string][]constant.EndpointType)
 	for model, endpoints := range modelSupportEndpointsStr {
 		supportedEndpoints := make([]constant.EndpointType, 0)
 		for _, endpointStr := range endpoints {
@@ -310,7 +227,7 @@ func updatePricing() {
 	}
 
 	// 构建全局 supportedEndpointMap（默认 + 自定义覆盖）
-	supportedEndpointMap = make(map[string]common.EndpointInfo)
+	supportedEndpointMap := make(map[string]common.EndpointInfo)
 	// 1. 默认端点
 	for _, endpoints := range modelSupportEndpointTypes {
 		for _, et := range endpoints {
@@ -322,13 +239,15 @@ func updatePricing() {
 		}
 	}
 	// 2. 自定义端点（models 表）覆盖默认
-	for _, meta := range metaMap {
+	for _, modelName := range slices.Sorted(maps.Keys(metaMap)) {
+		meta := metaMap[modelName]
 		if strings.TrimSpace(meta.Endpoints) == "" {
 			continue
 		}
 		var raw map[string]interface{}
 		if err := common.Unmarshal([]byte(meta.Endpoints), &raw); err == nil {
-			for k, v := range raw {
+			for _, k := range slices.Sorted(maps.Keys(raw)) {
+				v := raw[k]
 				switch val := v.(type) {
 				case string:
 					supportedEndpointMap[k] = common.EndpointInfo{Path: val, Method: "POST"}
@@ -348,8 +267,7 @@ func updatePricing() {
 		}
 	}
 
-	pricingMap = make([]Pricing, 0)
-	pluginGeneration := jsplugin.DefaultRegistry.Generation()
+	pricingMap := make([]Pricing, 0)
 	for model, groups := range modelGroupsMap {
 		pricing := Pricing{
 			ModelName:              model,
@@ -400,7 +318,7 @@ func updatePricing() {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
 			}
-		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
+		} else if target, resolved := s.deps.Channels.ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
 			if tailMode := billing_setting.GetBillingMode(target.Declared); tailMode == "tiered_expr" {
 				if expr, ok := billing_setting.GetBillingExpr(target.Declared); ok && strings.TrimSpace(expr) != "" {
 					pricing.BillingMode = tailMode
@@ -410,7 +328,7 @@ func updatePricing() {
 		}
 		plugin, ok := pluginGeneration.GetByModel(model)
 		if !ok {
-			if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved {
+			if target, resolved := s.deps.Channels.ResolveTaskModelAlias(pluginGeneration, model); resolved {
 				plugin, ok = pluginGeneration.Get(target.PluginKey)
 			}
 		}
@@ -438,25 +356,23 @@ func updatePricing() {
 		pricingMap = append(pricingMap, pricing)
 	}
 
+	sort.Slice(pricingMap, func(i, j int) bool { return pricingMap[i].ModelName < pricingMap[j].ModelName })
+	sort.Slice(vendorsList, func(i, j int) bool { return vendorsList[i].ID < vendorsList[j].ID })
+	for i := range pricingMap {
+		sort.Strings(pricingMap[i].EnableGroup)
+	}
 	// 防止大更新后数据不通用
 	if len(pricingMap) > 0 {
 		pricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
 	}
 
 	// 刷新缓存映射，供高并发快速查询
-	modelEnableGroupsLock.Lock()
-	modelEnableGroups = make(map[string][]string)
-	modelQuotaTypeMap = make(map[string]int)
+	modelEnableGroups := make(map[string][]string)
+	modelQuotaTypeMap := make(map[string]int)
 	for _, p := range pricingMap {
 		modelEnableGroups[p.ModelName] = p.EnableGroup
 		modelQuotaTypeMap[p.ModelName] = p.QuotaType
 	}
-	modelEnableGroupsLock.Unlock()
 
-	lastGetPricingTime = time.Now()
-}
-
-// GetSupportedEndpointMap 返回全局端点到路径的映射
-func GetSupportedEndpointMap() map[string]common.EndpointInfo {
-	return supportedEndpointMap
+	return &snapshot{catalog: billingcontract.PricingSnapshot{Prices: pricingMap, Vendors: vendorsList, Endpoints: supportedEndpointMap}, endpoints: modelSupportEndpointTypes, groups: modelEnableGroups, quotaTypes: modelQuotaTypeMap}, nil
 }

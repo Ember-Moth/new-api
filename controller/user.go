@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	identitygroups "github.com/QuantumNous/new-api/internal/module/identity/groups"
+
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	identitycontract "github.com/QuantumNous/new-api/internal/module/identity/contract"
 
@@ -393,7 +395,7 @@ func GetUserModels(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	groups := service.GetUserUsableGroups(user.Group)
+	groups := identitygroups.GetUserUsableGroups(user.Group)
 	group := c.Query("group")
 	var groupsToQuery []string
 	switch {
@@ -403,7 +405,7 @@ func GetUserModels(c *gin.Context) {
 		}
 	case group == "auto":
 		if _, ok := groups[group]; ok {
-			groupsToQuery = service.GetUserAutoGroup(user.Group)
+			groupsToQuery = identitygroups.GetUserAutoGroup(user.Group)
 		}
 	default:
 		if _, ok := groups[group]; ok {

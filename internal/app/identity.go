@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 
+	identitygroups "github.com/QuantumNous/new-api/internal/module/identity/groups"
+
 	"github.com/QuantumNous/new-api/logger"
 
 	"context"
@@ -35,8 +37,8 @@ func tokenPolicy() identity.TokenPolicy {
 		MaxTokens:         operation_setting.GetMaxUserTokens,
 		MaxAutoGroups:     setting.GetMaxTokenAutoGroups,
 		UserGroup:         func(ctx context.Context, userID int) (string, error) { return model.GetUserGroup(userID, false) },
-		IsSelectableGroup: service.IsUserSelectableGroup,
-		AutoGroups:        service.GetUserAutoGroup,
+		IsSelectableGroup: identitygroups.IsUserSelectableGroup,
+		AutoGroups:        identitygroups.GetUserAutoGroup,
 	}
 }
 

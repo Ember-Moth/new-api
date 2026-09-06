@@ -3,18 +3,25 @@ package app
 import (
 	"context"
 
+	"github.com/QuantumNous/new-api/common"
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 	"github.com/QuantumNous/new-api/model"
 )
 
-// rankingModelMetadata adapts the pricing catalog until billing owns its runtime.
-func rankingModelMetadata(context.Context) map[string]contract.RankingModelMetadata {
-	vendors := make(map[int]model.PricingVendor)
-	for _, vendor := range model.GetVendors() {
+// rankingModelMetadata projects one billing snapshot for usage rankings.
+func rankingModelMetadata(ctx context.Context) map[string]contract.RankingModelMetadata {
+	snapshot, err := model.PricingService().Snapshot(ctx)
+	if err != nil {
+		common.SysError("ranking pricing snapshot: " + err.Error())
+	}
+	vendors := make(map[int]billingcontract.PricingVendor)
+	for _, vendor := range snapshot.Vendors {
 		vendors[vendor.ID] = vendor
 	}
 	metadata := make(map[string]contract.RankingModelMetadata)
-	for _, pricing := range model.GetPricing() {
+	for _, pricing := range snapshot.Prices {
 		item := contract.RankingModelMetadata{Vendor: pricing.OwnerBy}
 		if vendor, ok := vendors[pricing.VendorID]; ok {
 			item.Vendor = vendor.Name
