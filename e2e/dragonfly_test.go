@@ -20,6 +20,10 @@ import (
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
+	"crypto/sha256"
+	"encoding/hex"
+
+	"github.com/QuantumNous/new-api/internal/infra/configsync"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
@@ -83,6 +87,135 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("versioned options publish and data readers never access PostgreSQL", func(t *testing.T) {
+		previous := common.OptionMap
+		common.OptionMap = map[string]string{}
+		t.Cleanup(func() {
+			common.OptionMap = previous
+			require.NoError(t, client.Del(context.Background(), "config:snapshot:options").Err())
+		})
+		writer := system.NewOptions(system.OptionDependencies{DB: database, Cache: client})
+		reader := system.NewOptions(system.OptionDependencies{Cache: client, ReadOnly: true})
+		require.Error(t, reader.Reload(t.Context()))
+		require.NoError(t, writer.UpdateOption(t.Context(), "Notice", "first"))
+		t.Cleanup(func() {
+			require.NoError(t, database.Exec(`DELETE FROM options WHERE "key" IN ('Notice','About')`).Error)
+		})
+		first := writer.AppliedVersion()
+		require.NotEmpty(t, first)
+		common.OptionMap["Notice"] = "stale replica"
+		require.NoError(t, reader.Reload(t.Context()))
+		assert.Equal(t, "first", common.OptionMap["Notice"])
+		assert.Equal(t, first, reader.AppliedVersion())
+		require.Error(t, reader.UpdateOption(t.Context(), "Notice", "forbidden"))
+		require.NoError(t, writer.UpdateOption(t.Context(), "Notice", "second"))
+		require.NotEqual(t, first, writer.AppliedVersion())
+		require.NoError(t, reader.Reload(t.Context()))
+		assert.Equal(t, "second", common.OptionMap["Notice"])
+		require.NoError(t, client.HSet(t.Context(), "config:snapshot:options", "data", "corrupted").Err())
+		require.Error(t, reader.Reload(t.Context()))
+		assert.Equal(t, "second", common.OptionMap["Notice"])
+		require.NoError(t, writer.Reload(t.Context()))
+		require.NoError(t, reader.Reload(t.Context()))
+		require.NoError(t, client.Del(t.Context(), "config:snapshot:options").Err())
+		require.Error(t, reader.Reload(t.Context()))
+		require.NoError(t, writer.Reload(t.Context()))
+		require.NoError(t, reader.Reload(t.Context()))
+		assert.Equal(t, writer.AppliedVersion(), reader.AppliedVersion())
+		// Separate control-plane writers must publish the union of committed changes.
+		other := system.NewOptions(system.OptionDependencies{DB: database, Cache: client})
+		start := make(chan struct{})
+		done := make(chan error, 2)
+		go func() { <-start; done <- writer.UpdateOption(t.Context(), "Notice", "left") }()
+		go func() { <-start; done <- other.UpdateOption(t.Context(), "About", "right") }()
+		close(start)
+		for range 2 {
+			require.NoError(t, <-done)
+		}
+		require.NoError(t, reader.Reload(t.Context()))
+		assert.Equal(t, "left", common.OptionMap["Notice"])
+		assert.Equal(t, "right", common.OptionMap["About"])
+		published, err := configsync.New(client, "options").Read(t.Context())
+		require.NoError(t, err)
+		var rows []struct{ Key, Value string }
+		require.NoError(t, common.Unmarshal(published.Data, &rows))
+		values := make(map[string]string)
+		for _, row := range rows {
+			values[row.Key] = row.Value
+		}
+		assert.Equal(t, "left", values["Notice"])
+		assert.Equal(t, "right", values["About"])
+		version := reader.AppliedVersion()
+		require.NoError(t, database.Exec(`CREATE FUNCTION reject_config_publish() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected configuration write failure'; END; $$; CREATE TRIGGER reject_config_publish BEFORE INSERT OR UPDATE ON options FOR EACH ROW EXECUTE FUNCTION reject_config_publish();`).Error)
+		require.Error(t, writer.UpdateOption(t.Context(), "Notice", "must-not-publish"))
+		require.NoError(t, database.Exec("DROP FUNCTION reject_config_publish() CASCADE").Error)
+		require.NoError(t, reader.Reload(t.Context()))
+		assert.Equal(t, version, reader.AppliedVersion())
+		assert.Equal(t, "left", common.OptionMap["Notice"])
+
+	})
+
+	t.Run("configuration notifications and missed-message reconciliation", func(t *testing.T) {
+		store := configsync.New(client, "watch-test")
+		t.Cleanup(func() { require.NoError(t, client.Del(context.Background(), "config:snapshot:watch-test").Err()) })
+		_, err := store.Publish(t.Context(), []byte("first"))
+		require.NoError(t, err)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		observed := make(chan string, 64)
+		done := make(chan struct{})
+		failures := make(chan error, 4)
+		go func() {
+			defer close(done)
+			store.Watch(ctx, 20*time.Millisecond, func(ctx context.Context) error {
+				snapshot, err := store.Read(ctx)
+				if err != nil {
+					return err
+				}
+				select {
+				case observed <- string(snapshot.Data):
+				case <-ctx.Done():
+				}
+				return nil
+			}, func(err error) {
+				select {
+				case failures <- err:
+				default:
+				}
+			})
+		}()
+		for _, want := range []string{"first", "notified", "missed"} {
+			if want == "notified" {
+				_, err = store.Publish(t.Context(), []byte(want))
+				require.NoError(t, err)
+			}
+			if want == "missed" {
+				// Inject a valid snapshot without PUBLISH, as if a notification was lost.
+				digest := sha256.Sum256([]byte(want))
+				require.NoError(t, client.HSet(t.Context(), "config:snapshot:watch-test", "version", hex.EncodeToString(digest[:]), "data", want).Err())
+			}
+			deadline := time.NewTimer(5 * time.Second)
+			found := false
+			for !found {
+				select {
+				case value := <-observed:
+					found = value == want
+				case err := <-failures:
+					require.NoError(t, err)
+				case <-deadline.C:
+					t.Fatal("snapshot did not converge")
+				}
+			}
+			deadline.Stop()
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("configuration watcher did not stop")
+		}
+	})
 
 	t.Run("session authority shares atomic issuance rotation and revocation", func(t *testing.T) {
 		oldActive, oldIssued := common.UserSessionActiveLimit, common.UserSessionIssuanceLimit

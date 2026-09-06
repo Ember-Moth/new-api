@@ -9,17 +9,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/module/system/contract"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
+	"github.com/QuantumNous/new-api/internal/module/system/contract"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
 type ReportConfig struct {
-	Node      common.NodeIdentity
-	Version   string
-	StartedAt int64
-	Resources func() contract.SystemInstanceResources
+	OptionsVersion func() string
+	Node           common.NodeIdentity
+	Version        string
+	StartedAt      int64
+	Resources      func() contract.SystemInstanceResources
 }
 
 type Reporter struct {
@@ -90,6 +91,9 @@ func (r *Reporter) ReportCurrentSystemInstance(ctx context.Context) error {
 			Hostname: hostname,
 		},
 		Resources: resources,
+	}
+	if r.config.OptionsVersion != nil {
+		info.Extra = map[string]any{"options_version": r.config.OptionsVersion()}
 	}
 	return r.registry.UpsertSystemInstance(ctx, identity.Name, info, r.config.StartedAt, common.GetTimestamp())
 }

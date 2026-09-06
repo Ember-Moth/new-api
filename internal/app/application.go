@@ -208,7 +208,7 @@ func Run(assets router.WebAssets) {
 	logService := usage.New(usage.Dependencies{Performance: performance, RankingMetadata: rankingModelMetadata, Aggregates: aggregates, DB: model.LOG_DB, ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
 	systemService := system.New(system.Dependencies{Cache: common.RDB, Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsControlPlane,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
-		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
+		InstanceReport: system.InstanceReportConfig{OptionsVersion: model.OptionManager().AppliedVersion, Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})
 	instanceReporterDone := systemService.StartSystemInstanceReporter(runCtx)
 	defer func() { cancelRun(); <-instanceReporterDone }()

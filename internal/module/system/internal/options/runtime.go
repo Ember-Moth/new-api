@@ -5,20 +5,21 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/internal/config/setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/config"
 	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/performance_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 )
 
 const retiredThemeOptionKey = "theme.frontend"
 
 func (r *Manager) Initialize(ctx context.Context) error {
+	r.version = "" // Initialization precedes watchers and rebuilds all defaults.
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 

@@ -155,3 +155,28 @@ python3 /tmp/verify-new-api-planes.py
 输出：`/tmp/new-api-session-{full-tests,final-regression,build,vet,startup}.log`。其余早期 session 测试输出包含迭代中的失败，不作为最终验证结论。
 
 后续继续审计剩余运行状态，推进配置版本发布与补偿同步，随后处理后台任务恢复和计费可靠结算。容器入口集成验证仍待补，整体目标未完成。
+
+## 第七批：系统配置快照发布与补偿同步
+
+系统 options 由控制面持久化后发布到 DragonflyDB。共享基础设施 `internal/infra/configsync` 提供内容 SHA-256 版本、原子快照/通知发布、完整性检查与通知订阅。通知只携带版本，消费者重新读取当前完整快照；漏通知/断线通过 `SYNC_FREQUENCY` 周期核对补偿。控制面定期从业务库重建快照，缓存丢失后可恢复，不增加 PostgreSQL 缓存或版本状态表。
+
+配置写入和发布期间的源读取使用同一个按 schema 区分的 PostgreSQL advisory transaction lock；发布在源锁释放前完成，并限制缓存发布等待时间，避免迟到的旧源读取覆盖新配置。多控制面写入不同配置键后发布完整合并结果。数据库写入失败不发布；数据库提交后发布失败会报告错误，后续控制面补偿会重新发布已提交值。
+
+数据面 options 初始化和后续同步只依赖 DragonflyDB，拒绝配置写入。启动调整为先连接缓存，再初始化/发布 options；数据面冷启动缺少快照时明确报错。已应用版本写入系统实例 `info.extra.options_version`，便于核对实例是否同步。
+
+这批覆盖 **system options 的传输、版本应用及恢复**。渠道/插件配置和请求级配置读取尚需继续收敛；现有全局设置按各自 setter 应用，不能把这一批当作所有转发设置已实现请求级原子切换。
+
+实际验证版本：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。使用前文 DSN 执行并通过：
+
+```sh
+GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+完整根模块/RelayKit 测试通过。真实 DragonflyDB + PostgreSQL 验证只读实例不注入 DB 仍可加载、写入被拒绝、多发布者合并更新、SQL 写入失败不发布、快照损坏拒绝应用、丢失快照恢复、通知和漏通知补偿、取消后 watcher 退出。
+
+新库两角色各启动两轮。数据面使用独立 PostgreSQL 登录角色，明确撤销其 `options` 表的全部权限；仍可从缓存启动，节点上报与发布端版本一致。运行中修改源配置后，数据面版本收敛，期间仍无该表读取权限。原登录会话、业务数据、签名消费凭证及 ClickHouse 日志重启保留。
+
+输出记录：`/tmp/new-api-config-{full-tests,build,vet,startup}.log`。渠道与插件配置、请求级快照、后台任务恢复、可靠计费交付和容器入口验证继续推进；整体目标未完成。

@@ -41,6 +41,12 @@ func initResources() error {
 
 	logger.SetupLogger()
 
+	// Initialize Redis
+	err = common.InitRedisClient()
+	if err != nil {
+		return err
+	}
+
 	// Initialize model settings
 	ratio_setting.InitRatioSettings()
 
@@ -73,7 +79,7 @@ func initResources() error {
 
 	// Initialize options, should after model.InitDB()
 
-	options := system.NewOptions(system.OptionDependencies{DB: model.DB, InvalidatePricing: model.InvalidatePricingCache,
+	options := system.NewOptions(system.OptionDependencies{DB: model.DB, Cache: common.RDB, ReadOnly: !common.IsControlPlane, InvalidatePricing: model.InvalidatePricingCache,
 		ValidateTaskURL: service.ValidateTaskArtifactBaseURL,
 		AliasPlugin: func(generation *jsplugin.RoutingGeneration, name string) (string, bool) {
 			target, ok := model.ChannelService().ResolveTaskModelAlias(generation, name)
@@ -90,12 +96,6 @@ func initResources() error {
 
 	// Initialize SQL Database
 	err = model.InitLogDB()
-	if err != nil {
-		return err
-	}
-
-	// Initialize Redis
-	err = common.InitRedisClient()
 	if err != nil {
 		return err
 	}

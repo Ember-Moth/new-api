@@ -2,32 +2,42 @@ package options
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/module/system/entity"
-	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/internal/infra/configsync"
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/internal/config/setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/module/system/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"gorm.io/gorm"
 )
 
 type Dependencies struct {
+	Cache             *redis.Client
+	ReadOnly          bool
 	DB                *gorm.DB
 	InvalidatePricing func()
 	ValidateTaskURL   func(string) error
 	AliasPlugin       func(*jsplugin.RoutingGeneration, string) (string, bool)
 }
 type Manager struct {
-	store *store
-	mu    sync.Mutex
-	deps  Dependencies
+	store     *store
+	mu        sync.Mutex
+	deps      Dependencies
+	version   string
+	snapshots *configsync.Store
 }
 
-func New(deps Dependencies) *Manager { return &Manager{store: &store{db: deps.DB}, deps: deps} }
+func New(deps Dependencies) *Manager {
+	return &Manager{store: &store{db: deps.DB}, deps: deps, snapshots: configsync.New(deps.Cache, "options")}
+}
 
 func (r *Manager) invalidatePricing() {
 	if r.deps.InvalidatePricing != nil {
@@ -75,6 +85,9 @@ func (r *Manager) UpdateOption(ctx context.Context, key, value string) error {
 }
 
 func (r *Manager) UpdateOptionsBulk(ctx context.Context, values map[string]string) error {
+	if r.deps.ReadOnly {
+		return errors.New("data-plane configuration is read-only")
+	}
 	if len(values) == 0 {
 		return nil
 	}
@@ -95,20 +108,61 @@ func (r *Manager) UpdateOptionsBulk(ctx context.Context, values map[string]strin
 	if err := r.store.put(ctx, rows); err != nil {
 		return err
 	}
-	for _, key := range keys {
-		if err := r.ApplyRuntime(key, values[key]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.reloadLocked(ctx)
 }
 
 func (r *Manager) Reload(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	rows, err := r.store.all(ctx)
-	if err != nil {
-		return err
+	return r.reloadLocked(ctx)
+}
+
+func (r *Manager) reloadLocked(ctx context.Context) error {
+	var rows []entity.Option
+	var version string
+	if r.deps.ReadOnly {
+		snapshot, err := r.snapshots.Read(ctx)
+		if err != nil {
+			return err
+		}
+		if snapshot.Version == r.version {
+			return nil
+		}
+		if err := common.Unmarshal(snapshot.Data, &rows); err != nil {
+			return err
+		}
+		version = snapshot.Version
+	} else if r.deps.Cache != nil {
+		err := r.store.publishSnapshot(ctx, func(values []entity.Option) error {
+			for _, row := range values {
+				if err := validateOptionValue(row.Key, row.Value); err != nil {
+					return err
+				}
+			}
+			data, err := common.Marshal(values)
+			if err != nil {
+				return err
+			}
+			snapshot, err := r.snapshots.Publish(ctx, data)
+			if err != nil {
+				return err
+			}
+			rows, version = values, snapshot.Version
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if version == r.version {
+			return nil
+		}
+	} else {
+		// Explicit DB-only fixtures need no distributed publication service.
+		var err error
+		rows, err = r.store.all(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	for _, row := range rows {
 		if err := validateOptionValue(row.Key, row.Value); err != nil {
@@ -120,10 +174,15 @@ func (r *Manager) Reload(ctx context.Context) error {
 			return err
 		}
 	}
+	r.version = version
 	return nil
 }
 
 func (r *Manager) SyncOptions(ctx context.Context, frequency int) {
+	if r.deps.Cache != nil || r.deps.ReadOnly {
+		r.snapshots.Watch(ctx, time.Duration(frequency)*time.Second, r.Reload, func(err error) { common.SysLog("failed to synchronize options: " + err.Error()) })
+		return
+	}
 	if frequency <= 0 {
 		return
 	}
@@ -139,4 +198,11 @@ func (r *Manager) SyncOptions(ctx context.Context, frequency int) {
 			}
 		}
 	}
+}
+
+// AppliedVersion identifies the last configuration fully applied by this process.
+func (r *Manager) AppliedVersion() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.version
 }

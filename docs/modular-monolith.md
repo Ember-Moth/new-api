@@ -1404,3 +1404,8 @@ OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/�
 ### 第五十一批：登录会话与签发限制迁入 DragonflyDB
 
 移除 PostgreSQL `user_sessions`，登录会话、刷新轮换、撤销、活跃数量及签发窗口以 DragonflyDB 为权威。Lua 原子签发消除计数竞争，独立保留签发事件避免注销/密码重置绕过限制。删除旧快照回填与 SQL Session 清理；身份安全回归、真实 DragonflyDB 测试及注册登录后双角色重启保留会话验证通过。详细命令和后续配置发布/结算工作见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第五十二批：系统配置版本发布与补偿同步
+
+控制面持久化 options 后串行发布 DragonflyDB 内容版本快照；数据面只读缓存，通知加周期核对处理漏消息和重连，控制面可重建缓存丢失的快照。节点上报已应用版本。真实缓存/数据库并发发布与故障回归、完整测试、build/vet，以及被拒绝读取 options 的数据面启动/热更新验证通过。渠道/插件配置和请求级快照仍待后续收敛，见 [控制面与数据面拆分](control-data-plane.md)。
