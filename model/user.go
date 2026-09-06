@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/logger"
@@ -998,7 +1000,7 @@ func increaseUserQuota(id int, quota int) (err error) {
 	if count == 0 {
 		return gorm.ErrRecordNotFound
 	}
-	return ErrWalletQuotaLimitExceeded
+	return billingcontract.ErrWalletQuotaLimitExceeded
 }
 
 func DecreaseUserQuota(id int, quota int, db bool) (err error) {

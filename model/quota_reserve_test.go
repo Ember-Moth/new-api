@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -234,7 +236,7 @@ func TestQuotaBatchRejectsWalletOverflowWithoutApplyingOtherDeltas(t *testing.T)
 	stores[BatchUpdateTypeUserQuota] = map[int]int{user.Id: 1}
 	stores[BatchUpdateTypeUsedQuota] = map[int]int{user.Id: 10}
 	batch := &quotaBatch{ID: "00000000-0000-4000-8000-000000000002", Stores: stores}
-	require.ErrorIs(t, applyQuotaBatch(batch), ErrWalletQuotaLimitExceeded)
+	require.ErrorIs(t, applyQuotaBatch(batch), billingcontract.ErrWalletQuotaLimitExceeded)
 	require.NoError(t, DB.First(&user, user.Id).Error)
 	assert.Equal(t, common.MaxWalletQuota, user.Quota)
 	assert.Zero(t, user.UsedQuota)

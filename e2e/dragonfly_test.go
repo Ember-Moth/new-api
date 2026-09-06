@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	billingentity "github.com/QuantumNous/new-api/internal/module/billing/entity"
+
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
 	"github.com/QuantumNous/new-api/common"
@@ -583,8 +585,8 @@ func TestDragonflyCacheContracts(t *testing.T) {
 			reserved, err := model.TryReserveUserQuota(user.Id, 7)
 			require.NoError(t, err)
 			require.True(t, reserved)
-			row := model.TopUp{UserId: user.Id, Amount: 2, Money: 2.5, TradeNo: "cache-" + test.provider, PaymentProvider: test.provider, PaymentMethod: test.provider, Status: common.TopUpStatusPending}
-			require.NoError(t, row.Insert())
+			row := billingentity.TopUp{UserId: user.Id, Amount: 2, Money: 2.5, TradeNo: "cache-" + test.provider, PaymentProvider: test.provider, PaymentMethod: test.provider, Status: common.TopUpStatusPending}
+			require.NoError(t, model.TopUpStore().Create(t.Context(), &row))
 			customer := "cus_cache"
 			input := billingcontract.TopUpCompletion{TradeNo: row.TradeNo, Provider: test.provider, StripeCustomerID: &customer, CustomerEmail: "payer@example.test"}
 			store := model.TopUpStore()

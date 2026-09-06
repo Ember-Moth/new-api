@@ -120,3 +120,50 @@ func (h *Handler) RequestCreemPay(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": gin.H{"checkout_url": result.CheckoutURL, "order_id": result.OrderID}})
 }
+
+func (h *Handler) RequestWaffoAmount(c *gin.Context) {
+	h.waffoAmount(c, contract.PaymentProviderWaffo)
+}
+func (h *Handler) RequestWaffoPancakeAmount(c *gin.Context) {
+	h.waffoAmount(c, contract.PaymentProviderWaffoPancake)
+}
+func (h *Handler) waffoAmount(c *gin.Context, provider string) {
+	var input contract.WaffoWalletRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+		return
+	}
+	quote, err := h.billing.Purchases.WaffoQuote(c.Request.Context(), c.GetInt("id"), input.Amount, provider)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if quote.Money <= 0.01 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "success", "data": strconv.FormatFloat(quote.Money, 'f', 2, 64)})
+}
+func (h *Handler) RequestWaffoPay(c *gin.Context) {
+	h.waffoPay(c, contract.PaymentProviderWaffo)
+}
+func (h *Handler) RequestWaffoPancakePay(c *gin.Context) {
+	h.waffoPay(c, contract.PaymentProviderWaffoPancake)
+}
+func (h *Handler) waffoPay(c *gin.Context, provider string) {
+	var input contract.WaffoWalletRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+		return
+	}
+	result, err := h.billing.Purchases.StartWaffo(c.Request.Context(), c.GetInt("id"), input, provider)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if provider == contract.PaymentProviderWaffo {
+		c.JSON(http.StatusOK, gin.H{"message": "success", "data": gin.H{"payment_url": result.PaymentURL, "order_id": result.OrderID}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "success", "data": gin.H{"checkout_url": result.CheckoutURL, "session_id": result.SessionID, "expires_at": result.ExpiresAt, "order_id": result.OrderID, "token": result.Token, "token_expires_at": result.TokenExpiresAt}})
+}

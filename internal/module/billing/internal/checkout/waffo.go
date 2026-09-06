@@ -10,7 +10,7 @@ import (
 	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
 )
 
-func (c *Client) waffoSubscription(ctx context.Context, request contract.CheckoutRequest) (contract.CheckoutSession, error) {
+func (c *Client) PancakeWallet(ctx context.Context, request contract.CheckoutRequest) (contract.CheckoutSession, error) {
 	expires := 45 * 60
 	result, err := c.Waffo(ctx, &contract.WaffoCheckoutParams{ProductID: request.ProductID, BuyerIdentity: contract.WaffoBuyerIdentity(request.UserID), BuyerEmail: request.Email, PriceSnapshot: &contract.WaffoPriceSnapshot{Amount: decimal.NewFromFloat(request.Price).StringFixed(2), TaxCategory: "saas"}, ExpiresInSeconds: &expires, OrderMerchantExternalID: request.TradeNo})
 	return contract.CheckoutSession{SessionID: result.SessionID, CheckoutURL: result.CheckoutURL, ExpiresAt: result.ExpiresAt, Token: result.Token, TokenExpiresAt: result.TokenExpiresAt}, err

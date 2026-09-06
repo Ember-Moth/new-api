@@ -3,6 +3,7 @@ package contract
 import "fmt"
 
 type GatewayConfig struct {
+	DirectWaffo                      WaffoGatewayConfig
 	StripeKey, StripeWebhookSecret   string
 	CreemKey, CreemWebhookSecret     string
 	CreemTestMode                    bool
@@ -12,7 +13,14 @@ type GatewayConfig struct {
 	ServerAddress, CallbackAddress   string
 }
 
+type WaffoGatewayConfig struct {
+	Sandbox                                   bool
+	APIKey, PrivateKey, PublicKey, MerchantID string
+	Currency, NotifyURL, ReturnURL, AppName   string
+}
+
 type CheckoutRequest struct {
+	PayMethodType, PayMethodName                       string
 	SuccessURL, CancelURL                              string
 	AllowPromotionCodes                                bool
 	InputAmount                                        int64
@@ -24,6 +32,7 @@ type CheckoutRequest struct {
 }
 
 type CheckoutSession struct {
+	PaymentURL                                                                 string
 	PayLink, CheckoutURL, SessionID, ExpiresAt, OrderID, Token, TokenExpiresAt string
 	EpayURL                                                                    string
 	EpayParams                                                                 map[string]string

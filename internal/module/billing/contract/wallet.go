@@ -3,6 +3,7 @@ package contract
 import "github.com/QuantumNous/new-api/constant"
 
 type WalletConfig struct {
+	WaffoUnitPrice, PancakeUnitPrice                     float64
 	StripeUnitPrice                                      float64
 	StripePromotionCodes                                 bool
 	PaymentAllowed                                       bool
@@ -18,6 +19,13 @@ type WalletConfig struct {
 	AmountOptions                                        []int
 	Discounts                                            map[int]float64
 	TopupLink                                            string
+}
+
+type WaffoWalletRequest struct {
+	Amount         int64  `json:"amount"`
+	PayMethodIndex *int   `json:"pay_method_index"`
+	PayMethodType  string `json:"pay_method_type"`
+	PayMethodName  string `json:"pay_method_name"`
 }
 
 type TopUpInfo struct {

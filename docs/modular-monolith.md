@@ -51,7 +51,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
-按用户最新要求，当前优先拆分控制面的 CRUD：先完成管理接口、业务校验和存储的模块归属，再处理转发执行、健康测试等运行时流程。已完成 identity 的 OAuth 提供商配置、令牌和管理员用户管理、subscription 的套餐配置和 billing 的兑换码管理，自助账户管理也已迁入 identity；后续继续安全凭据和系统管理等控制面功能。整体模块化目标不变。
+按用户要求，优先拆分控制面的 CRUD。identity 的主要账户、安全凭据和会话管理、channel 配置、subscription 生命周期与支付、usage 日志统计、system 任务/节点/选项，以及 billing 充值结账均已归入业务模块。当前继续消除旧配置适配和账户计费运行时依赖，随后整理网关转发。最终根目录不得保留 controller、service、model；目录消除必须伴随业务归属清晰，不能将横向大包整体换名搬走。
 
 已完成的第一批改动：
 
@@ -280,6 +280,14 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 统一的结账错误保留服务端原因和订单关联日志，HTTP 只返回既有用户提示。入口、配置、DTO 和通用校验归属随迁移更新；Waffo 两套钱包结账、通用配置与转发额度运行时仍待继续整理。
 
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
+
+第三十七批迁移剩余的 Waffo 钱包结账与 Pancake 管理配置：
+
+- Waffo/Pancake 报价与订单归 billing 私有 purchases；复用有界单位换算、钱包容量、分组倍率和折扣校验。Token 模式使用整数/decimal 归一化，支付方式以服务端列表为准；小于一个可持久化单位的请求继续拒绝。
+- Waffo SDK 请求构造及签名归 checkout，保留支付币种、零小数币种格式、回调地址、付款方式和客户端响应字段；Pancake 使用同一模块客户端绑定规范买家身份、价格快照和认证 token。
+- 两条路径均先持久化 pending 订单再请求网关；不将含糊的超时立即变成终态，后续验签成功的支付回调可继续入账，重复通知仍只记一次额度。
+- Pancake 店铺/产品创建与发布、目录查询和配置保存归 billing 的 paymentconfig；system 选项管理器通过应用层注入，保存使用请求 context 和单个事务。空密钥保留现值，临时凭据不混用保存的密钥；创建产品失败继续返回已经创建的店铺，查询与创建不隐式保存配置。
+- 删除根目录的 Waffo 控制器、支付校验/返回地址包装、service/waffo_pancake.go 与 model/topup.go。回归和 DragonflyDB 集成直接使用 billing 实体与接口，不再为测试保留生产转发包装。
 
 ## 第一批验证（2026-09-05）
 
@@ -1026,3 +1034,33 @@ python3 /tmp/verify-new-api-modular-startup.py
 完整回归继续验证真实 DragonflyDB 入账缓存与 PostgreSQL/ClickHouse 日志；竞态检查通过。
 
 输出：`/tmp/new-api-wallet-stripe-creem-build.log`、`/tmp/new-api-wallet-stripe-creem-tests.log`、`/tmp/new-api-wallet-stripe-creem-race.log`、`/tmp/new-api-wallet-stripe-creem-full-tests.log`、`/tmp/new-api-wallet-stripe-creem-vet.log`、`/tmp/new-api-wallet-stripe-creem-startup.log`。
+
+## 第三十七批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**；支付 SDK 保持 **waffo-go v1.3.2**、**waffo-pancake-sdk-go v0.3.1**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归、相关竞态测试及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/module/billing ./internal/arch -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing \
+  -run 'TestWaffoWallet|TestPancakeWallet|TestPancakeConfiguration|TestPancakeManagement' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+真实 PostgreSQL 测试覆盖两种展示单位的报价与持久化额度、非法倍率/折扣/超大输入拒绝、服务端支付方式选择、创建网关会话前已存在的 pending 订单、超时后继续入账及重复完成。Pancake 配置保存通过真实选项管理器，覆盖空密钥保留、一次事务保存全部字段、注入数据库错误后整体回滚与请求取消。
+
+SDK 协议测试验证 Waffo RSA 请求/响应签名、币种金额格式、支付跳转和空响应拒绝；Pancake 使用本地 HTTP 服务验证买家身份、价格快照、认证 token、产品发布失败时保留店铺信息，以及目录过滤。没有调用真实支付账户。完整回归继续覆盖真实 DragonflyDB 缓存及 PostgreSQL/ClickHouse 日志。
+
+首轮启动验证在输出应用日志前达到 20 秒期限，验证器随后终止并回收子进程；确认版本命令可执行后，使用同一二进制和原始期限重跑，全部九次启动及版本/数据检查通过。未改变应用或放宽验证期限。
+
+输出：`/tmp/new-api-waffo-wallet-build.log`、`/tmp/new-api-waffo-module-tests.log`、`/tmp/new-api-waffo-wallet-race.log`、`/tmp/new-api-waffo-wallet-full-tests.log`、`/tmp/new-api-waffo-wallet-vet.log`、`/tmp/new-api-waffo-wallet-startup.log`。

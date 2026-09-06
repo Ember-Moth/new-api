@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/stripe-go/v81"
+	waffonet "github.com/waffo-com/waffo-go/net"
+	waffoutils "github.com/waffo-com/waffo-go/utils"
 )
 
 func TestStripeSubscriptionCheckoutUsesRequestCredentialsAndCustomerSemantics(t *testing.T) {
@@ -204,4 +206,105 @@ func TestStripeWalletCheckoutPreservesPaymentModeAndRedirects(t *testing.T) {
 	cancel()
 	_, err = client.StripeWallet(ctx, request)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type waffoTransportFixture func(context.Context, *waffonet.HttpRequest) (*waffonet.HttpResponse, error)
+
+func (f waffoTransportFixture) Send(ctx context.Context, req *waffonet.HttpRequest) (*waffonet.HttpResponse, error) {
+	return f(ctx, req)
+}
+
+func TestWaffoWalletSDKSignsOrdersAndPreservesCurrencyFormatting(t *testing.T) {
+	merchant, err := waffoutils.GenerateKeyPair()
+	require.NoError(t, err)
+	upstream, err := waffoutils.GenerateKeyPair()
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		currency, amount, action, url string
+		money                         float64
+	}{
+		{"USD", "29.90", `{"webUrl":"https://waffo.example/pay"}`, "https://waffo.example/pay", 29.9},
+		{"JPY", "30", "https://waffo.example/raw", "https://waffo.example/raw", 29.9},
+	} {
+		t.Run(tc.currency, func(t *testing.T) {
+			cfg := contract.GatewayConfig{ServerAddress: "https://console.example/", CallbackAddress: "https://api.example/", DirectWaffo: contract.WaffoGatewayConfig{Sandbox: true, APIKey: "api-test", PrivateKey: merchant.PrivateKey, PublicKey: upstream.PublicKey, MerchantID: "merchant", Currency: tc.currency}}
+			transport := waffoTransportFixture(func(ctx context.Context, req *waffonet.HttpRequest) (*waffonet.HttpResponse, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				assert.Equal(t, "api-test", req.Headers["X-API-KEY"])
+				assert.True(t, waffoutils.Verify(string(req.Body), req.Headers["X-SIGNATURE"], merchant.PublicKey))
+				var body map[string]any
+				require.NoError(t, common.Unmarshal(req.Body, &body))
+				assert.Equal(t, "wallet-ref", body["paymentRequestId"])
+				assert.Equal(t, "wallet-ref", body["merchantOrderId"])
+				assert.Equal(t, tc.amount, body["orderAmount"])
+				assert.Equal(t, tc.currency, body["orderCurrency"])
+				assert.Equal(t, "https://api.example/api/waffo/webhook", body["notifyUrl"])
+				assert.Equal(t, "https://console.example/wallet?show_history=true", body["successRedirectUrl"])
+				assert.Equal(t, map[string]any{"goodsName": "Recharge 12 credits", "appName": "New API"}, body["goodsInfo"])
+				payload, err := common.Marshal(map[string]any{"code": "0", "data": map[string]any{"orderAction": tc.action}})
+				require.NoError(t, err)
+				sig, err := waffoutils.Sign(string(payload), upstream.PrivateKey)
+				require.NoError(t, err)
+				return waffonet.NewHttpResponse(200, map[string]string{"X-SIGNATURE": sig}, payload), nil
+			})
+			client := checkout.New(checkout.Options{Config: func() contract.GatewayConfig { return cfg }, WaffoTransport: transport})
+			input := contract.CheckoutRequest{TradeNo: "wallet-ref", UserID: 7, InputAmount: 12, Price: tc.money, PayMethodType: "CARD", PayMethodName: "VISA"}
+			result, err := client.WaffoWallet(t.Context(), input)
+			require.NoError(t, err)
+			assert.Equal(t, tc.url, result.PaymentURL)
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			_, err = client.WaffoWallet(ctx, input)
+			require.ErrorIs(t, err, context.Canceled)
+		})
+	}
+	for _, body := range []string{`{"code":"declined"}`, `{"code":"0"}`, `{"code":"0","data":{}}`} {
+		client := checkout.New(checkout.Options{Config: func() contract.GatewayConfig {
+			return contract.GatewayConfig{DirectWaffo: contract.WaffoGatewayConfig{APIKey: "key", PrivateKey: merchant.PrivateKey, PublicKey: upstream.PublicKey}}
+		}, WaffoTransport: waffoTransportFixture(func(context.Context, *waffonet.HttpRequest) (*waffonet.HttpResponse, error) {
+			return waffonet.NewHttpResponse(200, nil, []byte(body)), nil
+		})})
+		_, err := client.WaffoWallet(t.Context(), contract.CheckoutRequest{Price: 1})
+		require.Error(t, err)
+	}
+}
+
+func TestPancakeWalletSDKUsesDisplayPriceAndBuyerIdentity(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	private := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	for _, tc := range []struct {
+		money  float64
+		amount string
+	}{{29, "29.00"}, {29.9, "29.90"}, {29.999, "30.00"}} {
+		t.Run(tc.amount, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := common.DecodeJson(r.Body, &body); err != nil {
+					http.Error(w, err.Error(), 400)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if strings.HasSuffix(r.URL.Path, "issue-session-token") {
+					assert.Equal(t, "new-api-user-7", body["buyerIdentity"])
+					_, _ = w.Write([]byte(`{"data":{"token":"JWT","expiresAt":"expiry"}}`))
+					return
+				}
+				assert.Equal(t, "wallet-trade", body["orderMerchantExternalId"])
+				assert.Equal(t, map[string]any{"amount": tc.amount, "taxCategory": "saas"}, body["priceSnapshot"])
+				assert.Equal(t, float64(2700), body["expiresInSeconds"])
+				_, _ = w.Write([]byte(`{"data":{"sessionId":"ses_wallet","checkoutUrl":"https://waffo.example/wallet","expiresAt":"expiry"}}`))
+			}))
+			defer server.Close()
+			client := checkout.New(checkout.Options{WaffoBaseURL: server.URL, HTTPClient: server.Client(), Config: func() contract.GatewayConfig {
+				return contract.GatewayConfig{WaffoMerchantID: "MER_AbCdEfGhIjKlMnOpQrStUv", WaffoPrivateKey: private}
+			}})
+			result, err := client.PancakeWallet(t.Context(), contract.CheckoutRequest{ProductID: "PROD_AbCdEfGhIjKlMnOpQrStUv", TradeNo: "wallet-trade", UserID: 7, Price: tc.money})
+			require.NoError(t, err)
+			assert.Equal(t, "ses_wallet", result.SessionID)
+			assert.Equal(t, "JWT", result.Token)
+		})
+	}
 }

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
@@ -131,7 +133,7 @@ FROM d WHERE t.id = d.id AND t.deleted_at IS NULL RETURNING t.id`,
 					return err
 				}
 				if active != 0 {
-					return fmt.Errorf("batch %s: %w", batch.ID, ErrWalletQuotaLimitExceeded)
+					return fmt.Errorf("batch %s: %w", batch.ID, billingcontract.ErrWalletQuotaLimitExceeded)
 				}
 			}
 		}

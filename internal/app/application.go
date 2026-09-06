@@ -30,6 +30,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/internal/module/billing"
+	"github.com/QuantumNous/new-api/internal/module/billing/paymentconfig"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
@@ -48,6 +49,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/bytedance/gopkg/util/gopool"
@@ -157,6 +159,9 @@ func Run(assets router.WebAssets) {
 	identityService := identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})
+	billingService.PaymentConfig = paymentconfig.New(paymentconfig.Dependencies{SaveOptions: model.OptionManager().UpdateOptionsBulk, Config: func() paymentconfig.Config {
+		return paymentconfig.Config{MerchantID: setting.WaffoPancakeMerchantID, PrivateKey: setting.WaffoPancakePrivateKey, ReturnURL: setting.WaffoPancakeReturnURL, StoreID: setting.WaffoPancakeStoreID, ProductID: setting.WaffoPancakeProductID}
+	}})
 	billingService.Purchases = billingpurchases.New(billingpurchases.Dependencies{ValidateRedirect: common.ValidateRedirectURL, Config: service.WalletConfiguration, Buyer: identityService.CheckoutBuyer, GroupRatio: common.GetTopupGroupRatio, TopUps: model.TopUpStore(), Gateway: service.PaymentCheckoutClient()})
 	subscriptionService := subscription.New(subscription.Dependencies{
 		Gateways: service.PaymentCheckoutClient(), CheckoutBuyer: identityService.CheckoutBuyer,

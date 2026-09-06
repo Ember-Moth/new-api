@@ -12,9 +12,11 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/stripe/stripe-go/v81"
+	waffonet "github.com/waffo-com/waffo-go/net"
 )
 
 type Options struct {
+	WaffoTransport              waffonet.HttpTransport
 	Config                      func() contract.GatewayConfig
 	HTTPClient                  *http.Client
 	StripeBackend               stripe.Backend
@@ -86,7 +88,7 @@ func (c *Client) CreateSubscription(ctx context.Context, request contract.Checko
 	case "epay":
 		return c.epaySubscription(ctx, request)
 	case "waffo_pancake":
-		return c.waffoSubscription(ctx, request)
+		return c.PancakeWallet(ctx, request)
 	default:
 		return contract.CheckoutSession{}, errors.New("unsupported payment provider")
 	}

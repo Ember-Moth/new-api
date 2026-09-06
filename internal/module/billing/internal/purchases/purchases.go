@@ -18,6 +18,8 @@ import (
 )
 
 type Gateway interface {
+	WaffoWallet(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
+	PancakeWallet(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
 	StripeWallet(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
 	Creem(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
 	ValidateSubscription(string, string) error

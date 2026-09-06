@@ -15,6 +15,7 @@ import (
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/checkout"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
@@ -317,4 +318,121 @@ func TestCreemWalletSelectionAndCreditValidation(t *testing.T) {
 	assert.EqualError(t, err, "充值额度必须大于 0")
 	_, err = purchases.ValidateCredit(decimal.NewFromInt(common.MaxWalletQuota + 1))
 	assert.EqualError(t, err, "充值额度超出系统可表示范围")
+}
+
+func (g walletGatewayFixture) WaffoWallet(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+	return g.create(ctx, r)
+}
+func (g walletGatewayFixture) PancakeWallet(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+	return g.create(ctx, r)
+}
+
+func TestWaffoWalletQuoteAppliesDisplayUnitsAndServerPricing(t *testing.T) {
+	f := newTopupFixture(t, 500000)
+	accounts := identity.New(identity.Dependencies{DB: f.db})
+	cfg := contract.WalletConfig{QuotaPerUnit: 500000, WaffoUnitPrice: 2.5, PancakeUnitPrice: 2.5, WaffoMinimum: 1, PancakeMinimum: 1, Discounts: map[int]float64{10: 0.8, 1500000: 0.5, 20: 0}}
+	ratio := 1.2
+	service := purchases.New(purchases.Dependencies{Config: func() contract.WalletConfig { return cfg }, Buyer: accounts.CheckoutBuyer, GroupRatio: func(string) float64 { return ratio }, TopUps: f.store})
+	for _, provider := range []string{"waffo", "waffo_pancake"} {
+		for _, tc := range []struct {
+			amount       int64
+			tokens       bool
+			ratio, money float64
+			stored       int64
+		}{{10, false, 1.2, 24, 10}, {1500000, true, 1.2, 4.5, 3}, {20, false, 1, 50, 20}} {
+			cfg.TokensDisplay, ratio = tc.tokens, tc.ratio
+			quote, err := service.WaffoQuote(t.Context(), f.user.Id, tc.amount, provider)
+			require.NoError(t, err)
+			assert.Equal(t, tc.money, quote.Money)
+			assert.Equal(t, tc.stored, quote.StoredAmount)
+			assert.EqualValues(t, tc.stored*500000, quote.CreditedQuota)
+		}
+		cfg.TokensDisplay = true
+		_, err := service.WaffoQuote(t.Context(), f.user.Id, 1, provider)
+		require.Error(t, err, "a token amount below one persisted unit cannot settle")
+		cfg.TokensDisplay = false
+		_, err = service.WaffoQuote(t.Context(), f.user.Id, math.MaxInt64, provider)
+		require.Error(t, err)
+		ratio = math.NaN()
+		_, err = service.WaffoQuote(t.Context(), f.user.Id, 10, provider)
+		require.Error(t, err)
+		ratio = 1
+		cfg.Discounts[10] = math.Inf(1)
+		_, err = service.WaffoQuote(t.Context(), f.user.Id, 10, provider)
+		require.Error(t, err)
+		cfg.Discounts[10] = 0.8
+	}
+}
+
+func TestWaffoWalletCheckoutKeepsPendingOrdersForRetryAndUsesServerMethods(t *testing.T) {
+	for _, provider := range []string{"waffo", "waffo_pancake"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newTopupFixture(t, 10)
+			accounts := identity.New(identity.Dependencies{DB: f.db})
+			cfg := contract.WalletConfig{PaymentAllowed: true, QuotaPerUnit: 10, TokensDisplay: true, WaffoUnitPrice: 2, PancakeUnitPrice: 2, WaffoMinimum: 2, PancakeMinimum: 2, WaffoEnabled: true, WaffoConfigured: true, PancakeProductID: "server-product", WaffoMethods: []constant.WaffoPayMethod{{PayMethodType: "CARD", PayMethodName: "VISA"}}, Gateway: contract.GatewayConfig{WaffoMerchantID: "merchant", WaffoPrivateKey: "private"}}
+			var submitted contract.CheckoutRequest
+			fail := false
+			gateway := walletGatewayFixture{create: func(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+				submitted = r
+				row, err := f.store.Get(ctx, r.TradeNo)
+				require.NoError(t, err)
+				assert.Equal(t, common.TopUpStatusPending, row.Status)
+				assert.EqualValues(t, 2, row.Amount)
+				assert.Equal(t, 5.0, row.Money)
+				assert.Equal(t, provider, row.PaymentProvider)
+				if fail {
+					return contract.CheckoutSession{}, context.DeadlineExceeded
+				}
+				return contract.CheckoutSession{PaymentURL: "https://pay.example", CheckoutURL: "https://checkout.example", SessionID: "session", Token: "token"}, nil
+			}}
+			service := purchases.New(purchases.Dependencies{Config: func() contract.WalletConfig { return cfg }, Buyer: accounts.CheckoutBuyer, GroupRatio: func(string) float64 { return 1 }, TopUps: f.store, Gateway: gateway})
+			index := 0
+			input := contract.WaffoWalletRequest{Amount: 25, PayMethodIndex: &index, PayMethodType: "forged", PayMethodName: "forged"}
+			handler := billinghttp.New(billing.New(billing.Dependencies{Purchases: service}), billinghttp.ManagementHooks{})
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set("id", f.user.Id) })
+			if provider == "waffo" {
+				router.POST("/pay", handler.RequestWaffoPay)
+			} else {
+				router.POST("/pay", handler.RequestWaffoPancakePay)
+			}
+			response := redemptionRequest(t, router, http.MethodPost, "/pay", input)
+			assert.Equal(t, "success", response.Message)
+			var data map[string]any
+			require.NoError(t, common.Unmarshal(response.Data, &data))
+			assert.Equal(t, submitted.TradeNo, data["order_id"])
+			if provider == "waffo" {
+				assert.Equal(t, "https://pay.example", data["payment_url"])
+				assert.Equal(t, "CARD", submitted.PayMethodType)
+				assert.Equal(t, "VISA", submitted.PayMethodName)
+				index = -1
+				_, err := service.StartWaffo(t.Context(), f.user.Id, input, provider)
+				require.EqualError(t, err, "不支持的支付方式")
+				index = 0
+			} else {
+				assert.Equal(t, "token", data["token"])
+				assert.Equal(t, "server-product", submitted.ProductID)
+				assert.Equal(t, f.user.Id, submitted.UserID)
+			}
+			fail = true
+			_, err := service.StartWaffo(t.Context(), f.user.Id, input, provider)
+			require.EqualError(t, err, "拉起支付失败")
+			row, err := f.store.Get(t.Context(), submitted.TradeNo)
+			require.NoError(t, err)
+			assert.Equal(t, common.TopUpStatusPending, row.Status)
+			for range 2 {
+				_, err = f.store.Complete(t.Context(), contract.TopUpCompletion{TradeNo: submitted.TradeNo, Provider: provider})
+				require.NoError(t, err)
+			}
+			require.NoError(t, f.db.First(&f.user, f.user.Id).Error)
+			assert.Equal(t, 30, f.user.Quota)
+			assert.EqualValues(t, 1, f.events.Load())
+			cfg.PaymentAllowed = false
+			_, err = service.StartWaffo(t.Context(), f.user.Id, input, provider)
+			require.Error(t, err)
+			var count int64
+			require.NoError(t, f.db.Model(&entity.TopUp{}).Count(&count).Error)
+			assert.EqualValues(t, 2, count)
+		})
+	}
 }
