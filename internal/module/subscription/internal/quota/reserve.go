@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/internal/dbtime"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
@@ -80,7 +81,7 @@ func (s *Store) PreConsumeUserSubscription(ctx context.Context, requestId string
 			result.PreConsumed = amount
 			return tx.Model(&record).Updates(map[string]any{"user_subscription_id": sub.Id, "status": "consumed"}).Error
 		}
-		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+		return fmt.Errorf("%w, need=%d", contract.ErrSubscriptionQuotaInsufficient, amount)
 	})
 	if err != nil {
 		return nil, err

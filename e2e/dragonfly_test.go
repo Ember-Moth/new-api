@@ -25,6 +25,8 @@ import (
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/pquerna/otp/totp"
@@ -580,6 +582,65 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		var count int64
 		require.NoError(t, database.Model(&model.SubscriptionOrder{}).Where("user_id = ?", user.Id).Count(&count).Error)
 		assert.EqualValues(t, 1, count)
+	})
+
+	t.Run("billing sessions synchronize cached reservations refunds and settlement", func(t *testing.T) {
+		oldBatch := common.BatchUpdateEnabled
+		common.BatchUpdateEnabled = true
+		t.Cleanup(func() { require.NoError(t, model.FlushQuotaUpdates()); common.BatchUpdateEnabled = oldBatch })
+		for _, source := range []string{"wallet", "subscription"} {
+			user := model.User{Username: "df-session-" + source, AffCode: "df-session-" + source, Quota: 100, AuthVersion: 1}
+			require.NoError(t, database.Create(&user).Error)
+			token := model.Token{UserId: user.Id, Key: "df-session-token-" + source, Status: common.TokenStatusEnabled, RemainQuota: 100, ExpiredTime: -1}
+			require.NoError(t, database.Create(&token).Error)
+			var sub model.UserSubscription
+			if source == "subscription" {
+				plan := model.SubscriptionPlan{Title: "DF Session plan", Enabled: true, QuotaResetPeriod: model.SubscriptionResetNever}
+				require.NoError(t, database.Create(&plan).Error)
+				sub = model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100, Status: "active", StartTime: common.GetTimestamp() - 1, EndTime: common.GetTimestamp() + 3600, NextResetTime: common.GetTimestamp() + 1800}
+				require.NoError(t, database.Create(&sub).Error)
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx, cancel := context.WithCancel(t.Context())
+			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil).WithContext(ctx)
+			input := &relaycommon.RelayInfo{RequestId: "df-session-refund-" + source, UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, ForcePreConsume: true, UserSetting: kitdto.UserSetting{BillingPreference: source + "_only"}}
+			require.Nil(t, service.PreConsumeBilling(c, 30, input))
+			require.NoError(t, input.Billing.Reserve(50))
+			assert.Equal(t, 50, input.FinalPreConsumedQuota)
+			cancel()
+			input.Billing.Refund(c)
+			input.Billing.Refund(c)
+			cached, err := model.GetUserCache(user.Id)
+			require.NoError(t, err)
+			cachedToken, err := model.GetTokenByKey(token.Key, false)
+			require.NoError(t, err)
+			assert.Equal(t, 100, cached.Quota)
+			assert.Equal(t, 100, cachedToken.RemainQuota)
+			require.NoError(t, model.FlushQuotaUpdates())
+			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+			input.RequestId = "df-session-settle-" + source
+			require.Nil(t, service.PreConsumeBilling(c, 30, input))
+			require.NoError(t, input.Billing.Settle(40))
+			input.Billing.Refund(c)
+			cachedToken, err = model.GetTokenByKey(token.Key, false)
+			require.NoError(t, err)
+			assert.Equal(t, 60, cachedToken.RemainQuota)
+			if source == "subscription" {
+				assert.EqualValues(t, 10, input.SubscriptionPostDelta)
+			}
+			require.NoError(t, model.FlushQuotaUpdates())
+			require.NoError(t, database.First(&user, user.Id).Error)
+			require.NoError(t, database.First(&token, token.Id).Error)
+			assert.Equal(t, 60, token.RemainQuota)
+			assert.Equal(t, 40, token.UsedQuota)
+			if source == "wallet" {
+				assert.Equal(t, 60, user.Quota)
+			} else {
+				require.NoError(t, database.First(&sub, sub.Id).Error)
+				assert.EqualValues(t, 40, sub.AmountUsed)
+				assert.Equal(t, 100, user.Quota)
+			}
+		}
 	})
 
 	t.Run("billing preference publication preserves pending wallet reservations", func(t *testing.T) {

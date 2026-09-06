@@ -440,12 +440,12 @@ func TestPrepareTieredBillingForSelectedGroupTopUpArrearsAllowsNegativeBalance(t
 	truncate(t)
 
 	const userID = 701
-	// Balance covers the initial 50k pre-consume (already deducted before this
-	// test's seed) but not the 50k top-up to the more expensive retry group.
+	// Balance covers the initial 50k pre-consume but not the additional 50k
+	// required by the more expensive retry group.
 	// The top-up must NOT abort the request: the full delta is deducted, the
 	// uncovered 30k becomes arrears (negative balance), mirroring how
 	// settlement charges a positive delta unconditionally.
-	seedUser(t, userID, 20_000)
+	seedUser(t, userID, 70_000)
 
 	relayInfo := &relaycommon.RelayInfo{
 		UserId:                userID,
@@ -464,11 +464,11 @@ func TestPrepareTieredBillingForSelectedGroupTopUpArrearsAllowsNegativeBalance(t
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.20},
 		},
 	}
-	session := &BillingSession{
-		relayInfo:        relayInfo,
-		funding:          &WalletFunding{userId: userID, consumed: 50_000},
-		preConsumedQuota: 50_000,
-	}
+	relayInfo.ForcePreConsume = true
+	relayInfo.UserSetting.BillingPreference = "wallet_only"
+	session, apiErr := NewBillingSession(nil, relayInfo, 50_000)
+	require.Nil(t, apiErr)
+
 	relayInfo.Billing = session
 
 	require.Nil(t, PrepareTieredBillingForSelectedGroup(nil, relayInfo))
@@ -493,17 +493,16 @@ func TestBillingSessionReserveWalletTopUpDecrementsBalance(t *testing.T) {
 	truncate(t)
 
 	const userID = 702
-	seedUser(t, userID, 500_000)
+	seedUser(t, userID, 550_000)
 
 	relayInfo := &relaycommon.RelayInfo{
 		UserId:       userID,
 		IsPlayground: true,
 	}
-	session := &BillingSession{
-		relayInfo:        relayInfo,
-		funding:          &WalletFunding{userId: userID, consumed: 50_000},
-		preConsumedQuota: 50_000,
-	}
+	relayInfo.ForcePreConsume = true
+	relayInfo.UserSetting.BillingPreference = "wallet_only"
+	session, apiErr := NewBillingSession(nil, relayInfo, 50_000)
+	require.Nil(t, apiErr)
 
 	require.NoError(t, session.Reserve(100_000))
 

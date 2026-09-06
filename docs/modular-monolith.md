@@ -298,6 +298,15 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 删除 model/quota_batch.go、quota_reserve.go、token_cache.go，移走 model/user.go、token.go 和 utils.go 中的账务实现。model/accounting_runtime.go 仅为尚未迁移的请求计费/任务调用方绑定共享实例及转发 API；这个适配器后续继续删除，不是最终模块边界。
 - 支付配置快照移到 internal/app/payment.go，应用共享一个 checkout 客户端；service/payment_checkout.go 和 epay.go 删除。管理钱包调整直接使用模块账务服务，不再回调旧 model 的增减额度函数。
 
+第三十九批迁移请求计费会话、资金来源和直接额度调整：
+
+- billing/sessions 公开 Engine/Session，私有实现只持有模块请求契约、账务/订阅服务和自己的状态；不依赖 Gin、RelayInfo 或旧业务大包。转发层适配器负责 HTTP 错误映射与日志字段同步。
+- 钱包和订阅的预扣、追加预留、结算、退款各自归私有资金来源实现；保持钱包补扣可记欠费、订阅最低预扣 1、强制预扣禁用信任旁路、严格订阅禁止钱包回退等现有行为。
+- 订阅额度不足增加哨兵错误，使用 errors.Is 分类，不再通过错误消息决定资金来源回退。数据库错误即使包含“subscription quota insufficient”文本也不能触发钱包扣款；令牌回滚失败返回账务错误，阻止第二次预扣。
+- Session 串行处理状态转换。退款在返回前执行，使用脱离请求取消信号的 context，多个退款调用不会重复记账；Playground 钱包预扣也纳入需要退款的状态。已退款会话拒绝再次结算，资金已提交但令牌更新失败的会话不会误退资金。
+- 直接按次/任务额度调整同样由模块执行，结果保留 FundingApplied/TokenApplied，供旧任务调用方处理部分提交；单请求金额和调整量在算差额前检查边界。
+- 删除 service/billing_session.go、funding_source.go；service/billing.go 留下转发适配和通知衔接，service/quota.go 不再实现预扣及资金/令牌更新。原 model/subscription_billing_test.go 的退款回归迁至模块，用直接可观察的数据库结果替代异步通知等待。
+
 ## 第一批验证（2026-09-05）
 
 Go **1.27.1**，PostgreSQL **18.6**，ClickHouse **26.9.1.762**。本批没有修改缓存 Lua/TTL/事务行为，未重新启用 DragonflyDB 集成实例。
@@ -1105,3 +1114,36 @@ python3 /tmp/verify-new-api-accounting-startup.py
 启动脚本沿用三种日志配置的新库与版本/保留数据检查，并在全部九次启动中设置 `BATCH_UPDATE_ENABLED=true`，验证工作线程可正常启动和停止。批处理仍是进程内队列；本批没有为进程崩溃前尚未落库的增量增加持久化保证。
 
 输出：`/tmp/new-api-accounting-build.log`、`/tmp/new-api-accounting-module-tests.log`、`/tmp/new-api-accounting-race.log`、`/tmp/new-api-accounting-dragonfly-tests.log`、`/tmp/new-api-accounting-full-tests.log`、`/tmp/new-api-accounting-vet.log`、`/tmp/new-api-accounting-startup.log`。
+
+## 第三十九批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归、计费会话竞态测试，以及启用批处理的三种日志配置新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/module/billing/... ./internal/module/subscription/... ./internal/arch ./service \
+  -run 'TestBillingSession|TestPrepareTieredBillingForSelectedGroupTopUp|TestModular|TestSubscription' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing -run TestBillingSession -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonflyCacheContracts -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-accounting-startup.py
+```
+
+真实 PostgreSQL 用例覆盖钱包/订阅偏好与回退、令牌预扣回滚、追加预留回滚、同时重复退款、请求取消后的退款、Playground 钱包退款、信任旁路与强制预扣、订阅最低预扣、负数/超大额度拒绝。注入数据库错误验证：消息包含额度不足文本的存储错误不会回退钱包，令牌回滚失败不会触发第二次预扣；资金已结算而令牌更新失败时不会退款或重复结算。
+
+DragonflyDB 全链路通过真实转发适配器执行预扣 30 → 追加到 50 → 取消请求后退款，以及新会话预扣 30 → 实际结算 40。在批量模式下验证即时缓存、最终数据库、令牌已用额度及订阅日志差额。原阶梯计费的更贵分组重试和欠费结算回归继续通过，测试改为真实预扣初始化会话。
+
+资金与令牌仍分两步提交；第二步失败通过错误和日志暴露，已提交资金不会自动回滚。非幂等的钱包/令牌退款仅尝试一次；订阅退款使用请求回执进行有限重试。
+
+输出：`/tmp/new-api-billing-sessions-build.log`、`/tmp/new-api-billing-sessions-tests.log`、`/tmp/new-api-billing-sessions-race.log`、`/tmp/new-api-billing-sessions-dragonfly.log`、`/tmp/new-api-billing-sessions-full-tests.log`、`/tmp/new-api-billing-sessions-vet.log`、`/tmp/new-api-billing-sessions-startup.log`。

@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"gorm.io/gorm" // Update subscription used amount by delta (positive consume more, negative refund).
 )
 
@@ -43,5 +44,5 @@ RETURNING OLD.amount_used AS amount_used_before, NEW.amount_used AS amount_used_
 	if err := tx.Select("id", "amount_total", "amount_used").First(&sub, id).Error; err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("subscription used exceeds total or supported limit, used=%d delta=%d total=%d", sub.AmountUsed, delta, sub.AmountTotal)
+	return nil, fmt.Errorf("%w: used exceeds total or supported limit, used=%d delta=%d total=%d", contract.ErrSubscriptionQuotaInsufficient, sub.AmountUsed, delta, sub.AmountTotal)
 }
