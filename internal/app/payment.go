@@ -50,3 +50,11 @@ func paymentCallbackAddress() string {
 	}
 	return operation_setting.CustomCallbackAddress
 }
+
+func rewardConfiguration() contract.RewardConfig {
+	setting := operation_setting.GetCheckinSetting()
+	return contract.RewardConfig{CheckinEnabled: setting.Enabled, MinQuota: setting.MinQuota, MaxQuota: setting.MaxQuota, QuotaPerUnit: common.QuotaPerUnit}
+}
+func statementConfiguration() contract.StatementConfig {
+	return contract.StatementConfig{TokenStats: common.DisplayTokenStatEnabled, DisplayType: operation_setting.GetQuotaDisplayType(), QuotaPerUnit: common.QuotaPerUnit, ExchangeRate: operation_setting.USDExchangeRate}
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/system"
 	systementity "github.com/QuantumNous/new-api/internal/module/system/entity"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -136,4 +137,41 @@ func TestPancakeManagementKeepsPartialCreationAndFiltersInactiveProducts(t *test
 	require.Len(t, data.Products, 1)
 	assert.Equal(t, "active", data.Products[0].ID)
 	assert.False(t, saved, "credential probes and upstream creation do not persist settings")
+}
+
+func TestPaymentComplianceConfirmationIsAtomicAndRequiresSession(t *testing.T) {
+	f := newTopupFixture(t, 10)
+	oldMap := common.OptionMap
+	oldPayment := *operation_setting.GetPaymentSetting()
+	t.Cleanup(func() { common.OptionMap = oldMap; *operation_setting.GetPaymentSetting() = oldPayment })
+	common.OptionMap = map[string]string{}
+	*operation_setting.GetPaymentSetting() = operation_setting.PaymentSetting{}
+	manager := system.NewOptions(system.OptionDependencies{DB: f.db.Session(&gorm.Session{CreateBatchSize: 1, SkipDefaultTransaction: true})})
+	config := paymentconfig.New(paymentconfig.Dependencies{TermsVersion: "v1", SaveOptions: manager.UpdateOptionsBulk})
+	handler := billinghttp.New(billing.New(billing.Dependencies{PaymentConfig: config}), billinghttp.ManagementHooks{})
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("id", 7); c.Set("use_access_token", c.Query("token") == "1") })
+	router.POST("/confirm", handler.ConfirmPaymentCompliance)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/confirm?token=1", strings.NewReader(`{"confirmed":true}`))
+	router.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	require.NoError(t, f.db.Exec(`CREATE FUNCTION fail_compliance_option() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.key = 'payment_setting.compliance_confirmed_ip' THEN RAISE EXCEPTION 'injected confirmation failure'; END IF; RETURN NEW; END; $$; CREATE TRIGGER fail_compliance_option BEFORE INSERT OR UPDATE ON options FOR EACH ROW EXECUTE FUNCTION fail_compliance_option();`).Error)
+	failed := redemptionRequest(t, router, http.MethodPost, "/confirm", map[string]any{"confirmed": true})
+	assert.False(t, failed.Success)
+	assert.False(t, operation_setting.GetPaymentSetting().ComplianceConfirmed)
+	var count int64
+	require.NoError(t, f.db.Model(&systementity.Option{}).Where(`"key" LIKE ?`, "payment_setting.compliance_%").Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, f.db.Exec("DROP FUNCTION fail_compliance_option() CASCADE").Error)
+	success := redemptionRequest(t, router, http.MethodPost, "/confirm", map[string]any{"confirmed": true})
+	assert.True(t, success.Success)
+	var confirmation paymentconfig.ComplianceConfirmation
+	require.NoError(t, common.Unmarshal(success.Data, &confirmation))
+	assert.True(t, confirmation.Confirmed)
+	assert.Equal(t, 7, confirmation.ConfirmedBy)
+	assert.Equal(t, "v1", confirmation.TermsVersion)
+	assert.True(t, operation_setting.IsPaymentComplianceConfirmed())
+	require.NoError(t, f.db.Model(&systementity.Option{}).Where(`"key" LIKE ?`, "payment_setting.compliance_%").Count(&count).Error)
+	assert.EqualValues(t, 5, count)
 }

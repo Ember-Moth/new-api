@@ -2,6 +2,7 @@ package paymentconfig
 
 import implementation "github.com/QuantumNous/new-api/internal/module/billing/internal/paymentconfig"
 
+type ComplianceConfirmation = implementation.ComplianceConfirmation
 type Service = implementation.Service
 type Config = implementation.Config
 type Dependencies = implementation.Dependencies

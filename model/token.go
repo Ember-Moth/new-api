@@ -20,9 +20,6 @@ type Token = entity.Token
 func InsertToken(token *Token) error {
 	return identity.New(identity.Dependencies{DB: DB}).ProvisionToken(context.Background(), token)
 }
-func GetTokenByIds(id, userID int) (*Token, error) {
-	return identity.New(identity.Dependencies{DB: DB}).TokenRecord(context.Background(), id, userID)
-}
 func ValidateUserToken(key string) (token *Token, err error) {
 	if key == "" {
 		return nil, ErrTokenNotProvided

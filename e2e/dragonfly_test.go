@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/module/billing"
 	billingentity "github.com/QuantumNous/new-api/internal/module/billing/entity"
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
@@ -641,6 +642,40 @@ func TestDragonflyCacheContracts(t *testing.T) {
 				assert.Equal(t, 100, user.Quota)
 			}
 		}
+	})
+
+	t.Run("checkin and affiliate credits preserve pending wallet reservations", func(t *testing.T) {
+		previous := common.BatchUpdateEnabled
+		common.BatchUpdateEnabled = true
+		t.Cleanup(func() { require.NoError(t, model.FlushQuotaUpdates()); common.BatchUpdateEnabled = previous })
+		require.NoError(t, schema.UpPostgres(pool, schema.Logs))
+		user := model.User{Username: "df-reward-wallet", AffCode: "df-reward-wallet", Quota: 100, AffQuota: 20, AuthVersion: 1}
+		require.NoError(t, database.Create(&user).Error)
+		reserved, err := model.TryReserveUserQuota(user.Id, 7)
+		require.NoError(t, err)
+		require.True(t, reserved)
+		svc := billing.New(billing.Dependencies{DB: database, Accounting: model.AccountingStore(), PaymentAllowed: func() bool { return true }, RewardConfig: func() billingcontract.RewardConfig {
+			return billingcontract.RewardConfig{CheckinEnabled: true, MinQuota: 5, MaxQuota: 5, QuotaPerUnit: 10}
+		}, RewardLog: func(ctx context.Context, id int, message string) {
+			model.LogService().RecordLog(ctx, id, model.LogTypeSystem, message)
+		}})
+		award, err := svc.Checkin(t.Context(), user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 5, award.QuotaAwarded)
+		_, err = svc.Checkin(t.Context(), user.Id)
+		require.Error(t, err)
+		require.NoError(t, svc.TransferAffiliate(t.Context(), user.Id, 10))
+		cached, err := model.GetUserCache(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, 108, cached.Quota)
+		require.NoError(t, model.FlushQuotaUpdates())
+		require.NoError(t, database.First(&user, user.Id).Error)
+		assert.Equal(t, 108, user.Quota)
+		assert.Equal(t, 10, user.AffQuota)
+		assert.EqualValues(t, 1, user.AuthVersion)
+		var count int64
+		require.NoError(t, database.Model(&model.Log{}).Where("user_id = ? AND type = ?", user.Id, model.LogTypeSystem).Count(&count).Error)
+		assert.EqualValues(t, 1, count)
 	})
 
 	t.Run("billing preference publication preserves pending wallet reservations", func(t *testing.T) {

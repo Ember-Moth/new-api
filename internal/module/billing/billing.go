@@ -1,7 +1,11 @@
 package billing
 
 import (
+	"context"
 	"errors"
+	"time"
+
+	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 
 	"github.com/QuantumNous/new-api/internal/module/billing/pricesync"
 
@@ -24,6 +28,11 @@ import (
 var ErrPaymentComplianceRequired = errors.New("payment compliance confirmation required")
 
 type Dependencies struct {
+	StatementConfig func() contract.StatementConfig
+	RewardConfig    func() contract.RewardConfig
+	RewardLog       func(context.Context, int, string)
+	Now             func() time.Time
+
 	PriceSync      *pricesync.Service
 	Pricing        *pricing.Service
 	PaymentConfig  *paymentconfig.Service
@@ -36,6 +45,13 @@ type Dependencies struct {
 }
 
 type Service struct {
+	statementConfig func() contract.StatementConfig
+	statements      *repo.Statements
+	rewardConfig    func() contract.RewardConfig
+	rewardLog       func(context.Context, int, string)
+	now             func() time.Time
+	checkins        *repo.Checkins
+
 	PriceSync      *pricesync.Service
 	Pricing        *pricing.Service
 	PaymentConfig  *paymentconfig.Service
@@ -49,10 +65,19 @@ type Service struct {
 }
 
 func New(deps Dependencies) *Service {
+	if deps.StatementConfig == nil {
+		deps.StatementConfig = func() contract.StatementConfig { return contract.StatementConfig{QuotaPerUnit: 1} }
+	}
+	if deps.Now == nil {
+		deps.Now = time.Now
+	}
+	if deps.RewardConfig == nil {
+		deps.RewardConfig = func() contract.RewardConfig { return contract.RewardConfig{} }
+	}
 	if deps.Accounting == nil {
 		deps.Accounting = accounting.New(accounting.Dependencies{DB: deps.DB})
 	}
-	return &Service{PriceSync: deps.PriceSync, Pricing: deps.Pricing, PaymentConfig: deps.PaymentConfig, Purchases: deps.Purchases, Webhooks: deps.Webhooks, TopUps: deps.TopUps, wallets: repo.NewWallets(deps.DB), accounting: deps.Accounting, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
+	return &Service{statementConfig: deps.StatementConfig, statements: repo.NewStatements(deps.DB), rewardConfig: deps.RewardConfig, rewardLog: deps.RewardLog, now: deps.Now, checkins: repo.NewCheckins(deps.DB), PriceSync: deps.PriceSync, Pricing: deps.Pricing, PaymentConfig: deps.PaymentConfig, Purchases: deps.Purchases, Webhooks: deps.Webhooks, TopUps: deps.TopUps, wallets: repo.NewWallets(deps.DB), accounting: deps.Accounting, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

@@ -126,7 +126,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), billingHandler.RequestWaffoPay)
 				selfRoute.POST("/waffo-pancake/amount", billingHandler.RequestWaffoPancakeAmount)
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), billingHandler.RequestWaffoPancakePay)
-				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
+				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), billingHandler.TransferAffQuota)
 				selfRoute.PUT("/setting", identityHandler.UpdateNotificationSettings)
 
 				// 2FA routes
@@ -137,8 +137,8 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 				selfRoute.POST("/2fa/backup_codes", middleware.DisableCache(), identityHandler.RegenerateTwoFABackupCodes)
 
 				// Check-in routes
-				selfRoute.GET("/checkin", controller.GetCheckinStatus)
-				selfRoute.POST("/checkin", middleware.TurnstileCheck(), controller.DoCheckin)
+				selfRoute.GET("/checkin", billingHandler.GetCheckinStatus)
+				selfRoute.POST("/checkin", middleware.TurnstileCheck(), billingHandler.DoCheckin)
 
 				// Custom OAuth bindings
 				selfRoute.GET("/oauth/bindings", identityHandler.OAuthBindings)
@@ -209,7 +209,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 		{
 			optionRoute.GET("/", systemHandler.GetOptions)
 			optionRoute.PUT("/", systemHandler.UpdateOption)
-			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
+			optionRoute.POST("/payment_compliance", billingHandler.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)
 			optionRoute.POST("/rest_model_ratio", billingHandler.ResetModelRatio)
@@ -287,7 +287,7 @@ func SetApiRouter(router *gin.Engine, deps Dependencies) {
 			tokenUsageRoute := usageRoute.Group("/token")
 			tokenUsageRoute.Use(middleware.TokenAuthReadOnly())
 			{
-				tokenUsageRoute.GET("/", controller.GetTokenUsage)
+				tokenUsageRoute.GET("/", billingHandler.GetTokenUsage)
 			}
 		}
 

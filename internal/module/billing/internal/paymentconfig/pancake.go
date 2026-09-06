@@ -11,10 +11,11 @@ import (
 
 type Config struct{ MerchantID, PrivateKey, ReturnURL, StoreID, ProductID string }
 type Dependencies struct {
-	Config      func() Config
-	SaveOptions func(context.Context, map[string]string) error
-	HTTPClient  *http.Client
-	BaseURL     string
+	TermsVersion string
+	Config       func() Config
+	SaveOptions  func(context.Context, map[string]string) error
+	HTTPClient   *http.Client
+	BaseURL      string
 }
 type Service struct{ deps Dependencies }
 

@@ -44,7 +44,7 @@ type Dependencies struct {
 
 func SetRouter(router *gin.Engine, assets WebAssets, deps Dependencies) {
 	SetApiRouter(router, deps)
-	SetDashboardRouter(router)
+	SetDashboardRouter(router, deps)
 	SetRelayRouter(router)
 	SetTaskPluginProtocolRouter(router)
 	SetVideoRouter(router)

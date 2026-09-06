@@ -324,6 +324,15 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 渠道模块提供带 context 的来源查询，目录投影不读取密钥。OpenRouter 从选择的渠道取得启用密钥，校验目标同源；带认证请求禁止跨源重定向，避免把渠道密钥发送到替换地址。
 - 转换结果只允许有限的非负价格与字符串表达式，拒绝负数、NaN/Inf、嵌套对象等无效值。保留模型间零价格和上游部分失败的报告；比较不修改本地定价，应用层仍负责本地配置快照。
 
+第四十二批迁移剩余的钱包控制面功能：
+
+- billing 拥有签到记录、月份统计、随机奖励、邀请奖励转入余额、OpenAI 兼容账单及令牌用量读取；删除 controller/checkin.go、billing.go、token.go、payment_compliance.go 与 model/checkin.go，并移走用户文件中的邀请转账实现。
+- 签到在事务内锁定有效用户、创建唯一日期记录并增加有界额度；重复签到、不存在/已删除用户、无效奖励配置及余额上界失败不会留下孤立记录或错误奖励。成功提交后同步增量缓存并记录一次系统日志。
+- 邀请转入只更新 aff_quota 和 quota 两个字段，持有用户行锁并检查邀请余额及钱包上界；提交后更新额度缓存，保留已预扣余额、认证版本与其他账户字段。
+- 月份输入严格解析，查询使用月初到下月月初的半开区间；记录和累计统计在只读 repeatable-read 事务中读取。累计奖励和令牌总额度用精确 JSON 数字表达，避免整数相加溢出。
+- 账单保留 USD/CNY/TOKENS、无限令牌与过期时间语义，先检查查询结果再访问数据；用户读取失败不再被后一次查询覆盖。Token usage 仍由原只读令牌鉴权保护，响应包含用量和模型限制，不返回密钥。
+- 支付合规确认由 paymentconfig 调用系统选项管理器一次事务保存五个字段，保留禁止 API access token 确认的限制；数据库错误不会发布部分确认配置。
+
 ## 第一批验证（2026-09-05）
 
 Go **1.27.1**，PostgreSQL **18.6**，ClickHouse **26.9.1.762**。本批没有修改缓存 Lua/TTL/事务行为，未重新启用 DragonflyDB 集成实例。
@@ -1222,3 +1231,37 @@ python3 /tmp/verify-new-api-pricing-startup.py
 完整回归继续覆盖真实 DragonflyDB 与 ClickHouse；新库启动、两次重启、schema 版本、保留数据和供应商唯一约束检查继续通过。
 
 输出：`/tmp/new-api-price-sync-build.log`、`/tmp/new-api-price-sync-tests.log`、`/tmp/new-api-price-sync-race.log`、`/tmp/new-api-price-sync-full-tests.log`、`/tmp/new-api-price-sync-vet.log`、`/tmp/new-api-price-sync-startup.log`。
+
+## 第四十二批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归、相关竞态检查和三种日志配置的新库/两次重启全部通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test ./internal/module/billing ./internal/arch \
+  -run 'TestCheckin|TestAffiliate|TestBillingStatements|TestModular' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+GOWORK=off go test -race ./internal/module/billing \
+  -run 'TestCheckin|TestAffiliate|TestBillingStatements|TestPaymentComplianceConfirmation' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonflyCacheContracts -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-pricing-startup.py
+```
+
+真实 PostgreSQL 覆盖并发签到只发一次奖励、闰月/跨月统计、零奖励、无效配置、余额上界回滚、缺失用户、并发邀请转入、字段隔离、账单单位/令牌归属及两个 bigint 极值的总额。确认配置通过真实选项管理器注入写入失败，验证整个事务回滚；成功保存五个字段，API access token 请求返回 403。
+
+DragonflyDB 集成验证缓存预扣 7、签到奖励 5、邀请转入 10 后缓存与最终数据库余额均为 108，认证版本不变且系统日志只有一条。签到审计另行分别写入真实 PostgreSQL 和 ClickHouse 隔离日志库，验证重复请求不重复记录。
+
+输出：`/tmp/new-api-wallet-control-build.log`、`/tmp/new-api-wallet-control-tests.log`、`/tmp/new-api-wallet-control-compliance-tests.log`、`/tmp/new-api-wallet-control-race.log`、`/tmp/new-api-wallet-control-dragonfly.log`、`/tmp/new-api-wallet-control-full-tests.log`、`/tmp/new-api-wallet-control-vet.log`、`/tmp/new-api-wallet-control-startup.log`。

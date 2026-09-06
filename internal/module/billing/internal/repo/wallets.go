@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
@@ -78,4 +79,31 @@ func (r *Wallets) Credit(tx *gorm.DB, id, amount int) error {
 		return gorm.ErrRecordNotFound
 	}
 	return contract.ErrTopUpQuotaLimitExceeded
+}
+
+// TransferAffiliate changes only the two balances while holding the user row.
+func (r *Wallets) TransferAffiliate(ctx context.Context, id, amount int) error {
+	if amount <= 0 || amount > common.MaxWalletQuota {
+		return contract.ErrInvalidTopUpQuota
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row struct{ Quota, AffQuota int }
+		if err := tx.Table("users").Select("quota", "aff_quota").Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND deleted_at IS NULL", id).Take(&row).Error; err != nil {
+			return err
+		}
+		if row.AffQuota < amount {
+			return errors.New("邀请额度不足！")
+		}
+		if row.Quota > common.MaxWalletQuota-amount {
+			return contract.ErrTopUpQuotaLimitExceeded
+		}
+		result := tx.Table("users").Where("id = ? AND deleted_at IS NULL", id).Updates(map[string]any{"aff_quota": gorm.Expr("aff_quota - ?", amount), "quota": gorm.Expr("quota + ?", amount)})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
