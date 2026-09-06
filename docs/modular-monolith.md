@@ -1429,3 +1429,8 @@ OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/�
 ### 第五十六批：入口 Nginx 协议验收
 
 新增标准库测试脚本，使用实际部署配置验证路径分流、SSE 即时传输与 WebSocket 双向隧道；本机 Nginx 1.31.5 通过。仅使用临时进程与 loopback 后端，未变更系统服务。容器运行时验证仍待补，见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第五十七批：维护任务统一调度
+
+认证清理、Codex 凭证刷新、订阅维护接入现有系统任务调度和共享租约，删除独立周期循环；退出时停止调度并等待 handler。相关真实数据库测试、runner 生命周期竞态测试、双角色新库两轮启动通过。详见 [控制面与数据面拆分](control-data-plane.md)。

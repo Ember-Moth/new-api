@@ -31,6 +31,21 @@ type stubSystemTaskRunResult struct {
 	err      error
 }
 
+type blockingSystemTaskHandler struct {
+	started              chan struct{}
+	cancellationObserved chan struct{}
+	release              chan struct{}
+}
+
+func (blockingSystemTaskHandler) Type() string { return "test_blocking" }
+
+func (h blockingSystemTaskHandler) Run(ctx context.Context, _ *SystemTask, _ string) {
+	close(h.started)
+	<-ctx.Done()
+	close(h.cancellationObserved)
+	<-h.release
+}
+
 func (h *stubScheduledHandler) Type() string { return h.taskType }
 
 func (h *stubScheduledHandler) Run(ctx context.Context, task *SystemTask, runnerID string) {
@@ -247,4 +262,56 @@ func TestTaskExecutionReceivesApplicationCancellation(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("task did not receive application cancellation")
 	}
+}
+
+func TestStartSystemTaskRunnerWaitsForDispatchedHandlers(t *testing.T) {
+	r := newTaskFixture(t)
+	handler := blockingSystemTaskHandler{
+		started:              make(chan struct{}),
+		cancellationObserved: make(chan struct{}),
+		release:              make(chan struct{}),
+	}
+	withSystemTaskRegistry(r, handler)
+	created, err := r.CreateSystemTask(t.Context(), handler.Type(), nil, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := r.StartSystemTaskRunner(ctx)
+	assert.Equal(t, done, r.StartSystemTaskRunner(ctx))
+
+	select {
+	case <-handler.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking task was not dispatched")
+	}
+	cancel()
+	select {
+	case <-handler.cancellationObserved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatched task did not observe application cancellation")
+	}
+
+	select {
+	case <-done:
+		t.Fatal("runner closed done before the dispatched handler exited")
+	default:
+	}
+	close(handler.release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("runner did not close done after task %s exited", created.TaskID)
+	}
+}
+
+func TestStartSystemTaskRunnerDataPlaneReturnsClosedDone(t *testing.T) {
+	r := New(Dependencies{Master: false})
+	done := r.StartSystemTaskRunner(t.Context())
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("data-plane runner done channel was not closed")
+	}
+	assert.Equal(t, done, r.StartSystemTaskRunner(t.Context()))
 }

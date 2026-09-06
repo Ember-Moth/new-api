@@ -39,8 +39,6 @@ type Service struct {
 	billingPreference func(context.Context, int) (string, error)
 	Payments          *payments.Store
 	Quota             *quota.Store
-	maintenanceOnce   sync.Once
-	maintenanceDone   chan struct{}
 	maintenanceMu     sync.Mutex
 	lastCleanup       time.Time
 	Members           *memberships.Store

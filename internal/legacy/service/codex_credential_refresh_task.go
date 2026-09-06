@@ -4,70 +4,44 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-
-	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 )
 
 const (
-	codexCredentialRefreshTickInterval = 10 * time.Minute
-	codexCredentialRefreshThreshold    = 24 * time.Hour
-	codexCredentialRefreshBatchSize    = 200
-	codexCredentialRefreshTimeout      = 15 * time.Second
-)
-
-var (
-	codexCredentialRefreshOnce    sync.Once
-	codexCredentialRefreshRunning atomic.Bool
+	codexCredentialRefreshThreshold = 24 * time.Hour
+	codexCredentialRefreshBatchSize = 200
+	codexCredentialRefreshTimeout   = 15 * time.Second
 )
 
 func shouldAutoRefreshCodexChannelStatus(status int) bool {
 	return status == common.ChannelStatusEnabled || status == common.ChannelStatusAutoDisabled
 }
 
-func StartCodexCredentialAutoRefreshTask() {
-	codexCredentialRefreshOnce.Do(func() {
-		if !common.IsControlPlane {
-			return
-		}
-
-		gopool.Go(func() {
-			logger.LogInfo(context.Background(), fmt.Sprintf("codex credential auto-refresh task started: tick=%s threshold=%s", codexCredentialRefreshTickInterval, codexCredentialRefreshThreshold))
-
-			ticker := time.NewTicker(codexCredentialRefreshTickInterval)
-			defer ticker.Stop()
-
-			runCodexCredentialAutoRefreshOnce()
-			for range ticker.C {
-				runCodexCredentialAutoRefreshOnce()
-			}
-		})
-	})
-}
-
-func runCodexCredentialAutoRefreshOnce() {
-	if !codexCredentialRefreshRunning.CompareAndSwap(false, true) {
-		return
+// RunCodexCredentialAutoRefreshOnce performs one credential refresh pass. It
+// returns I/O failures so a scheduled system task can persist a failed result
+// and retry on the next interval.
+func RunCodexCredentialAutoRefreshOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	defer codexCredentialRefreshRunning.Store(false)
-
-	ctx := context.Background()
 	now := time.Now()
 
 	var refreshed int
 	var scanned int
+	var refreshErr error
 
 	offset := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var channels []*model.Channel
-		err := model.DB.
+		err := model.DB.WithContext(ctx).
 			Select("id", "name", "key", "status", "channel_info").
 			Where("type = ? AND (status = ? OR status = ?)",
 				constant.ChannelTypeCodex,
@@ -79,8 +53,11 @@ func runCodexCredentialAutoRefreshOnce() {
 			Offset(offset).
 			Find(&channels).Error
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			logger.LogError(ctx, fmt.Sprintf("codex credential auto-refresh: query channels failed: %v", err))
-			return
+			return fmt.Errorf("query Codex channels: %w", err)
 		}
 		if len(channels) == 0 {
 			break
@@ -88,6 +65,9 @@ func runCodexCredentialAutoRefreshOnce() {
 		offset += codexCredentialRefreshBatchSize
 
 		for _, ch := range channels {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if ch == nil {
 				continue
 			}
@@ -121,6 +101,12 @@ func runCodexCredentialAutoRefreshOnce() {
 			newKey, _, err := RefreshCodexChannelCredential(refreshCtx, ch.Id, CodexCredentialRefreshOptions{ResetCaches: false})
 			cancel()
 			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if refreshErr == nil {
+					refreshErr = fmt.Errorf("refresh channel_id=%d name=%s: %w", ch.Id, ch.Name, err)
+				}
 				logger.LogWarn(ctx, fmt.Sprintf("codex credential auto-refresh: channel_id=%d name=%s refresh failed: %v", ch.Id, ch.Name, err))
 				continue
 			}
@@ -130,18 +116,20 @@ func runCodexCredentialAutoRefreshOnce() {
 		}
 	}
 
-	if refreshed > 0 {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.LogWarn(ctx, fmt.Sprintf("codex credential auto-refresh: InitChannelCache panic: %v", r))
-				}
-			}()
-			model.InitChannelCache()
-		}()
+	if refreshed > 0 && ctx.Err() == nil {
+		if err := model.ChannelService().ReloadChannelCache(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("reload channel cache: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	if common.DebugEnabled {
 		logger.LogDebug(ctx, "codex credential auto-refresh: scanned=%d refreshed=%d", scanned, refreshed)
 	}
+	return refreshErr
 }

@@ -262,3 +262,20 @@ python3 e2e/verify_proxy.py
 ```
 
 在本机 Nginx **1.31.5** 通过。使用临时目录和 loopback 端口，没有启动系统服务或修改现有代理配置。输出 `/tmp/new-api-proxy-verification.log`。这一项补齐真实 Nginx 的协议验收；Docker 镜像/Compose 容器启动仍未验证，不将两者混为一谈。
+
+## 第十二批：维护任务统一调度与退出等待
+
+认证凭证清理、Codex 凭证刷新、订阅维护移入现有系统任务调度器，周期分别为 1 小时、10 分钟、1 分钟。多个控制面通过已有 DragonflyDB 租约竞争执行，同类型活动任务由 PostgreSQL 唯一约束去重；数据面不运行调度。单次回调传播 context 与 I/O 错误，任务记录成功或失败，失败后到下个周期重新调度。删除各自独立的后台循环。
+
+系统 runner 返回完成信号，停止调度后等待已派发 handler 退出；应用先取消并等待 runner，再关闭数据库。验证可取消的阻塞 handler、重复启动/data role 完成信号、回调失败持久化、订阅维护及认证清理取消路径。
+
+本批使用 PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。沿用前文 TEST_*_DSN，相关包测试通过：
+
+```sh
+GOWORK=off go test ./internal/module/system/internal/tasks ./internal/transport/task ./internal/module/subscription ./internal/legacy/service
+GOWORK=off go test -race ./internal/module/system/internal/tasks -run '^TestStartSystemTaskRunnerWaitsForDispatchedHandlers$' -count=1
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+python3 /tmp/verify-new-api-planes.py
+```
+
+新库控制面和数据面各启动两次，真实转发、角色隔离、业务数据/会话保留通过。包内调度测试使用真实 PostgreSQL 和 miniredis，既有 e2e 使用真实 DragonflyDB 验证租约。未把本批等同于所有后台恢复完成：渠道余额同步循环、已超时业务任务的重试策略仍待收敛。

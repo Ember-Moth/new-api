@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -134,6 +135,14 @@ func TestCreateLoginSessionFailsClosedWhenCacheIsUnavailable(t *testing.T) {
 	require.NoError(t, common.RDB.Close())
 	_, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "browser")
 	require.Error(t, err)
+}
+
+func TestAuthArtifactCleanupReturnsCancellationBeforeIO(t *testing.T) {
+	testdb.UseCache(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, RunAuthArtifactCleanup(ctx), context.Canceled)
 }
 
 func TestLoginSessionCreateRefreshAndRevoke(t *testing.T) {

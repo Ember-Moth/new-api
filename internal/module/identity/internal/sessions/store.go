@@ -124,13 +124,17 @@ func (r *Store) CountActiveUserSessions(userID int, now int64) (int64, error) {
 	return r.cache.ZCount(context.Background(), userSessionIndex(userID, "active"), "("+strconv.FormatInt(now, 10), "+inf").Result()
 }
 func (r *Store) CountUserSessionsCreatedSince(userID int, createdAfter int64) (int64, error) {
+	return r.CountUserSessionsCreatedSinceWithContext(context.Background(), userID, createdAfter)
+}
+
+func (r *Store) CountUserSessionsCreatedSinceWithContext(ctx context.Context, userID int, createdAfter int64) (int64, error) {
 	if r.cache == nil {
 		return 0, errors.New("DragonflyDB is required for login sessions")
 	}
 	if userID < 0 || createdAfter <= 0 {
 		return 0, ErrUserSessionInvalid
 	}
-	return r.cache.ZCount(context.Background(), userSessionIndex(userID, "issued"), "("+strconv.FormatInt(createdAfter, 10), "+inf").Result()
+	return r.cache.ZCount(ctx, userSessionIndex(userID, "issued"), "("+strconv.FormatInt(createdAfter, 10), "+inf").Result()
 }
 func (r *Store) GetUserSessionBySID(sid string) (*UserSession, error) {
 	if r.cache == nil {

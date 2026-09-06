@@ -6,13 +6,13 @@ import (
 	"math"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
 	"github.com/QuantumNous/new-api/internal/module/subscription/catalog"
 	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"github.com/QuantumNous/new-api/internal/module/subscription/quota"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -249,13 +249,8 @@ func TestSubscriptionMaintenanceCleanupAndCancellation(t *testing.T) {
 	require.Len(t, records, 1)
 	assert.Equal(t, "recent", records[0].RequestId)
 	ctx, cancel := context.WithCancel(t.Context())
-	done := runtime.StartMaintenance(ctx, true)
-	assert.Equal(t, done, runtime.StartMaintenance(ctx, true))
 	cancel()
-	<-done
 	require.ErrorIs(t, runtime.RunMaintenance(ctx), context.Canceled)
-	replica := subscription.New(subscription.Dependencies{})
-	<-replica.StartMaintenance(t.Context(), false)
 	cutoff, err := quotas.CleanupSubscriptionPreConsumeRecords(t.Context(), math.MaxInt64)
 	require.NoError(t, err)
 	assert.Zero(t, cutoff)

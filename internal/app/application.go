@@ -142,9 +142,6 @@ func Run(assets router.WebAssets) {
 		go model.ChannelService().SyncBalances(runCtx, frequency)
 	}
 
-	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
-	service.StartCodexCredentialAutoRefreshTask()
-
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	paymentGateway := checkout.New(checkout.Options{Config: paymentGatewayConfig})
 	ledger := model.AccountingStore()
@@ -172,8 +169,6 @@ func Run(assets router.WebAssets) {
 		},
 		InvalidatePlan: model.InvalidateSubscriptionPlanCache,
 	})
-	subscriptionDone := subscriptionService.StartMaintenance(runCtx, common.IsControlPlane)
-	defer func() { cancelRun(); <-subscriptionDone }()
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
@@ -280,7 +275,13 @@ func Run(assets router.WebAssets) {
 	model.InvalidatePricingCache()
 	model.GetPricing()
 	go controller.SyncTaskPlugins(runCtx)
-	systemService.StartSystemTaskRunner(runCtx)
+	tasktransport.RegisterMaintenanceTasks(systemService, tasktransport.MaintenanceWorkloads{
+		AuthArtifactCleanup:     service.RunAuthArtifactCleanup,
+		CodexCredentialRefresh:  service.RunCodexCredentialAutoRefreshOnce,
+		SubscriptionMaintenance: subscriptionService.RunMaintenance,
+	})
+	systemRunnerDone := systemService.StartSystemTaskRunner(runCtx)
+	defer func() { cancelRun(); <-systemRunnerDone }()
 	instanceReporterDone := systemService.StartSystemInstanceReporter(runCtx)
 	defer func() { cancelRun(); <-instanceReporterDone }()
 	var port = os.Getenv("PORT")

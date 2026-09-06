@@ -123,7 +123,5 @@ func initResources() error {
 		// Don't return error, custom OAuth is not critical
 	}
 
-	service.StartAuthArtifactCleanup()
-
 	return nil
 }

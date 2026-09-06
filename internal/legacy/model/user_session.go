@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"time"
 
 	"github.com/QuantumNous/new-api/internal/shared/common"
@@ -33,6 +34,9 @@ func CountActiveUserSessions(userID int, now int64) (int64, error) {
 }
 func CountUserSessionsCreatedSince(userID int, createdAfter int64) (int64, error) {
 	return sessions.New(DB, common.RDB).CountUserSessionsCreatedSince(userID, createdAfter)
+}
+func CountUserSessionsCreatedSinceWithContext(ctx context.Context, userID int, createdAfter int64) (int64, error) {
+	return sessions.New(DB, common.RDB).CountUserSessionsCreatedSinceWithContext(ctx, userID, createdAfter)
 }
 func GetUserSessionBySID(sid string) (*UserSession, error) {
 	return sessions.New(DB, common.RDB).GetUserSessionBySID(sid)

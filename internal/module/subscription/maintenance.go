@@ -2,40 +2,16 @@ package subscription
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
-func (s *Service) StartMaintenance(ctx context.Context, master bool) <-chan struct{} {
-	s.maintenanceOnce.Do(func() {
-		s.maintenanceDone = make(chan struct{})
-		if !master {
-			close(s.maintenanceDone)
-			return
-		}
-		go func() {
-			defer close(s.maintenanceDone)
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			for {
-				if err := s.RunMaintenance(ctx); err != nil && ctx.Err() == nil {
-					logger.LogWarn(ctx, fmt.Sprintf("subscription maintenance failed: %v", err))
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-				}
-			}
-		}()
-	})
-	return s.maintenanceDone
-}
-
 func (s *Service) RunMaintenance(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.maintenanceMu.Lock()
 	defer s.maintenanceMu.Unlock()
 	totalExpired, totalReset := 0, 0

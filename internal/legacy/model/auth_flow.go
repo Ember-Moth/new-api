@@ -55,3 +55,7 @@ func ClaimExternalAuthAssertionWithTx(tx *gorm.DB, purpose, assertion string, ex
 func DeleteExpiredAuthAssertionReceipts(now time.Time) error {
 	return flows.New(DB, common.RDB).DeleteExpiredAssertionReceipts(context.Background(), now)
 }
+
+func DeleteExpiredAuthAssertionReceiptsWithContext(ctx context.Context, now time.Time) error {
+	return flows.New(DB, common.RDB).DeleteExpiredAssertionReceipts(ctx, now)
+}

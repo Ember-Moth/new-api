@@ -30,6 +30,8 @@ type Runtime struct {
 	handlersMu sync.RWMutex
 	handlers   map[string]SystemTaskHandler
 	wakeup     chan struct{}
+	dispatchWG sync.WaitGroup
+	done       chan struct{}
 	once       sync.Once
 	nodeName   string
 	master     bool
@@ -37,7 +39,7 @@ type Runtime struct {
 }
 
 func New(deps Dependencies) *Runtime {
-	r := &Runtime{Store: &Store{db: deps.DB, cache: deps.Cache}, handlers: make(map[string]SystemTaskHandler), wakeup: make(chan struct{}, 1), nodeName: deps.NodeName, master: deps.Master, logs: deps.Logs}
+	r := &Runtime{Store: &Store{db: deps.DB, cache: deps.Cache}, handlers: make(map[string]SystemTaskHandler), wakeup: make(chan struct{}, 1), done: make(chan struct{}), nodeName: deps.NodeName, master: deps.Master, logs: deps.Logs}
 	r.RegisterSystemTaskHandler(logCleanupHandler{runtime: r})
 	return r
 }
@@ -217,7 +219,9 @@ func (r *Runtime) runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		logger.LogDebug(ctx, "system task claimed: runner=%s task=%s owner=%s", runnerID, task.TaskID, owner)
 		dispatchHandler := handler
 		dispatchTask := claimedTask
+		r.dispatchWG.Add(1)
 		gopool.Go(func() {
+			defer r.dispatchWG.Done()
 			r.runWithLeaseHeartbeat(ctx, dispatchTask, owner, func(ctx context.Context) {
 				dispatchHandler.Run(ctx, dispatchTask, owner)
 			})
@@ -493,20 +497,23 @@ func logSystemTaskLockError(ctx context.Context, task *SystemTask, err error) {
 	}
 	logger.LogWarn(ctx, fmt.Sprintf("system task %s update failed: %v", task.TaskID, err))
 }
-func (r *Runtime) StartSystemTaskRunner(ctx context.Context) {
+func (r *Runtime) StartSystemTaskRunner(ctx context.Context) <-chan struct{} {
 	r.once.Do(func() {
 		if !r.master {
+			close(r.done)
 			return
 		}
 		runnerID := fmt.Sprintf("%s-%s", r.nodeName, common.GetRandomString(8))
 		gopool.Go(func() {
+			defer close(r.done)
 			logger.LogInfo(ctx, fmt.Sprintf("system task runner started: runner=%s idle_interval=%s", runnerID, systemTaskRunnerIdleInterval))
 			ticker := time.NewTicker(systemTaskRunnerIdleInterval)
 			defer ticker.Stop()
 			var lastScheduler, lastCleanup time.Time
+		runner:
 			for {
 				if ctx.Err() != nil {
-					return
+					break runner
 				}
 				now := time.Now()
 				if now.Sub(lastCleanup) >= systemTaskStaleLockInterval {
@@ -522,11 +529,13 @@ func (r *Runtime) StartSystemTaskRunner(ctx context.Context) {
 				r.runSystemTaskClaimPass(ctx, runnerID)
 				select {
 				case <-ctx.Done():
-					return
+					break runner
 				case <-ticker.C:
 				case <-r.wakeup:
 				}
 			}
+			r.dispatchWG.Wait()
 		})
 	})
+	return r.done
 }
