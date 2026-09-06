@@ -94,10 +94,7 @@ func newUserFixture(t *testing.T) *userFixture {
 	authorization, err := authz.New(db, false)
 	require.NoError(t, err)
 	f := &userFixture{db: db, router: gin.New(), authorization: &userAuthorizationFixture{engine: authorization}}
-	wallet := billing.New(billing.Dependencies{DB: db, WalletRuntime: billing.WalletRuntime{
-		Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
-		Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
-	}})
+	wallet := billing.New(billing.Dependencies{DB: db, Accounting: model.AccountingStore()})
 	f.service = identity.New(identity.Dependencies{
 		Authentication: service.AuthenticationRuntime(),
 		VerifyEmail:    func(email, code string) bool { return code == "valid" },

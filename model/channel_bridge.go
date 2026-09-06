@@ -3,7 +3,6 @@ package model
 import (
 	"sync"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -40,13 +39,7 @@ func ConfigureChannelService(service *channelmodule.Service) {
 	channelServices[DB] = service
 }
 
-func queueChannelUsedQuota(id, quota int) bool {
-	if !common.BatchUpdateEnabled {
-		return false
-	}
-	addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)
-	return true
-}
+func queueChannelUsedQuota(id, quota int) bool { return AccountingStore().QueueChannelUsage(id, quota) }
 
 func ChannelDependencies() channelmodule.Dependencies {
 	return channelmodule.Dependencies{DB: DB, RoutingChanged: InvalidatePricingCache, QueueUsedQuota: queueChannelUsedQuota}

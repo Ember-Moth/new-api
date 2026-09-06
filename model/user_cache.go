@@ -43,21 +43,6 @@ func (user *UserBase) GetSetting() dto.UserSetting {
 	return (*identityentity.UserBase)(user).GetSetting()
 }
 
-// Add atomic quota operations using hash fields.
-// 通过守卫式 Lua 脚本执行：哈希不存在时直接跳过（下次读取会从数据库水合），
-// 不会像裸 HINCRBY 那样创建只含 Quota 字段的残缺哈希。
-func cacheIncrUserQuota(userId int, delta int64) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	_, err := cacheApplyUserQuotaDelta(userId, delta)
-	return err
-}
-
-func cacheDecrUserQuota(userId int, delta int64) error {
-	return cacheIncrUserQuota(userId, -delta)
-}
-
 // Helper functions to get individual fields if needed
 func getUserGroupCache(userId int) (string, error) {
 	cache, err := GetUserCache(userId)

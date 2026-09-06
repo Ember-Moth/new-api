@@ -30,6 +30,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/internal/module/billing"
+	"github.com/QuantumNous/new-api/internal/module/billing/checkout"
 	"github.com/QuantumNous/new-api/internal/module/billing/paymentconfig"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
@@ -150,21 +151,18 @@ func Run(assets router.WebAssets) {
 	service.StartCodexCredentialAutoRefreshTask()
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
-	billingService := billing.New(billing.Dependencies{Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{EpayVerifier: service.PaymentCheckoutClient().VerifyEpay, Config: service.PaymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed,
-		WalletRuntime: billing.WalletRuntime{
-			Credit: func(id, amount int) error { return model.IncreaseUserQuota(id, amount, true) },
-			Debit:  func(id, amount int) error { return model.DecreaseUserQuota(id, amount, true) },
-		},
-	})
+	paymentGateway := checkout.New(checkout.Options{Config: paymentGatewayConfig})
+	ledger := model.AccountingStore()
+	billingService := billing.New(billing.Dependencies{Accounting: ledger, Webhooks: billingwebhooks.New(billingwebhooks.Dependencies{EpayVerifier: paymentGateway.VerifyEpay, Config: paymentWebhookConfig, TopUps: model.TopUpStore(), Subscriptions: model.SubscriptionPayments()}), TopUps: model.TopUpStore(), DB: model.DB, PaymentAllowed: operation_setting.IsPaymentComplianceConfirmed})
 	identityService := identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})
 	billingService.PaymentConfig = paymentconfig.New(paymentconfig.Dependencies{SaveOptions: model.OptionManager().UpdateOptionsBulk, Config: func() paymentconfig.Config {
 		return paymentconfig.Config{MerchantID: setting.WaffoPancakeMerchantID, PrivateKey: setting.WaffoPancakePrivateKey, ReturnURL: setting.WaffoPancakeReturnURL, StoreID: setting.WaffoPancakeStoreID, ProductID: setting.WaffoPancakeProductID}
 	}})
-	billingService.Purchases = billingpurchases.New(billingpurchases.Dependencies{ValidateRedirect: common.ValidateRedirectURL, Config: service.WalletConfiguration, Buyer: identityService.CheckoutBuyer, GroupRatio: common.GetTopupGroupRatio, TopUps: model.TopUpStore(), Gateway: service.PaymentCheckoutClient()})
+	billingService.Purchases = billingpurchases.New(billingpurchases.Dependencies{ValidateRedirect: common.ValidateRedirectURL, Config: walletConfiguration, Buyer: identityService.CheckoutBuyer, GroupRatio: common.GetTopupGroupRatio, TopUps: model.TopUpStore(), Gateway: paymentGateway})
 	subscriptionService := subscription.New(subscription.Dependencies{
-		Gateways: service.PaymentCheckoutClient(), CheckoutBuyer: identityService.CheckoutBuyer,
+		Gateways: paymentGateway, CheckoutBuyer: identityService.CheckoutBuyer,
 		BillingPreference: identityService.BillingPreference,
 		Payments:          model.SubscriptionPayments(),
 		Members:           model.SubscriptionMemberships(),
@@ -220,7 +218,7 @@ func Run(assets router.WebAssets) {
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
 		common.SysLog("batch update enabled with interval " + strconv.Itoa(common.BatchUpdateInterval) + "s")
-		model.InitBatchUpdater()
+		ledger.Start(runCtx, time.Duration(common.BatchUpdateInterval)*time.Second)
 	}
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
@@ -313,7 +311,7 @@ func Run(assets router.WebAssets) {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
-	if err := model.FlushQuotaUpdates(); err != nil {
+	if err := ledger.Stop(ctx); err != nil {
 		common.SysError("failed to flush quota updates during shutdown: " + err.Error())
 	}
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)

@@ -8,7 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
-	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
 	"gorm.io/gorm"
 )
 
@@ -73,28 +73,10 @@ func GetTokenById(id int) (*Token, error) {
 	return &token, err
 }
 
-func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
-	if !fromDB && common.RedisEnabled {
-		// Try Redis first
-		token, err := cacheGetTokenByKey(key)
-		if err == nil {
-			return token, nil
-		}
-		// Don't return error - fall through to DB
-	}
-	token = &Token{}
-	if err = DB.Where(commonKeyCol+" = ?", key).First(token).Error; err != nil {
-		return nil, err
-	}
-	if common.RedisEnabled {
-		// 冷缓存时用数据库快照初始化；已存在的哈希只刷新 TTL，
-		// 避免快照覆盖 Redis 中已被原子预扣的余额。初始化失败不影响本次读取。
-		if _, cacheErr := cacheInitToken(*token); cacheErr != nil {
-			common.SysLog("failed to init token cache: " + cacheErr.Error())
-		}
-	}
-	return token, nil
+func GetTokenByKey(key string, fromDB bool) (*Token, error) {
+	return tokencache.New(DB).GetByKey(key, fromDB)
 }
+func InvalidateTokenCacheForMutation(key string) error { return tokencache.New(DB).Invalidate(key) }
 
 func updateTokenStatus(token *Token) (err error) {
 	if cacheErr := InvalidateTokenCacheForMutation(token.Key); cacheErr != nil {
@@ -102,66 +84,6 @@ func updateTokenStatus(token *Token) (err error) {
 	}
 	// This can update zero values
 	return DB.Model(token).Select("accessed_time", "status").Updates(token).Error
-}
-
-func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
-	if quota < 0 {
-		return errors.New("quota 不能为负数！")
-	}
-	if common.RedisEnabled {
-		gopool.Go(func() {
-			// 守卫式增量：哈希不存在时跳过，由下次读取从数据库水合，
-			// 绝不创建只有配额字段的残缺哈希。
-			if _, err := cacheApplyTokenQuotaDelta(tokenId, key, int64(quota)); err != nil {
-				common.SysLog("failed to increase token quota: " + err.Error())
-			}
-		})
-	}
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, tokenId, quota)
-		return nil
-	}
-	return increaseTokenQuota(tokenId, quota)
-}
-
-func increaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
-			"used_quota":    gorm.Expr("used_quota - ?", quota),
-			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
-}
-
-func DecreaseTokenQuota(id int, key string, quota int) (err error) {
-	if quota < 0 {
-		return errors.New("quota 不能为负数！")
-	}
-	if common.RedisEnabled {
-		gopool.Go(func() {
-			if _, err := cacheApplyTokenQuotaDelta(id, key, int64(-quota)); err != nil {
-				common.SysLog("failed to decrease token quota: " + err.Error())
-			}
-		})
-	}
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, id, -quota)
-		return nil
-	}
-	return decreaseTokenQuota(id, quota)
-}
-
-func decreaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
-			"used_quota":    gorm.Expr("used_quota + ?", quota),
-			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
 }
 
 // InvalidateUserTokensCache 清理指定用户所有令牌在 Redis 中的缓存，

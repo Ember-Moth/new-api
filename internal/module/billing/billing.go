@@ -3,6 +3,8 @@ package billing
 import (
 	"errors"
 
+	"github.com/QuantumNous/new-api/internal/module/billing/accounting"
+
 	"github.com/QuantumNous/new-api/internal/module/billing/paymentconfig"
 
 	"github.com/QuantumNous/new-api/internal/module/billing/purchases"
@@ -17,17 +19,12 @@ import (
 
 var ErrPaymentComplianceRequired = errors.New("payment compliance confirmation required")
 
-type WalletRuntime struct {
-	Credit func(int, int) error
-	Debit  func(int, int) error
-}
-
 type Dependencies struct {
 	PaymentConfig  *paymentconfig.Service
 	Purchases      *purchases.Service
 	Webhooks       *webhooks.Processor
 	TopUps         *topups.Store
-	WalletRuntime  WalletRuntime
+	Accounting     *accounting.Store
 	DB             *gorm.DB
 	PaymentAllowed func() bool
 }
@@ -38,13 +35,16 @@ type Service struct {
 	Webhooks       *webhooks.Processor
 	TopUps         *topups.Store
 	wallets        *repo.Wallets
-	walletRuntime  WalletRuntime
+	accounting     *accounting.Store
 	redemptions    *repo.Redemptions
 	paymentAllowed func() bool
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{PaymentConfig: deps.PaymentConfig, Purchases: deps.Purchases, Webhooks: deps.Webhooks, TopUps: deps.TopUps, wallets: repo.NewWallets(deps.DB), walletRuntime: deps.WalletRuntime, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
+	if deps.Accounting == nil {
+		deps.Accounting = accounting.New(accounting.Dependencies{DB: deps.DB})
+	}
+	return &Service{PaymentConfig: deps.PaymentConfig, Purchases: deps.Purchases, Webhooks: deps.Webhooks, TopUps: deps.TopUps, wallets: repo.NewWallets(deps.DB), accounting: deps.Accounting, redemptions: repo.NewRedemptions(deps.DB), paymentAllowed: deps.PaymentAllowed}
 }
 
 func (s *Service) RequirePaymentCompliance() error {

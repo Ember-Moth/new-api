@@ -289,6 +289,15 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - Pancake 店铺/产品创建与发布、目录查询和配置保存归 billing 的 paymentconfig；system 选项管理器通过应用层注入，保存使用请求 context 和单个事务。空密钥保留现值，临时凭据不混用保存的密钥；创建产品失败继续返回已经创建的店铺，查询与创建不隐式保存配置。
 - 删除根目录的 Waffo 控制器、支付校验/返回地址包装、service/waffo_pancake.go 与 model/topup.go。回归和 DragonflyDB 集成直接使用 billing 实体与接口，不再为测试保留生产转发包装。
 
+第三十八批将钱包/令牌额度运行时与批处理归入 billing/accounting：
+
+- 私有 accounting 实现拥有钱包增减、令牌增减、原子预扣、缓存补偿、用户使用量/请求数，以及参与同一事务的渠道使用量增量；公开 facade 接收数据库、缓存客户端和启用策略，不导入旧 model/service/controller。
+- 全局批处理 maps、锁和 pending 批次改为模块实例状态。失败保留同一个批次 ID，数据库 receipt 防止不确定提交后的重复扣费；用户、令牌、渠道计数继续在一个事务里完成。定时任务可取消，Stop 等待任务退出后排空剩余队列；应用启动/关闭显式管理生命周期。
+- 额度调整在直接写库成功或批量入队后同步更新缓存，移除原来脱离调用生命周期的额度 goroutine；数据库明确失败时不会先污染钱包/令牌缓存。原子缓存预扣写库失败时继续补偿，补偿不继承已取消请求的取消信号。
+- 令牌缓存初始化、冷缓存查询、TTL 与变更 fence 归 identity/tokencache；不会用数据库快照覆盖已有缓存中的实时额度。billing 通过 identity 的公开缓存接口完成水合。
+- 删除 model/quota_batch.go、quota_reserve.go、token_cache.go，移走 model/user.go、token.go 和 utils.go 中的账务实现。model/accounting_runtime.go 仅为尚未迁移的请求计费/任务调用方绑定共享实例及转发 API；这个适配器后续继续删除，不是最终模块边界。
+- 支付配置快照移到 internal/app/payment.go，应用共享一个 checkout 客户端；service/payment_checkout.go 和 epay.go 删除。管理钱包调整直接使用模块账务服务，不再回调旧 model 的增减额度函数。
+
 ## 第一批验证（2026-09-05）
 
 Go **1.27.1**，PostgreSQL **18.6**，ClickHouse **26.9.1.762**。本批没有修改缓存 Lua/TTL/事务行为，未重新启用 DragonflyDB 集成实例。
@@ -1064,3 +1073,35 @@ SDK 协议测试验证 Waffo RSA 请求/响应签名、币种金额格式、支�
 首轮启动验证在输出应用日志前达到 20 秒期限，验证器随后终止并回收子进程；确认版本命令可执行后，使用同一二进制和原始期限重跑，全部九次启动及版本/数据检查通过。未改变应用或放宽验证期限。
 
 输出：`/tmp/new-api-waffo-wallet-build.log`、`/tmp/new-api-waffo-module-tests.log`、`/tmp/new-api-waffo-wallet-race.log`、`/tmp/new-api-waffo-wallet-full-tests.log`、`/tmp/new-api-waffo-wallet-vet.log`、`/tmp/new-api-waffo-wallet-startup.log`。
+
+## 第三十八批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归、账务模块竞态测试以及启用批处理的三种日志配置新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/module/billing/internal/accounting ./internal/arch -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing/internal/accounting -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off go test ./e2e -run TestDragonflyCacheContracts -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-accounting-startup.py
+```
+
+账务测试使用正式 SQL 初始化的隔离 PostgreSQL schema，验证两个最大单请求扣费可安全累积、批次最后一项写入失败时全部回滚、相同批次 ID 不重复扣费、钱包上界和累加溢出拒绝、模块实例队列隔离、取消与停止后排空。原请求预扣及令牌缓存回归继续验证数据库回退、脚本重新加载和变更 fence。
+
+真实 DragonflyDB 集成覆盖用户并发预扣、精确大整数余额、令牌实时余量、配置变更缓存失效、充值和订阅购买不覆盖预扣。新增数据库错误注入验证：明确写库失败后钱包/令牌缓存不变化，Lua 已成功预扣的部分正确补偿；恢复写入后返回时缓存与数据库余额一致。
+
+启动脚本沿用三种日志配置的新库与版本/保留数据检查，并在全部九次启动中设置 `BATCH_UPDATE_ENABLED=true`，验证工作线程可正常启动和停止。批处理仍是进程内队列；本批没有为进程崩溃前尚未落库的增量增加持久化保证。
+
+输出：`/tmp/new-api-accounting-build.log`、`/tmp/new-api-accounting-module-tests.log`、`/tmp/new-api-accounting-race.log`、`/tmp/new-api-accounting-dragonfly-tests.log`、`/tmp/new-api-accounting-full-tests.log`、`/tmp/new-api-accounting-vet.log`、`/tmp/new-api-accounting-startup.log`。

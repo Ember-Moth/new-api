@@ -1,4 +1,4 @@
-package model
+package accounting
 
 import (
 	"context"
@@ -8,6 +8,9 @@ import (
 	"github.com/go-redis/redis/v8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
+	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"gorm.io/gorm"
 )
 
@@ -81,38 +84,38 @@ func quotaResultFromLua(result int, err error) (cacheQuotaResult, error) {
 	}
 }
 
-func cacheTryReserveUserQuota(userID int, amount int64) (cacheQuotaResult, error) {
-	result, err := userQuotaReserveScript.Run(context.Background(), common.RDB,
-		[]string{getUserCacheKey(userID)}, amount, userID, userCacheSchemaVersion).Int()
+func (s *Store) cacheTryReserveUserQuota(ctx context.Context, userID int, amount int64) (cacheQuotaResult, error) {
+	result, err := userQuotaReserveScript.Run(ctx, s.deps.Redis,
+		[]string{usercache.CacheKey(userID)}, amount, userID, usercache.SchemaVersion).Int()
 	return quotaResultFromLua(result, err)
 }
 
-func cacheApplyUserQuotaDelta(userID int, delta int64) (cacheQuotaResult, error) {
-	result, err := userQuotaDeltaScript.Run(context.Background(), common.RDB,
-		[]string{getUserCacheKey(userID)}, delta, userID, userCacheSchemaVersion).Int()
+func (s *Store) cacheApplyUserQuotaDelta(ctx context.Context, userID int, delta int64) (cacheQuotaResult, error) {
+	result, err := userQuotaDeltaScript.Run(ctx, s.deps.Redis,
+		[]string{usercache.CacheKey(userID)}, delta, userID, usercache.SchemaVersion).Int()
 	return quotaResultFromLua(result, err)
 }
 
-func cacheTryReserveTokenQuota(id int, key string, amount int64) (cacheQuotaResult, error) {
-	result, err := tokenQuotaReserveScript.Run(context.Background(), common.RDB,
-		[]string{getTokenCacheKey(key)}, amount, id, common.GetTimestamp()).Int()
+func (s *Store) cacheTryReserveTokenQuota(ctx context.Context, id int, key string, amount int64) (cacheQuotaResult, error) {
+	result, err := tokenQuotaReserveScript.Run(ctx, s.deps.Redis,
+		[]string{tokencache.Key(key)}, amount, id, common.GetTimestamp()).Int()
 	return quotaResultFromLua(result, err)
 }
 
-func cacheApplyTokenQuotaDelta(id int, key string, delta int64) (cacheQuotaResult, error) {
-	result, err := tokenQuotaDeltaScript.Run(context.Background(), common.RDB,
-		[]string{getTokenCacheKey(key)}, delta, id, common.GetTimestamp()).Int()
+func (s *Store) cacheApplyTokenQuotaDelta(ctx context.Context, id int, key string, delta int64) (cacheQuotaResult, error) {
+	result, err := tokenQuotaDeltaScript.Run(ctx, s.deps.Redis,
+		[]string{tokencache.Key(key)}, delta, id, common.GetTimestamp()).Int()
 	return quotaResultFromLua(result, err)
 }
 
 // persistUserQuotaDelta 把已在缓存侧预扣成功的增量落库；批量模式下入队，
 // 直写模式下要求行存在（用户已删除时报错，交由调用方补偿缓存）。
-func persistUserQuotaDelta(id int, delta int) error {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, delta)
+func (s *Store) persistUserQuotaDelta(ctx context.Context, id int, delta int) error {
+	if s.deps.BatchEnabled() {
+		s.addNewRecord(BatchUpdateTypeUserQuota, id, delta)
 		return nil
 	}
-	result := DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", delta))
+	result := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", delta))
 	if result.Error != nil {
 		return result.Error
 	}
@@ -122,12 +125,12 @@ func persistUserQuotaDelta(id int, delta int) error {
 	return nil
 }
 
-func persistTokenQuotaDelta(id int, delta int) error {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, id, delta)
+func (s *Store) persistTokenQuotaDelta(ctx context.Context, id int, delta int) error {
+	if s.deps.BatchEnabled() {
+		s.addNewRecord(BatchUpdateTypeTokenQuota, id, delta)
 		return nil
 	}
-	result := DB.Model(&Token{}).Where("id = ?", id).Updates(
+	result := s.db.WithContext(ctx).Model(&entity.Token{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"remain_quota":  gorm.Expr("remain_quota + ?", delta),
 			"used_quota":    gorm.Expr("used_quota - ?", delta),
@@ -143,15 +146,15 @@ func persistTokenQuotaDelta(id int, delta int) error {
 	return nil
 }
 
-func reserveUserQuotaDB(id int, quota int) (bool, error) {
-	result := DB.Model(&User{}).
+func (s *Store) reserveUserQuotaDB(ctx context.Context, id int, quota int) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&entity.User{}).
 		Where("id = ? AND quota >= ?", id, quota).
 		Update("quota", gorm.Expr("quota - ?", quota))
 	return result.RowsAffected == 1, result.Error
 }
 
-func reserveTokenQuotaDB(id int, quota int) (bool, error) {
-	result := DB.Model(&Token{}).
+func (s *Store) reserveTokenQuotaDB(ctx context.Context, id int, quota int) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&entity.Token{}).
 		Where("id = ? AND remain_quota >= ?", id, quota).
 		Updates(map[string]interface{}{
 			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
@@ -164,34 +167,37 @@ func reserveTokenQuotaDB(id int, quota int) (bool, error) {
 // TryReserveUserQuota atomically checks and deducts a user's wallet quota.
 // 缓存命中时以缓存余额为准（避免批量模式下过期的数据库余额放大并发超扣）；
 // Redis 异常或水合失败时降级为数据库条件更新，保证服务可用。
-func TryReserveUserQuota(id int, quota int) (bool, error) {
+func (s *Store) TryReserveUserQuota(ctx context.Context, id int, quota int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if quota < 0 {
 		return false, errors.New("quota 不能为负数！")
 	}
 	if quota == 0 {
 		return true, nil
 	}
-	if !common.RedisEnabled {
-		return reserveUserQuotaDB(id, quota)
+	if !s.deps.CacheEnabled() {
+		return s.reserveUserQuotaDB(ctx, id, quota)
 	}
 
-	result, err := cacheTryReserveUserQuota(id, int64(quota))
+	result, err := s.cacheTryReserveUserQuota(ctx, id, int64(quota))
 	if err == nil && result == cacheQuotaMiss {
-		if _, hydrateErr := GetUserCache(id); hydrateErr == nil {
-			result, err = cacheTryReserveUserQuota(id, int64(quota))
+		if _, hydrateErr := usercache.New(s.db).GetUserCache(id); hydrateErr == nil {
+			result, err = s.cacheTryReserveUserQuota(ctx, id, int64(quota))
 		}
 	}
 	if err != nil || result == cacheQuotaMiss {
 		if err != nil {
 			common.SysLog("user quota cache reserve unavailable, falling back to database: " + err.Error())
 		}
-		return reserveUserQuotaDB(id, quota)
+		return s.reserveUserQuotaDB(ctx, id, quota)
 	}
 	if result == cacheQuotaInsufficient {
 		return false, nil
 	}
-	if err = persistUserQuotaDelta(id, -quota); err != nil {
-		compensated, compensateErr := cacheApplyUserQuotaDelta(id, int64(quota))
+	if err = s.persistUserQuotaDelta(ctx, id, -quota); err != nil {
+		compensated, compensateErr := s.cacheApplyUserQuotaDelta(context.WithoutCancel(ctx), id, int64(quota))
 		if compensateErr != nil || compensated != cacheQuotaOK {
 			common.SysError(fmt.Sprintf("failed to compensate reserved user quota: result=%d error=%v", compensated, compensateErr))
 		}
@@ -202,7 +208,10 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 
 // TryReserveTokenQuota atomically checks and deducts a token quota. Unlimited
 // tokens skip the balance check but still update remain/used accounting.
-func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, error) {
+func (s *Store) TryReserveTokenQuota(ctx context.Context, id int, key string, quota int, unlimited bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if quota < 0 {
 		return false, errors.New("quota 不能为负数！")
 	}
@@ -210,29 +219,29 @@ func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, 
 		return true, nil
 	}
 	if unlimited {
-		return true, DecreaseTokenQuota(id, key, quota)
+		return true, s.DecreaseTokenQuota(ctx, id, key, quota)
 	}
-	if !common.RedisEnabled {
-		return reserveTokenQuotaDB(id, quota)
+	if !s.deps.CacheEnabled() {
+		return s.reserveTokenQuotaDB(ctx, id, quota)
 	}
 
-	result, err := cacheTryReserveTokenQuota(id, key, int64(quota))
+	result, err := s.cacheTryReserveTokenQuota(ctx, id, key, int64(quota))
 	if err == nil && result == cacheQuotaMiss {
-		if _, hydrateErr := GetTokenByKey(key, true); hydrateErr == nil {
-			result, err = cacheTryReserveTokenQuota(id, key, int64(quota))
+		if _, hydrateErr := tokencache.New(s.db).GetByKey(key, true); hydrateErr == nil {
+			result, err = s.cacheTryReserveTokenQuota(ctx, id, key, int64(quota))
 		}
 	}
 	if err != nil || result == cacheQuotaMiss {
 		if err != nil {
 			common.SysLog("token quota cache reserve unavailable, falling back to database: " + err.Error())
 		}
-		return reserveTokenQuotaDB(id, quota)
+		return s.reserveTokenQuotaDB(ctx, id, quota)
 	}
 	if result == cacheQuotaInsufficient {
 		return false, nil
 	}
-	if err = persistTokenQuotaDelta(id, -quota); err != nil {
-		compensated, compensateErr := cacheApplyTokenQuotaDelta(id, key, int64(quota))
+	if err = s.persistTokenQuotaDelta(ctx, id, -quota); err != nil {
+		compensated, compensateErr := s.cacheApplyTokenQuotaDelta(context.WithoutCancel(ctx), id, key, int64(quota))
 		if compensateErr != nil || compensated != cacheQuotaOK {
 			common.SysError(fmt.Sprintf("failed to compensate reserved token quota: result=%d error=%v", compensated, compensateErr))
 		}

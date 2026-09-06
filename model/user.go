@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
-
 	"github.com/QuantumNous/new-api/common"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/logger"
@@ -956,89 +954,6 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 	return userBase.GetSetting(), nil
 }
 
-func IncreaseUserQuota(id int, quota int, db bool) (err error) {
-	if quota < 0 {
-		return errors.New("quota 不能为负数！")
-	}
-	if err := common.ValidateWalletQuota(quota); err != nil {
-		return err
-	}
-	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
-		gopool.Go(func() {
-			if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
-				common.SysLog("failed to increase user quota: " + err.Error())
-			}
-		})
-		return nil
-	}
-	if err := increaseUserQuota(id, quota); err != nil {
-		return err
-	}
-	gopool.Go(func() {
-		if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
-			common.SysLog("failed to increase user quota: " + err.Error())
-		}
-	})
-	return nil
-}
-
-func increaseUserQuota(id int, quota int) (err error) {
-	result := DB.Model(&User{}).
-		Where("id = ? AND quota <= ?", id, common.MaxWalletQuota-quota).
-		Update("quota", gorm.Expr("quota + ?", quota))
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 1 {
-		return nil
-	}
-	var count int64
-	if err := DB.Model(&User{}).Where("id = ?", id).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return billingcontract.ErrWalletQuotaLimitExceeded
-}
-
-func DecreaseUserQuota(id int, quota int, db bool) (err error) {
-	if quota < 0 {
-		return errors.New("quota 不能为负数！")
-	}
-	gopool.Go(func() {
-		err := cacheDecrUserQuota(id, int64(quota))
-		if err != nil {
-			common.SysLog("failed to decrease user quota: " + err.Error())
-		}
-	})
-	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
-		return nil
-	}
-	return decreaseUserQuota(id, quota)
-}
-
-func decreaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
-	if err != nil {
-		return err
-	}
-	return err
-}
-
-func DeltaUpdateUserQuota(id int, delta int) (err error) {
-	if delta == 0 {
-		return nil
-	}
-	if delta > 0 {
-		return IncreaseUserQuota(id, delta, false)
-	} else {
-		return DecreaseUserQuota(id, -delta, false)
-	}
-}
-
 //func GetRootUserEmail() (email string) {
 //	DB.Model(&User{}).Where("role = ?", common.RoleRootUser).Select("email").Find(&email)
 //	return email
@@ -1053,44 +968,6 @@ func UpdateUserLastLoginAt(id int) {
 	if err := DB.Model(&User{}).Where("id = ?", id).Update("last_login_at", common.GetTimestamp()).Error; err != nil {
 		common.SysLog("failed to update user last_login_at: " + err.Error())
 	}
-}
-
-func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
-		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
-		return
-	}
-	updateUserUsedQuotaAndRequestCount(id, quota, 1)
-}
-
-// UpdateUserUsedQuota adjusts accumulated usage without changing request count.
-func UpdateUserUsedQuota(id int, quota int) {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
-		return
-	}
-	if err := DB.Model(&User{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error; err != nil {
-		common.SysLog("failed to update user used quota: " + err.Error())
-	}
-}
-
-func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
-	err := DB.Model(&User{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
-			"used_quota":    gorm.Expr("used_quota + ?", quota),
-			"request_count": gorm.Expr("request_count + ?", count),
-		},
-	).Error
-	if err != nil {
-		common.SysLog("failed to update user used quota and request count: " + err.Error())
-		return
-	}
-
-	//// 更新缓存
-	//if err := InvalidateUserCache(id); err != nil {
-	//	common.SysError("failed to invalidate user cache: " + err.Error())
-	//}
 }
 
 // GetUsernameById gets username from Redis first, falls back to DB if needed

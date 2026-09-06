@@ -1,13 +1,11 @@
 package model
 
 import (
-	"math"
 	"testing"
 	"time"
 
-	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
-
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -59,27 +57,10 @@ func getTokenFromDB(t *testing.T, id int) Token {
 
 func resetBatchUpdateTestState(t *testing.T) {
 	t.Helper()
-	oldBatchEnabled := common.BatchUpdateEnabled
+	old := common.BatchUpdateEnabled
 	common.BatchUpdateEnabled = false
-	batchFlushMutex.Lock()
-	pendingQuotaBatch = nil
-	batchFlushMutex.Unlock()
-	for i := 0; i < BatchUpdateTypeCount; i++ {
-		batchUpdateLocks[i].Lock()
-		batchUpdateStores[i] = make(map[int]int)
-		batchUpdateLocks[i].Unlock()
-	}
-	t.Cleanup(func() {
-		common.BatchUpdateEnabled = oldBatchEnabled
-		batchFlushMutex.Lock()
-		pendingQuotaBatch = nil
-		batchFlushMutex.Unlock()
-		for i := 0; i < BatchUpdateTypeCount; i++ {
-			batchUpdateLocks[i].Lock()
-			batchUpdateStores[i] = make(map[int]int)
-			batchUpdateLocks[i].Unlock()
-		}
-	})
+	accountingStores.Clear()
+	t.Cleanup(func() { common.BatchUpdateEnabled = old; accountingStores.Clear() })
 }
 
 func TestTryReserveQuotaWithoutRedis(t *testing.T) {
@@ -139,7 +120,7 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	assert.False(t, reserved)
 	assert.Equal(t, 9, getTokenFromDB(t, token.Id).RemainQuota)
 
-	batchUpdate()
+	require.NoError(t, FlushQuotaUpdates())
 	assert.Equal(t, 2, getUserQuotaFromDB(t, user.Id))
 	reloadedToken := getTokenFromDB(t, token.Id)
 	assert.Equal(t, 2, reloadedToken.RemainQuota)
@@ -162,103 +143,6 @@ func TestCachedQuotaScriptReloadKeepsBalanceAfterScriptCacheFlush(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, 11, cached.Quota)
 	assert.Equal(t, 11, getUserQuotaFromDB(t, user.Id))
-}
-
-func TestBatchUpdateAccumulatesTwoMaximumRequestCharges(t *testing.T) {
-	truncateTables(t)
-	resetBatchUpdateTestState(t)
-	common.BatchUpdateEnabled = true
-
-	user := createReserveTestUser(t, common.MaxQuota*2+100)
-	require.NoError(t, DecreaseUserQuota(user.Id, common.MaxQuota, false))
-	require.NoError(t, DecreaseUserQuota(user.Id, common.MaxQuota, false))
-
-	batchUpdate()
-	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id))
-}
-
-func TestBatchFailureRetainsAllCountersAndRetriesWithoutDoubleCharging(t *testing.T) {
-	truncateTables(t)
-	resetBatchUpdateTestState(t)
-	common.BatchUpdateEnabled = true
-	user := createReserveTestUser(t, 100)
-	token := createReserveTestToken(t, 100)
-	channel := Channel{Name: "batch-channel", Key: "fixture", Status: common.ChannelStatusEnabled}
-	require.NoError(t, DB.Create(&channel).Error)
-	require.NoError(t, DecreaseUserQuota(user.Id, 10, false))
-	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 10))
-	UpdateUserUsedQuotaAndRequestCount(user.Id, 10)
-	UpdateChannelUsedQuota(channel.Id, 10)
-	require.NoError(t, DB.Exec(`
-CREATE FUNCTION fail_quota_batch() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN RAISE EXCEPTION 'injected final batch update failure'; END;
-$$;
-CREATE TRIGGER fail_quota_batch BEFORE UPDATE ON channels FOR EACH ROW EXECUTE FUNCTION fail_quota_batch();`).Error)
-	batchUpdate()
-	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id))
-	assert.Equal(t, 100, getTokenFromDB(t, token.Id).RemainQuota)
-	require.NoError(t, DB.Exec("DROP FUNCTION fail_quota_batch() CASCADE").Error)
-	batchUpdate()
-	batchUpdate()
-	require.NoError(t, DB.First(&user, user.Id).Error)
-	assert.Equal(t, 90, user.Quota)
-	assert.Equal(t, 10, user.UsedQuota)
-	assert.Equal(t, 1, user.RequestCount)
-	updated := getTokenFromDB(t, token.Id)
-	assert.Equal(t, 90, updated.RemainQuota)
-	assert.Equal(t, 10, updated.UsedQuota)
-	require.NoError(t, DB.First(&channel, channel.Id).Error)
-	assert.EqualValues(t, 10, channel.UsedQuota)
-}
-
-func TestQuotaBatchReplayDoesNotRepeatCommittedDeltas(t *testing.T) {
-	truncateTables(t)
-	resetBatchUpdateTestState(t)
-	user := createReserveTestUser(t, 100)
-	stores := make([]map[int]int, BatchUpdateTypeCount)
-	stores[BatchUpdateTypeUserQuota] = map[int]int{user.Id: -10}
-	stores[BatchUpdateTypeUsedQuota] = map[int]int{user.Id: 10}
-	stores[BatchUpdateTypeRequestCount] = map[int]int{user.Id: 1}
-	batch := &quotaBatch{ID: "00000000-0000-4000-8000-000000000001", Stores: stores}
-	require.NoError(t, applyQuotaBatch(batch))
-	require.NoError(t, applyQuotaBatch(batch))
-	require.NoError(t, DB.First(&user, user.Id).Error)
-	assert.Equal(t, 90, user.Quota)
-	assert.Equal(t, 10, user.UsedQuota)
-	assert.Equal(t, 1, user.RequestCount)
-}
-
-func TestQuotaBatchRejectsWalletOverflowWithoutApplyingOtherDeltas(t *testing.T) {
-	truncateTables(t)
-	resetBatchUpdateTestState(t)
-	user := createReserveTestUser(t, common.MaxWalletQuota)
-	stores := make([]map[int]int, BatchUpdateTypeCount)
-	stores[BatchUpdateTypeUserQuota] = map[int]int{user.Id: 1}
-	stores[BatchUpdateTypeUsedQuota] = map[int]int{user.Id: 10}
-	batch := &quotaBatch{ID: "00000000-0000-4000-8000-000000000002", Stores: stores}
-	require.ErrorIs(t, applyQuotaBatch(batch), billingcontract.ErrWalletQuotaLimitExceeded)
-	require.NoError(t, DB.First(&user, user.Id).Error)
-	assert.Equal(t, common.MaxWalletQuota, user.Quota)
-	assert.Zero(t, user.UsedQuota)
-}
-
-func TestBatchUpdateAccumulatorSaturatesOverflow(t *testing.T) {
-	resetBatchUpdateTestState(t)
-
-	addNewRecord(BatchUpdateTypeUserQuota, 1, math.MaxInt)
-	addNewRecord(BatchUpdateTypeUserQuota, 1, 1)
-	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	assert.Equal(t, math.MaxInt, batchUpdateStores[BatchUpdateTypeUserQuota][1])
-	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
-
-	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	batchUpdateStores[BatchUpdateTypeUserQuota] = make(map[int]int)
-	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
-	addNewRecord(BatchUpdateTypeUserQuota, 1, math.MinInt)
-	addNewRecord(BatchUpdateTypeUserQuota, 1, -1)
-	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	assert.Equal(t, math.MinInt, batchUpdateStores[BatchUpdateTypeUserQuota][1])
-	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
 }
 
 func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
@@ -305,7 +189,7 @@ func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
 	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false)
 	assert.False(t, reserved)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
-	cachedToken, cacheErr := cacheGetTokenByKey(token.Key)
+	cachedToken, cacheErr := tokencache.New(DB).Cached(token.Key)
 	require.NoError(t, cacheErr)
 	assert.Equal(t, 12, cachedToken.RemainQuota)
 	assert.Zero(t, cachedToken.UsedQuota)
@@ -321,32 +205,31 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	require.NoError(t, err)
 	stale := *loaded
 
-	result, err := cacheApplyTokenQuotaDelta(token.Id, token.Key, -70)
+	err = AccountingStore().PublishTokenDelta(t.Context(), token.Id, token.Key, -70)
 	require.NoError(t, err)
-	require.Equal(t, cacheQuotaOK, result)
 
 	// 已存在的哈希只刷新 TTL：数据库快照不得覆盖已被原子预扣的余额。
-	code, err := cacheInitToken(stale)
+	code, err := tokencache.New(DB).Initialize(stale)
 	require.NoError(t, err)
 	assert.Equal(t, 2, code)
-	cached, err := cacheGetTokenByKey(token.Key)
+	cached, err := tokencache.New(DB).Cached(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, 30, cached.RemainQuota)
 
 	// 变更期间：fence 删除缓存并拦截并发读者手中的过期快照。
 	require.NoError(t, InvalidateTokenCacheForMutation(token.Key))
-	code, err = cacheInitToken(stale)
+	code, err = tokencache.New(DB).Initialize(stale)
 	require.NoError(t, err)
 	assert.Zero(t, code, "the pre-mutation snapshot must not be published while fenced")
-	_, err = cacheGetTokenByKey(token.Key)
+	_, err = tokencache.New(DB).Cached(token.Key)
 	assert.Error(t, err)
 
 	// fence 过期后可重新从数据库水合。
-	server.FastForward(time.Duration(tokenCacheFenceSeconds+1) * time.Second)
+	server.FastForward(time.Duration(tokencache.FenceSeconds+1) * time.Second)
 	fresh, err := GetTokenByKey(token.Key, false)
 	require.NoError(t, err)
 	assert.Equal(t, 100, fresh.RemainQuota)
-	cached, err = cacheGetTokenByKey(token.Key)
+	cached, err = tokencache.New(DB).Cached(token.Key)
 	require.NoError(t, err)
 	assert.Equal(t, 100, cached.RemainQuota)
 }

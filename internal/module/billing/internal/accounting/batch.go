@@ -1,9 +1,12 @@
-package model
+package accounting
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
@@ -26,7 +29,7 @@ type quotaBatchUpdate struct {
 	users   bool
 }
 
-func applyQuotaBatch(batch *quotaBatch) error {
+func (s *Store) applyQuotaBatch(ctx context.Context, batch *quotaBatch) error {
 	userIDs := make(map[int]struct{})
 	for _, kind := range []int{BatchUpdateTypeUserQuota, BatchUpdateTypeUsedQuota, BatchUpdateTypeRequestCount} {
 		for id := range batch.Stores[kind] {
@@ -81,7 +84,7 @@ FROM d WHERE t.id = d.id AND t.deleted_at IS NULL RETURNING t.id`,
 	if len(users.rows)+len(tokens.rows)+len(channels.rows) == 0 {
 		return nil
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		receipt := tx.Exec("INSERT INTO quota_batch_receipts (id) VALUES (?::uuid) ON CONFLICT DO NOTHING", batch.ID)
 		if receipt.Error != nil {
 			return receipt.Error
@@ -129,7 +132,7 @@ FROM d WHERE t.id = d.id AND t.deleted_at IS NULL RETURNING t.id`,
 					}
 				}
 				var active int64
-				if err := tx.Model(&User{}).Where("id IN ?", missing).Count(&active).Error; err != nil {
+				if err := tx.Model(&entity.User{}).Where("id IN ?", missing).Count(&active).Error; err != nil {
 					return err
 				}
 				if active != 0 {

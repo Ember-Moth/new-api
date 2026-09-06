@@ -7,9 +7,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
-// AdjustWallet preserves the control-plane command contract while credit/debit
-// accounting is migrated behind the runtime port. The returned amount is the
-// locked previous balance for an absolute replacement's audit record.
+// AdjustWallet applies control-plane changes through the shared ledger. The
+// returned amount is the locked previous balance for an absolute replacement audit.
 func (s *Service) AdjustWallet(ctx context.Context, id int, mode string, amount int) (int, error) {
 	switch mode {
 	case "add":
@@ -19,7 +18,7 @@ func (s *Service) AdjustWallet(ctx context.Context, id int, mode string, amount 
 		if err := common.ValidateWalletQuota(amount); err != nil {
 			return 0, err
 		}
-		return 0, s.walletRuntime.Credit(id, amount)
+		return 0, s.accounting.IncreaseUserQuota(ctx, id, amount, true)
 	case "subtract":
 		if amount <= 0 {
 			return 0, errors.New("quota must be positive")
@@ -27,7 +26,7 @@ func (s *Service) AdjustWallet(ctx context.Context, id int, mode string, amount 
 		if err := common.ValidateWalletQuota(amount); err != nil {
 			return 0, err
 		}
-		return 0, s.walletRuntime.Debit(id, amount)
+		return 0, s.accounting.DecreaseUserQuota(ctx, id, amount, true)
 	case "override":
 		if err := common.ValidateWalletQuota(amount); err != nil {
 			return 0, err
