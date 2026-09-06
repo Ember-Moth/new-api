@@ -21,14 +21,14 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/shared/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -8,10 +8,10 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/entity"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/shopspring/decimal"
 )
 

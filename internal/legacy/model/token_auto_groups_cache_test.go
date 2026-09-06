@@ -5,7 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/stretchr/testify/assert"

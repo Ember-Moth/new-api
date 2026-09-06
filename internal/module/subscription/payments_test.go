@@ -18,7 +18,7 @@ import (
 	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/memberships"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	billingentity "github.com/QuantumNous/new-api/internal/module/billing/entity"

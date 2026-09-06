@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/waffo-com/waffo-go/core"
 	"github.com/waffo-com/waffo-go/utils"

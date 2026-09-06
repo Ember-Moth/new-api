@@ -11,7 +11,7 @@ import (
 
 	identitygroups "github.com/QuantumNous/new-api/internal/module/identity/groups"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/infra/database/value"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
@@ -20,8 +20,8 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

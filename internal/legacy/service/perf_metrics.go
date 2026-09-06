@@ -5,7 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 )
 
 func RecordRelayPerfSample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {

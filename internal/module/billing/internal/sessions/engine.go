@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/accounting"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
@@ -14,7 +14,7 @@ import (
 	subcontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/memberships"
 	"github.com/QuantumNous/new-api/internal/module/subscription/quota"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 )
 
 type Dependencies struct {

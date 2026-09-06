@@ -12,7 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
 	// Import oauth package to register providers via init()
-	_ "github.com/QuantumNous/new-api/oauth"
+	_ "github.com/QuantumNous/new-api/internal/legacy/oauth"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"

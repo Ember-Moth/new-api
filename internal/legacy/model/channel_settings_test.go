@@ -3,7 +3,7 @@ package model
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

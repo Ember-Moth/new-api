@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/Calcium-Ion/go-epay/epay"
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/checkout"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/stretchr/testify/assert"

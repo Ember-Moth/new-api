@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
 const (

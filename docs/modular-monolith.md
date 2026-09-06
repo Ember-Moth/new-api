@@ -43,6 +43,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 - [ ] usage 模块聚合日志与统计，覆盖 PostgreSQL/ClickHouse。
 - [ ] system 模块聚合系统配置、节点和调度；后台入口不再依赖 HTTP controller。
 - [x] 根目录 `controller`、`service`、`model` 已清空，完成整包目录迁移。
+- [x] `common`、`constant`、`dto`、`types`、`logger`、`setting`、`oauth`、`relay` 已整包移入 internal；RelayKit 保持独立。
 - [ ] `internal/legacy` 和 `internal/transport/http/controller` 的过渡实现继续按业务归属拆分，完成最终模块边界。
 - [ ] 模块实现、应用组装及基础设施依赖由架构检查约束；公开契约不形成循环。
 - [ ] 主应用和 RelayKit 独立构建、静态检查和有效回归测试通过；新库初始化与重复启动通过。
@@ -52,7 +53,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
-按用户最新要求，先完成目录迁移，再继续拆分逻辑。剩余 178 个文件保持原有 Go 包和函数实现，controller 整包迁至 internal/transport/http/controller，service/model 迁至 internal/legacy 下的同名包；导入路径与架构检查同步更新。已拆出的业务模块继续保持现有边界。目录迁移已经完成，旧包内部和包间的业务耦合仍待后续整理。
+按用户最新要求，先完成目录迁移，再继续拆分逻辑。剩余 178 个文件保持原有 Go 包和函数实现，controller 整包迁至 internal/transport/http/controller，service/model 迁至 internal/legacy 下的同名包；导入路径与架构检查同步更新。已拆出的业务模块继续保持现有边界。这些目录的迁移已经完成；后续八个包也已整包移动到下表位置。旧包内部和包间的业务耦合仍待后续整理。
 
 当前迁移位置：
 
@@ -61,8 +62,17 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 | controller/ | internal/transport/http/controller/ |
 | service/ | internal/legacy/service/ |
 | model/ | internal/legacy/model/ |
+| common/ | internal/shared/common/ |
+| constant/ | internal/shared/constant/ |
+| dto/ | internal/shared/dto/ |
+| types/ | internal/shared/types/ |
+| logger/ | internal/infra/logger/ |
+| setting/ | internal/config/setting/ |
+| oauth/ | internal/legacy/oauth/ |
+| relay/ | internal/legacy/relay/ |
+| relaykit/ | relaykit/（独立 Go 模块，保留） |
 
-下文前四十二批中的路径和验证命令记录的是当时状态；当前代码请按上表定位。
+下文历史批次中的路径和验证命令记录的是当时状态；当前代码请按上表定位。
 
 已完成的第一批改动：
 
@@ -350,6 +360,13 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 已逐个对照 HEAD 中的原文件，确认移动文件除导入路径外内容一致；根目录三个目录均不存在，也没有残留旧路径的 Go 导入。
 - 架构检查禁止所有生产代码重新导入旧根包，同时继续禁止已迁移模块依赖 internal/legacy 或入站适配层。目录移动没有放开已有模块的依赖边界。
 - 这一批完成目录层面的整理；业务拆分不作为本批迁移的前置条件，后续按用户优先级继续进行。
+
+第四十四批继续按约定整包移动共享设施、配置、OAuth 和转发代码：
+
+- common/constant/dto/types 移至 internal/shared 下的同名包；logger 移至 internal/infra/logger；setting 移至 internal/config/setting；oauth/relay 移至 internal/legacy 下的同名包。
+- 400 个文件连同嵌入的 Lua 资源整体移动，656 个 Go 文件更新包路径。逐一比对 829 个受影响文件，确认除 Go 路径替换外内容不变；保留 package 名称和函数实现。
+- 根目录上述八个目录均不存在；架构检查禁止重新导入旧路径，继续限制已拆模块对过渡包的依赖。
+- relaykit 目录、独立 go.mod、模块路径和主模块 replace 配置均保持原样，独立构建检查继续执行。
 
 ## 第一批验证（2026-09-05）
 
@@ -1304,3 +1321,24 @@ python3 /tmp/verify-new-api-pricing-startup.py
 完整回归覆盖迁移后包路径、模块依赖约束及真实数据库/缓存。三种日志配置均使用新库启动并重启两次，schema 版本、保留数据和供应商唯一约束检查通过。
 
 输出：`/tmp/new-api-directory-move-build.log`、`/tmp/new-api-directory-move-tests.log`、`/tmp/new-api-directory-move-vet.log`、`/tmp/new-api-directory-move-startup.log`。
+
+## 第四十四批验证（2026-09-06）
+
+本批只做整包目录迁移、Go 引用替换和架构规则/说明更新。已核对全部 400 个移动文件及其他受影响 Go 文件，共 829 个文件除包路径替换外内容一致；Lua 嵌入资源保持原样。根目录八个旧目录及其旧 Go 导入均已清除。
+
+验证环境沿用 Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。以下检查全部通过：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-pricing-startup.py
+```
+
+三种日志配置均通过新库初始化及两次重启，schema 版本、保留数据和供应商唯一性检查通过。主模块 go.mod/go.sum、RelayKit 目录及其独立模块配置没有改动。
+
+输出：`/tmp/new-api-shared-move-build.log`、`/tmp/new-api-shared-move-tests.log`、`/tmp/new-api-shared-move-vet.log`、`/tmp/new-api-shared-move-startup.log`。

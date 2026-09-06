@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/casbin/casbin/v2"
 	"gorm.io/gorm"

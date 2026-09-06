@@ -4,7 +4,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/entity"
 	"gorm.io/gorm"

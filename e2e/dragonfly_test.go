@@ -16,7 +16,7 @@ import (
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
@@ -26,7 +26,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/gin-gonic/gin"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/internal/dbtime"
 	"gorm.io/gorm"

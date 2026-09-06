@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"gorm.io/gorm"

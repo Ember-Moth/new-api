@@ -9,11 +9,11 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/system"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 )
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

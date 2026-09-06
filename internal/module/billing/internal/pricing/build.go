@@ -8,16 +8,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/shared/types"
 )
 
 type Pricing = billingcontract.Pricing

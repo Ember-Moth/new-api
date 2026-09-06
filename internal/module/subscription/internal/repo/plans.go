@@ -3,7 +3,7 @@ package repo
 import (
 	"context"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"gorm.io/gorm"
 )

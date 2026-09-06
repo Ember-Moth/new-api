@@ -8,7 +8,7 @@ import (
 
 	identitymodule "github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/authn"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )

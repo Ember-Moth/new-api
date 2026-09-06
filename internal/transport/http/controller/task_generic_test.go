@@ -12,14 +12,14 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+	relaychannel "github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

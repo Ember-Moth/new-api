@@ -5,7 +5,7 @@ import (
 
 	subscriptioncontract "github.com/QuantumNous/new-api/internal/module/subscription/contract"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	subscriptionentity "github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"gorm.io/gorm"
 )

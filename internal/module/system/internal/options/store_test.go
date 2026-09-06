@@ -3,13 +3,13 @@ package options
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/system/contract"
 	"github.com/QuantumNous/new-api/internal/module/system/entity"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"

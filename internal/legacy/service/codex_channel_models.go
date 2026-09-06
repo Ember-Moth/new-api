@@ -9,7 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 )
 

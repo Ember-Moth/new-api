@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	channelentity "github.com/QuantumNous/new-api/internal/module/channel/entity"

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 	"github.com/QuantumNous/new-api/internal/module/usage/metadata"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 )
 
 type WriterPolicy struct {

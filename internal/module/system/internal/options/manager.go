@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/system/entity"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
-	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"gorm.io/gorm"
 )
 

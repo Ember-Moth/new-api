@@ -4,10 +4,10 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
-	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/internal/legacy/relay"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

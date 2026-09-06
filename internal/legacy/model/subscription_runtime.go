@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/subscription/catalog"
 	"github.com/QuantumNous/new-api/internal/module/subscription/payments"

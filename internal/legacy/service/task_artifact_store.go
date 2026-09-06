@@ -6,8 +6,8 @@ import (
 	"io"
 
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/setting/system_setting"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/shared/types"
 	"github.com/gin-gonic/gin"
 )
 

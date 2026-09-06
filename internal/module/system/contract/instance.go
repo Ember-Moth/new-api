@@ -1,6 +1,6 @@
 package contract
 
-import "github.com/QuantumNous/new-api/common"
+import "github.com/QuantumNous/new-api/internal/shared/common"
 
 const (
 	SystemInstanceStatusOnline            = "online"

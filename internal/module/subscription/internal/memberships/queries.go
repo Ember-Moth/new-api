@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/QuantumNous/new-api/common" // GetAllActiveUserSubscriptions returns all active subscriptions for a user.
+	"github.com/QuantumNous/new-api/internal/shared/common" // GetAllActiveUserSubscriptions returns all active subscriptions for a user.
 )
 
 func (s *Store) GetAllActiveUserSubscriptions(ctx context.Context, userId int) ([]SubscriptionSummary, error) {

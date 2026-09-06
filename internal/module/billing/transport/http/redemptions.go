@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/gin-gonic/gin"
 )
 

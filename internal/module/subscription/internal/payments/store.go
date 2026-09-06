@@ -5,7 +5,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/catalog"
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"

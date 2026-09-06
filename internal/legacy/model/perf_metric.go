@@ -4,8 +4,8 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/internal/module/usage/performance"
-	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/perf_metrics_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 )
 
 var performanceStores sync.Map

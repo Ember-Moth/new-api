@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
 	"github.com/samber/lo"
 )
 

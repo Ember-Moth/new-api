@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
 // AdjustWallet applies control-plane changes through the shared ledger. The

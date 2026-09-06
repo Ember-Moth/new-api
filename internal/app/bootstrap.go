@@ -9,17 +9,17 @@ import (
 
 	"context"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/module/system"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/internal/legacy/oauth"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	_ "github.com/QuantumNous/new-api/setting/performance_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	_ "github.com/QuantumNous/new-api/internal/config/setting/performance_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/joho/godotenv"
 )
 

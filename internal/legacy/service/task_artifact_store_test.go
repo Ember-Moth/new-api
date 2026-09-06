@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/internal/shared/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

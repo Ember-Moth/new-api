@@ -7,15 +7,15 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	billingsessions "github.com/QuantumNous/new-api/internal/module/billing/sessions"
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 
-	"github.com/QuantumNous/new-api/logger"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 )

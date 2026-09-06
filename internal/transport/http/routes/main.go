@@ -13,7 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/channel"

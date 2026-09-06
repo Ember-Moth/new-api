@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	router "github.com/QuantumNous/new-api/internal/transport/http/routes"
 	"github.com/gin-gonic/gin"

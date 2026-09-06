@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -5,7 +5,7 @@ import (
 
 	identitygroups "github.com/QuantumNous/new-api/internal/module/identity/groups"
 
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 
 	"context"
 
@@ -13,11 +13,11 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
-	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/internal/legacy/oauth"
 )
 
 type providerRegistry struct{}

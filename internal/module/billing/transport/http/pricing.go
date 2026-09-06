@@ -3,7 +3,7 @@ package billinghttp
 import (
 	"net/http"
 
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 

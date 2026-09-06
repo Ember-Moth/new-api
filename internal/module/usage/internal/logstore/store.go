@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	dbquery "github.com/QuantumNous/new-api/internal/infra/database/query"
 	"github.com/QuantumNous/new-api/internal/module/usage/entity"
 	"github.com/QuantumNous/new-api/internal/module/usage/metadata"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/internal/shared/types"
 	"gorm.io/gorm"
 )
 

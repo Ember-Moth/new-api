@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	identitycontract "github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/google/uuid"

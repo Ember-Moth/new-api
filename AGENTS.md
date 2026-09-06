@@ -17,7 +17,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ## Architecture
 
-The application is being organized as a modular monolith. See `docs/modular-monolith.md` for the full target, dependency rules, and completion checklist. The remaining transitional packages are under internal/legacy and internal/transport/http/controller. Their directory relocation is complete; business-level separation remains ongoing.
+The application is being organized as a modular monolith. See `docs/modular-monolith.md` for the full target, dependency rules, and completion checklist. The remaining transitional packages are under internal/legacy and internal/transport/http/controller. Directory relocation is complete; shared packages are grouped under internal/shared, settings under internal/config/setting, and logging under internal/infra/logger. RelayKit remains an independent root module. Business-level separation remains ongoing.
 
 ```
 cmd/new-api/    — Executable and CLI entrypoint
@@ -28,6 +28,7 @@ internal/transport/http/server/ — HTTP server and dashboard delivery
 internal/transport/http/audit/ — Shared management audit actor metadata
 internal/transport/task/ — Background task adapters for channel updates, health tests and provider polling
 internal/infra/httpclient/ — Outbound HTTP, proxy transports, SSRF-safe fetching
+internal/infra/logger/ — Runtime logging and formatting
 internal/module/channel/ — Channel management, provider operations, catalog/discovery, persistence and routing; health testing and remaining callers are still being migrated
 internal/module/identity/ — Account CRUD and preferences, OAuth bindings, external identity ownership, two-factor/Passkey management, authentication challenges, JWT/session orchestration, session/user metadata cache, token hydration/mutation fences, usable-group/Auto selection policy, authentication-version fencing and authorization; authz exposes the instance API and internal/authorization owns Casbin storage and policy snapshots; password/OAuth login transport, billing cache ownership and legacy call adapters are still being migrated
 internal/module/billing/ — Redemption management/use, top-up settlement/history/manual completion, transactional wallet operations, subscription receipts checkout clients and Stripe/Creem/Waffo webhook verification and dispatch, wallet information/amount normalization, Epay/Stripe/Creem/Waffo wallet checkout and Pancake merchant configuration/catalog, wallet/token quota reservation and accounting batches, request billing sessions/funding-source lifecycle and model pricing catalog/upstream comparison, daily check-in and affiliate wallet credits, billing statements and payment confirmation; request price calculations, gateway adapters and remaining runtime callers are still being migrated
@@ -39,15 +40,15 @@ internal/arch/  — Executable dependency boundary rules
 internal/transport/http/controller/ — Remaining HTTP handlers, moved as a package before further business separation
 internal/legacy/service/ — Transitional runtime/business package; module extraction remains ongoing
 internal/legacy/model/ — Transitional data/runtime package; module extraction remains ongoing
-relay/         — AI API relay/proxy with provider adapters
-  relay/channel/ — Provider-specific adapters (openai/, claude/, gemini/, aws/, etc.)
-setting/       — Configuration management (ratio, model, operation, system, performance)
-common/        — Shared utilities (JSON, crypto, cache client, env, rate-limit, etc.)
-dto/           — Data transfer objects (request/response structs)
-constant/      — Constants (API types, channel types, context keys)
-types/         — Type definitions (relay formats, file sources, errors)
+internal/legacy/relay/         — AI API relay/proxy with provider adapters
+  internal/legacy/relay/channel/ — Provider-specific adapters (openai/, claude/, gemini/, aws/, etc.)
+internal/config/setting/       — Configuration management (ratio, model, operation, system, performance)
+internal/shared/common/        — Shared utilities (JSON, crypto, cache client, env, rate-limit, etc.)
+internal/shared/dto/           — Data transfer objects (request/response structs)
+internal/shared/constant/      — Constants (API types, channel types, context keys)
+internal/shared/types/         — Type definitions (relay formats, file sources, errors)
 i18n/          — Backend internationalization (go-i18n, en/zh)
-oauth/         — OAuth provider implementations
+internal/legacy/oauth/         — OAuth provider implementations
 pkg/           — Internal packages (cachex, ionet)
 web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
   src/i18n/    — Frontend internationalization (i18next, en/zh/zh-TW/fr/ru/ja/vi)
@@ -89,7 +90,7 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 - Code under `relaykit/` MUST NOT import or depend on packages from the root `new-api` module, or rely on root-only configuration, generated files, or workspace wiring.
 - Any change affecting `relaykit/` or its public APIs MUST be verified with `cd relaykit && GOWORK=off go build ./...`; a successful root-module build is not sufficient.
 
-**JSON package:** All JSON marshal/unmarshal operations MUST use the wrapper functions in `common/json.go`:
+**JSON package:** All JSON marshal/unmarshal operations MUST use the wrapper functions in `internal/shared/common/json.go`:
 
 - `common.Marshal(v any) ([]byte, error)`
 - `common.Unmarshal(data []byte, v any) error`
@@ -124,23 +125,23 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 
 **Billing expression system:** When working on tiered/dynamic billing (expression-based pricing), MUST read `pkg/billingexpr/expr.md` first. It documents the design philosophy, expression language, full architecture, token normalization rules, quota conversion, and expression versioning. All billing expression changes must follow that document.
 
-**Built-in model pricing:** New built-in model prices MUST be defined as self-contained billing expressions in `setting/billing_setting/builtin_billing.go`, using real USD per million tokens. Do not add new built-in prices to the legacy model/completion/cache ratio tables. Preserve explicit administrator pricing overrides. Existing legacy prices are migrated only when explicitly requested. Verify published prices and cover applicable context-length thresholds and cache categories.
+**Built-in model pricing:** New built-in model prices MUST be defined as self-contained billing expressions in `internal/config/setting/billing_setting/builtin_billing.go`, using real USD per million tokens. Do not add new built-in prices to the legacy model/completion/cache ratio tables. Preserve explicit administrator pricing overrides. Existing legacy prices are migrated only when explicitly requested. Verify published prices and cover applicable context-length thresholds and cache categories.
 
 **Billing safety invariants:** Quota/billing code MUST never produce a negative charge (a credit) from arithmetic overflow or unvalidated input. Apply defense in depth:
 
-- Every user-controlled quantity that becomes a billing multiplier (image `n`, video `seconds`/`duration`, resolution/quality ratios, batch counts) MUST be bounded before it reaches quota calculation. Reject out-of-range values at request validation with a 400. Existing bounds: `dto.MaxImageN` for image generation count, `relaycommon.MaxTaskDurationSeconds` for task video duration, `maxTokensLimit` (`relay/helper/valid_request.go`) for `max_tokens`-family fields on every relay format (OpenAI, Claude, Gemini, Responses). Reuse these constants instead of introducing new ad hoc limits for the same concepts. When adding a new relay format or request DTO, bound its max-tokens and count fields in its validator from day one.
+- Every user-controlled quantity that becomes a billing multiplier (image `n`, video `seconds`/`duration`, resolution/quality ratios, batch counts) MUST be bounded before it reaches quota calculation. Reject out-of-range values at request validation with a 400. Existing bounds: `dto.MaxImageN` for image generation count, `relaycommon.MaxTaskDurationSeconds` for task video duration, `maxTokensLimit` (`internal/legacy/relay/helper/valid_request.go`) for `max_tokens`-family fields on every relay format (OpenAI, Claude, Gemini, Responses). Reuse these constants instead of introducing new ad hoc limits for the same concepts. When adding a new relay format or request DTO, bound its max-tokens and count fields in its validator from day one.
 - Watch for validation bypass paths: passthrough fields (e.g. `Extra["parameters"]`), task `metadata` maps, and multipart form fields can carry the same quantities around the standard DTO validation. Any adaptor that reads a multiplier from such a path must enforce the same bound (or clamp) locally.
 - Durations parsed from media metadata are user/upstream-controlled too: audio file headers (transcription token counting, TTS response duration) and upstream deduction numbers (e.g. Kling `FinalUnitDeduction`) can claim absurd values. Convert them with saturation before they become token counts.
-- Never convert a computed quota or token count to `int` with a bare cast like `int(float64(quota) * ratio)`, `int(math.Round(...))` on unbounded input, or `int(decimal.IntPart())`. All quota rounding/conversion is centralized in `common/quota_math.go`; use those helpers: `common.QuotaFromFloat` (truncating) for float products, `common.QuotaRound` (half-away-from-zero) where rounding is intended, and `common.QuotaFromDecimal` for decimal products. `billingexpr.QuotaRound` delegates to `common.QuotaRound`. Do not reintroduce local conversion helpers or bare casts. Single-request saturation stays at the int32 boundary so batch accumulation cannot approach 64-bit wraparound; wallet/top-up conversion uses `common.WalletQuotaFromDecimalStrict` with the JavaScript-safe `common.MaxWalletQuota` boundary. Every clamp/NaN fallback is logged via `common.SysError`.
+- Never convert a computed quota or token count to `int` with a bare cast like `int(float64(quota) * ratio)`, `int(math.Round(...))` on unbounded input, or `int(decimal.IntPart())`. All quota rounding/conversion is centralized in `internal/shared/common/quota_math.go`; use those helpers: `common.QuotaFromFloat` (truncating) for float products, `common.QuotaRound` (half-away-from-zero) where rounding is intended, and `common.QuotaFromDecimal` for decimal products. `billingexpr.QuotaRound` delegates to `common.QuotaRound`. Do not reintroduce local conversion helpers or bare casts. Single-request saturation stays at the int32 boundary so batch accumulation cannot approach 64-bit wraparound; wallet/top-up conversion uses `common.WalletQuotaFromDecimalStrict` with the JavaScript-safe `common.MaxWalletQuota` boundary. Every clamp/NaN fallback is logged via `common.SysError`.
 - Saturation events are also audited: each helper has a `*Checked` variant (`common.QuotaFromFloatChecked` / `QuotaRoundChecked` / `QuotaFromDecimalChecked`) that additionally returns a `*common.QuotaClamp` when clamping occurred. Billing paths that compute a charge capture that clamp onto `relayInfo.QuotaClamp` (or thread it into task settlement) and, right before writing the consume/task log, call `attachQuotaSaturation` (in `internal/legacy/service/log_info_generate.go`) which nests the marker under the log's `other.admin_info.quota_saturation` and emits a request-correlated `logger.LogWarn`. Nesting under `admin_info` makes it admin-only for free (non-admin log views strip `admin_info`). When adding a new billing path, use the `*Checked` variant and surface the clamp the same way so the anomaly stays auditable in both the admin log UI and backend logs.
 - Multiplier maps go through `types.PriceData.AddOtherRatio`, which rejects non-positive, NaN, and +Inf ratios. Do not write to `PriceData.OtherRatios` directly, and do not weaken these guards.
 - Pre-consume (预扣费) and settle (结算/差额) must both be safe: a saturated oversized quota must fail pre-consume with insufficient-quota, never silently wrap. When adding a new billing path (new relay format, new task platform, new adjustment hook), trace the full chain — validation → EstimateBilling/OtherRatios → quota conversion → pre-consume → settle/refund — and confirm each step preserves these invariants.
 - Fields parsed into unsigned types (`*uint`) accept huge positive JSON numbers (e.g. `18446744073686646784`, a wrapped negative); a `>= 0` check is not sufficient, an upper bound is mandatory.
-- Regression tests for these invariants belong with the boundary they protect (request validators, converter helpers). See `relay/helper/openai_image_request_test.go`, `relay/common/relay_utils_test.go`, and `common/quota_math_test.go` for the expected style.
+- Regression tests for these invariants belong with the boundary they protect (request validators, converter helpers). See `internal/legacy/relay/helper/openai_image_request_test.go`, `internal/legacy/relay/common/relay_utils_test.go`, and `internal/shared/common/quota_math_test.go` for the expected style.
 
 **Backend test quality:** Backend tests must protect real behavior, API contracts, billing/accounting invariants, data compatibility, or regression paths.
 
-- **Do not scatter tests for a small change:** For a focused feature or fix, extend an existing suitable test file first. If a new test file is necessary, add at most one and consolidate the key regression cases there. MUST NOT create separate test files for the same small feature across `internal/transport/http/controller/`, `internal/legacy/service/`, `setting/`, or other layers merely because its call chain crosses those layers. Do not repeat fixtures and assertions at each layer. Keep the cases compact and focused on observable behavior; the number of production files touched is not a reason to add more test files.
+- **Do not scatter tests for a small change:** For a focused feature or fix, extend an existing suitable test file first. If a new test file is necessary, add at most one and consolidate the key regression cases there. MUST NOT create separate test files for the same small feature across `internal/transport/http/controller/`, `internal/legacy/service/`, `internal/config/setting/`, or other layers merely because its call chain crosses those layers. Do not repeat fixtures and assertions at each layer. Keep the cases compact and focused on observable behavior; the number of production files touched is not a reason to add more test files.
 - Do not add tests that only improve coverage numbers, prove that code happens to run, or lock in implementation details without a user-visible or cross-module contract.
 - Avoid fake fuzz/stress/smoke/performance tests built from random inputs, large loop counts, sleeps, timing comparisons, or log-only assertions.
 - Avoid duplicate tests that exercise the same branch with different names but no new invariant.

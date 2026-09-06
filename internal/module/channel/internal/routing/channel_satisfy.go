@@ -1,8 +1,8 @@
 package routing
 
 import (
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 )
 
 func (r *Runtime) IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {

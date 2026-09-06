@@ -1,7 +1,7 @@
 package channel
 
 import (
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/routing"
 	"gorm.io/gorm"

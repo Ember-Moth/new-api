@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 )

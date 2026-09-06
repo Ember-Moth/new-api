@@ -6,7 +6,7 @@ import (
 
 	"context"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/ceremony"
 
 	webauthn "github.com/go-webauthn/webauthn/webauthn"

@@ -3,8 +3,8 @@ package routing
 import (
 	"slices"
 
-	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 )
 
 var filterEvalOrder = []dto.ChannelFilterKind{

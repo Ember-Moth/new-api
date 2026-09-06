@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
 	"github.com/QuantumNous/new-api/internal/module/subscription/catalog"

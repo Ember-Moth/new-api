@@ -55,7 +55,7 @@ func TestModularDependencyBoundaries(t *testing.T) {
 				assert.True(t, strings.HasPrefix(dir, "cmd/") || dir == "internal/app" || strings.HasPrefix(dir, "internal/app/"), "%s: only command entrypoints may import the application composition root", path)
 			}
 			first := strings.Split(dep, "/")[0]
-			assert.NotContains(t, []string{"router", "middleware", "controller", "service", "model"}, first, "%s: removed root packages must not be imported", path)
+			assert.NotContains(t, []string{"router", "middleware", "controller", "service", "model", "common", "constant", "dto", "logger", "oauth", "setting", "types", "relay"}, first, "%s: removed root packages must not be imported", path)
 			if moduleCode || strings.HasPrefix(dir, "internal/infra/") {
 				assert.False(t, strings.HasPrefix(dep, "internal/legacy/"), "%s: migrated modules and infrastructure must not depend on transitional business packages", path)
 				assert.False(t, strings.HasPrefix(dep, "internal/transport/"), "%s: application adapters must not be dependencies of modules or infrastructure", path)

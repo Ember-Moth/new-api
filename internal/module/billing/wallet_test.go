@@ -14,8 +14,8 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/Calcium-Ion/go-epay/epay"
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/checkout"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"

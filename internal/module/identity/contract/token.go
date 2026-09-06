@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
 // TokenActor carries authenticated ownership and the group resolved by inbound auth.

@@ -6,8 +6,8 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/groups"
-	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 )
 
 func (s *Service) GroupNames() []string {

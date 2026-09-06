@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 
 	"github.com/gin-gonic/gin"

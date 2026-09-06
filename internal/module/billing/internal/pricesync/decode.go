@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
 )
 
 func decodePricing(body []byte, openRouter, modelsDev bool) (map[string]any, error) {

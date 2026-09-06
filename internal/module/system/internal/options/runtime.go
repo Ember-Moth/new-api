@@ -5,15 +5,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
-	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/config"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/setting/performance_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/config"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/performance_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
 )
 
 const retiredThemeOptionKey = "theme.frontend"

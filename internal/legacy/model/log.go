@@ -7,7 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/usage"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 
 	"github.com/gin-gonic/gin"
 )

@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

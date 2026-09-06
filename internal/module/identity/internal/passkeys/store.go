@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"gorm.io/gorm"

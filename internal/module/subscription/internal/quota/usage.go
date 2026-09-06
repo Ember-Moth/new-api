@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"gorm.io/gorm" // Update subscription used amount by delta (positive consume more, negative refund).
 )

@@ -15,8 +15,8 @@ import (
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"

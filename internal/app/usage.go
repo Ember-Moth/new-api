@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"

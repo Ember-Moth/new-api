@@ -15,7 +15,7 @@ import (
 	waffoutils "github.com/waffo-com/waffo-go/utils"
 	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/entity"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"

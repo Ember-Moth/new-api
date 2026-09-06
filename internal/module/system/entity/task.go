@@ -3,7 +3,7 @@ package entity
 import (
 	"errors"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"gorm.io/gorm"
 )
 

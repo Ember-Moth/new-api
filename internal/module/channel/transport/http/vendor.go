@@ -3,7 +3,7 @@ package channelhttp
 import (
 	"strconv"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 
 	"github.com/gin-gonic/gin"

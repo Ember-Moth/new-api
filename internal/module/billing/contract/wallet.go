@@ -1,6 +1,6 @@
 package contract
 
-import "github.com/QuantumNous/new-api/constant"
+import "github.com/QuantumNous/new-api/internal/shared/constant"
 
 type WalletConfig struct {
 	WaffoUnitPrice, PancakeUnitPrice                     float64

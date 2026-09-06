@@ -13,14 +13,14 @@ import (
 
 	"gorm.io/driver/postgres"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/QuantumNous/new-api/types"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/shared/types"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"

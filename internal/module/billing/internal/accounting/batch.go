@@ -10,7 +10,7 @@ import (
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"gorm.io/gorm"
 )
 

@@ -5,8 +5,8 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/channel"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 )
 
 func localPricingSyncData() map[string]any {

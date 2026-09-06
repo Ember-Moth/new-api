@@ -1,10 +1,10 @@
 package router
 
 import (
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
-	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/internal/legacy/relay"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"

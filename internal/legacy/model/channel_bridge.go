@@ -3,7 +3,7 @@ package model
 import (
 	"sync"
 
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"gorm.io/gorm"

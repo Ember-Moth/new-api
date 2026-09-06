@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	dbquery "github.com/QuantumNous/new-api/internal/infra/database/query"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/entity"

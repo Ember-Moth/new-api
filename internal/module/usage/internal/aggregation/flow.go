@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 	"gorm.io/gorm"
 )

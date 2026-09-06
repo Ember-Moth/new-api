@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/internal/module/billing/paymentconfig"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/gin-gonic/gin"
 )
 

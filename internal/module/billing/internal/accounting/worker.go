@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/google/uuid"
 )
 

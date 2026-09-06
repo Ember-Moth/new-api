@@ -6,7 +6,7 @@ import (
 
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 
-	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/stretchr/testify/require"

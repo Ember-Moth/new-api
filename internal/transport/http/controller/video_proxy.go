@@ -17,11 +17,11 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	relaychannel "github.com/QuantumNous/new-api/relay/channel"
-	"github.com/QuantumNous/new-api/setting/system_setting"
+	relaychannel "github.com/QuantumNous/new-api/internal/legacy/relay/channel"
+	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/http/httpguts"
 )
