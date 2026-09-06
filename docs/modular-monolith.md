@@ -1424,3 +1424,8 @@ OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/�
 ### 第五十五批：多 Key 轮询游标迁入 DragonflyDB
 
 轮询改用按渠道/密钥池隔离的有界 Lua 游标，移除 PostgreSQL 和前端配置中的 polling index。真实跨节点轮询及重启后继续使用下一枚 Key 的转发验证、完整 Go 测试、前端类型/lint/14 项测试通过。自动停用状态和结算仍待继续，见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第五十六批：入口 Nginx 协议验收
+
+新增标准库测试脚本，使用实际部署配置验证路径分流、SSE 即时传输与 WebSocket 双向隧道；本机 Nginx 1.31.5 通过。仅使用临时进程与 loopback 后端，未变更系统服务。容器运行时验证仍待补，见 [控制面与数据面拆分](control-data-plane.md)。

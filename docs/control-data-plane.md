@@ -252,3 +252,13 @@ bun run test src/features/channels/lib/__tests__
 前端依赖按锁文件安装，类型检查与改动文件 lint 通过；渠道相关 5 个测试文件、14 项测试通过。没有新增界面文案或视觉改动。
 
 输出：`/tmp/new-api-polling-{full-tests,build,vet,startup,typecheck,lint,web-tests}.log`。自动停用状态、后台任务恢复、可靠结算和入口容器验证仍未完成。
+
+## 第十一批：入口代理协议验收
+
+新增可重复运行的 `e2e/verify_proxy.py`，用仓库 `deploy/nginx.conf` 启动临时 Nginx，只替换测试监听地址和两个临时后端地址。验证控制面/数据面路径分流、`/v1/dashboard` 管理例外、SSE 首个事件在上游结束前抵达客户端，以及 WebSocket 升级和双向帧转发。
+
+```sh
+python3 e2e/verify_proxy.py
+```
+
+在本机 Nginx **1.31.5** 通过。使用临时目录和 loopback 端口，没有启动系统服务或修改现有代理配置。输出 `/tmp/new-api-proxy-verification.log`。这一项补齐真实 Nginx 的协议验收；Docker 镜像/Compose 容器启动仍未验证，不将两者混为一谈。
