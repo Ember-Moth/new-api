@@ -1207,6 +1207,7 @@ export function parseTaskResult(){return {};}`
 		require.NoError(t, err)
 		assert.True(t, reserved)
 		stale.Username = "metadata-updated"
+		require.NoError(t, database.Model(&model.User{}).Where("id = ?", user.Id).Update("username", stale.Username).Error)
 		require.NoError(t, cache.Publish(stale))
 		current, err := cache.GetUserCache(user.Id)
 		require.NoError(t, err)
@@ -1430,7 +1431,7 @@ export function parseTaskResult(){return {};}`
 		assert.EqualValues(t, 1, count)
 	})
 
-	t.Run("billing preference publication preserves pending wallet reservations", func(t *testing.T) {
+	t.Run("billing preference publication preserves committed wallet reservations", func(t *testing.T) {
 		previousBatch := common.BatchUpdateEnabled
 		common.BatchUpdateEnabled = true
 		t.Cleanup(func() { require.NoError(t, model.FlushQuotaUpdates()); common.BatchUpdateEnabled = previousBatch })
@@ -1442,7 +1443,7 @@ export function parseTaskResult(){return {};}`
 		require.NoError(t, err)
 		require.True(t, reserved)
 		require.NoError(t, database.First(&user, user.Id).Error)
-		assert.Equal(t, 100, user.Quota)
+		assert.Equal(t, 93, user.Quota)
 		accounts := identity.New(identity.Dependencies{DB: database, UserSecurity: identity.UserSecurity{PublishAuth: usercache.New(database).PublishUserAuthCache}})
 		preference, err := accounts.UpdateBillingPreference(t.Context(), user.Id, "wallet_only")
 		require.NoError(t, err)
@@ -1493,7 +1494,7 @@ export function parseTaskResult(){return {};}`
 			assert.Equal(t, 93+test.credit, cached.Quota)
 			assert.EqualValues(t, 1, cached.AuthVersion)
 			require.NoError(t, database.First(&user, user.Id).Error)
-			assert.Equal(t, 100+test.credit, user.Quota)
+			assert.Equal(t, 93+test.credit, user.Quota)
 			if test.provider == "creem" {
 				assert.Equal(t, "payer@example.test", cached.Email)
 			}

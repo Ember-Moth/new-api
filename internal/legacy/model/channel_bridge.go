@@ -1,7 +1,10 @@
 package model
 
 import (
+	"context"
 	"sync"
+
+	"github.com/QuantumNous/new-api/internal/shared/common"
 
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/shared/dto"
@@ -39,7 +42,9 @@ func ConfigureChannelService(service *channelmodule.Service) {
 	channelServices[DB] = service
 }
 
-func queueChannelUsedQuota(id, quota int) bool { return AccountingStore().QueueChannelUsage(id, quota) }
+func queueChannelUsedQuota(ctx context.Context, id, quota int) error {
+	return AccountingStore().RecordChannelUsage(ctx, id, quota)
+}
 
 func ChannelDependencies() channelmodule.Dependencies {
 	return channelmodule.Dependencies{DB: DB, RoutingChanged: InvalidatePricingCache, QueueUsedQuota: queueChannelUsedQuota}
@@ -97,7 +102,11 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	return ChannelService().EditChannelByTag(tag, newTag, modelMapping, models, group, priority, weight, paramOverride, headerOverride)
 }
 
-func UpdateChannelUsedQuota(id int, quota int) { ChannelService().UpdateChannelUsedQuota(id, quota) }
+func UpdateChannelUsedQuota(id int, quota int) {
+	if err := ChannelService().UpdateChannelUsedQuota(context.Background(), id, quota); err != nil {
+		common.SysError("failed to record channel usage: " + err.Error())
+	}
+}
 
 func DeleteChannelByStatus(status int64) (int64, error) {
 	return ChannelService().DeleteChannelByStatus(status)

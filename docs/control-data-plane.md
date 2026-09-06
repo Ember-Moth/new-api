@@ -279,3 +279,24 @@ python3 /tmp/verify-new-api-planes.py
 ```
 
 新库控制面和数据面各启动两次，真实转发、角色隔离、业务数据/会话保留通过。包内调度测试使用真实 PostgreSQL 和 miniredis，既有 e2e 使用真实 DragonflyDB 验证租约。未把本批等同于所有后台恢复完成：渠道余额同步循环、已超时业务任务的重试策略仍待收敛。
+
+## 第十三批：持久化账务投递与同步余额
+
+用户/Token 的余额变动和预扣始终同步提交 PostgreSQL，缓存只作投影。提交前后失效缓存，取消先修改 Redis 再入进程内队列的路径；不会因缓存更新失败再扣一次数据库，也不会在冷缓存已读到新余额后再 HINCRBY 同一差额。
+
+批量模式中的用户用量、请求数、渠道用量写入 PostgreSQL `quota_batch_deliveries`。这是未完成的持久化业务记账指令，不是缓存或租约状态。worker 以 `FOR UPDATE SKIP LOCKED` 每批领取最多 500 行，在同一事务中合并统计、保存凭证并删除已处理投递；失败保留投递，另一实例可以接手。控制面无论本机是否启用请求批量记账都会启动 drain，数据面仅提交投递。删除进程内待写 map 和 pending batch，渠道回调传播错误且无二次 SQL fallback。
+
+真实 PostgreSQL 回归覆盖新库迁移两次、替换 Store 接手、两个 Store 并发处理 525 行、SQL trigger 故障回滚、批次凭证重放、聚合溢出和直接渠道统计。真实 DragonflyDB 回归覆盖余额预扣、退款、结算、充值、奖励和资料更新；修正旧测试中“预扣后数据库余额不变”的预期。
+
+服务版本：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。以下命令在前文 TEST_*_DSN 下通过：
+
+```sh
+GOWORK=off go test ./internal/module/billing/internal/accounting -count=1 -v
+GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+python3 /tmp/verify-new-api-planes.py
+```
+
+完整根模块与 RelayKit 测试通过；新库双角色各启动两次并完成受限数据面真实转发。日志见 `/tmp/new-api-luna-acceptance-final.log`、`/tmp/new-api-luna-startup.log`。
+
+本批保证已入库投递的事务处理，不代表请求级结算已具备完整幂等性。余额 API 仍未接收稳定请求 ID，调用者在不确定提交后重试可能形成新业务操作；旧用户缓存填充也仍可能短暂覆盖提交后的失效，需要后续版本栅栏。legacy 统计调用失败目前记录错误，尚未把统计、资金和请求结果合并为统一结算事件。

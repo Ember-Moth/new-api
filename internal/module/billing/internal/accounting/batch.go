@@ -30,6 +30,12 @@ type quotaBatchUpdate struct {
 }
 
 func (s *Store) applyQuotaBatch(ctx context.Context, batch *quotaBatch) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return s.applyQuotaBatchTx(tx, batch)
+	})
+}
+
+func (s *Store) applyQuotaBatchTx(tx *gorm.DB, batch *quotaBatch) error {
 	userIDs := make(map[int]struct{})
 	for _, kind := range []int{BatchUpdateTypeUserQuota, BatchUpdateTypeUsedQuota, BatchUpdateTypeRequestCount} {
 		for id := range batch.Stores[kind] {
@@ -84,62 +90,60 @@ FROM d WHERE t.id = d.id AND t.deleted_at IS NULL RETURNING t.id`,
 	if len(users.rows)+len(tokens.rows)+len(channels.rows) == 0 {
 		return nil
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		receipt := tx.Exec("INSERT INTO quota_batch_receipts (id) VALUES (?::uuid) ON CONFLICT DO NOTHING", batch.ID)
-		if receipt.Error != nil {
-			return receipt.Error
-		}
-		if receipt.RowsAffected == 0 {
-			return nil
-		}
-		for _, update := range []quotaBatchUpdate{users, tokens, channels} {
-			// Bound SQL size and the number of bind parameters per statement.
-			for offset := 0; offset < len(update.rows); offset += 500 {
-				rows := update.rows[offset:min(offset+500, len(update.rows))]
-				var values strings.Builder
-				args := make([]any, 0, len(rows)*len(rows[0])+len(update.args))
-				for index, row := range rows {
-					if index > 0 {
+	receipt := tx.Exec("INSERT INTO quota_batch_receipts (id) VALUES (?::uuid) ON CONFLICT DO NOTHING", batch.ID)
+	if receipt.Error != nil {
+		return receipt.Error
+	}
+	if receipt.RowsAffected == 0 {
+		return nil
+	}
+	for _, update := range []quotaBatchUpdate{users, tokens, channels} {
+		// Bound SQL size and the number of bind parameters per statement.
+		for offset := 0; offset < len(update.rows); offset += 500 {
+			rows := update.rows[offset:min(offset+500, len(update.rows))]
+			var values strings.Builder
+			args := make([]any, 0, len(rows)*len(rows[0])+len(update.args))
+			for index, row := range rows {
+				if index > 0 {
+					values.WriteByte(',')
+				}
+				values.WriteByte('(')
+				for column, value := range row {
+					if column > 0 {
 						values.WriteByte(',')
 					}
-					values.WriteByte('(')
-					for column, value := range row {
-						if column > 0 {
-							values.WriteByte(',')
-						}
-						values.WriteString("?::bigint")
-						args = append(args, value)
-					}
-					values.WriteByte(')')
+					values.WriteString("?::bigint")
+					args = append(args, value)
 				}
-				args = append(args, update.args...)
-				var updated []int
-				query := "WITH d(" + update.columns + ") AS (VALUES " + values.String() + ") " + update.query
-				if err := tx.Raw(query, args...).Scan(&updated).Error; err != nil {
-					return err
-				}
-				if !update.users || len(updated) == len(rows) {
-					continue
-				}
-				matched := make(map[int]struct{}, len(updated))
-				for _, id := range updated {
-					matched[id] = struct{}{}
-				}
-				var missing []int64
-				for _, row := range rows {
-					if _, ok := matched[int(row[0])]; !ok {
-						missing = append(missing, row[0])
-					}
-				}
-				var active int64
-				if err := tx.Model(&entity.User{}).Where("id IN ?", missing).Count(&active).Error; err != nil {
-					return err
-				}
-				if active != 0 {
-					return fmt.Errorf("batch %s: %w", batch.ID, billingcontract.ErrWalletQuotaLimitExceeded)
+				values.WriteByte(')')
+			}
+			args = append(args, update.args...)
+			var updated []int
+			query := "WITH d(" + update.columns + ") AS (VALUES " + values.String() + ") " + update.query
+			if err := tx.Raw(query, args...).Scan(&updated).Error; err != nil {
+				return err
+			}
+			if !update.users || len(updated) == len(rows) {
+				continue
+			}
+			matched := make(map[int]struct{}, len(updated))
+			for _, id := range updated {
+				matched[id] = struct{}{}
+			}
+			var missing []int64
+			for _, row := range rows {
+				if _, ok := matched[int(row[0])]; !ok {
+					missing = append(missing, row[0])
 				}
 			}
+			var active int64
+			if err := tx.Model(&entity.User{}).Where("id IN ?", missing).Count(&active).Error; err != nil {
+				return err
+			}
+			if active != 0 {
+				return fmt.Errorf("batch %s: %w", batch.ID, billingcontract.ErrWalletQuotaLimitExceeded)
+			}
 		}
-		return nil
-	})
+	}
+	return nil
 }

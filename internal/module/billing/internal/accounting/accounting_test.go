@@ -3,6 +3,7 @@ package accounting
 import (
 	"context"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	channelentity "github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
+	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
@@ -73,15 +76,18 @@ func TestBatchFailureRetainsAllCountersAndRetriesWithoutDoubleCharging(t *testin
 	require.NoError(t, s.DecreaseUserQuota(t.Context(), user.Id, 10, false))
 	require.NoError(t, s.DecreaseTokenQuota(t.Context(), token.Id, token.Key, 10))
 	require.NoError(t, s.RecordUsage(t.Context(), user.Id, 10, 1))
-	require.True(t, s.QueueChannelUsage(channel.Id, 10))
+	require.NoError(t, s.RecordChannelUsage(t.Context(), channel.Id, 10))
 	require.NoError(t, db.Exec(`
 CREATE FUNCTION fail_quota_batch() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'injected final batch update failure'; END;
 $$;
 CREATE TRIGGER fail_quota_batch BEFORE UPDATE ON channels FOR EACH ROW EXECUTE FUNCTION fail_quota_batch();`).Error)
 	require.Error(t, s.Flush(t.Context()))
-	assert.Equal(t, 100, userQuota(t, db, user.Id))
-	assert.Equal(t, 100, tokenFromDB(t, db, token.Id).RemainQuota)
+	assert.Equal(t, 90, userQuota(t, db, user.Id))
+	assert.Equal(t, 90, tokenFromDB(t, db, token.Id).RemainQuota)
+	var pending int64
+	require.NoError(t, db.Model(&quotaBatchDelivery{}).Count(&pending).Error)
+	assert.EqualValues(t, 3, pending)
 	require.NoError(t, db.Exec("DROP FUNCTION fail_quota_batch() CASCADE").Error)
 	require.NoError(t, s.Flush(t.Context()))
 	require.NoError(t, s.Flush(t.Context()))
@@ -129,16 +135,122 @@ func TestBatchOverflowNeverWrapsIntoAWalletCredit(t *testing.T) {
 	for _, delta := range []int{math.MaxInt, math.MinInt} {
 		s, db := newAccountingFixture(t)
 		user := createAccountingUser(t, db, 100)
-		s.addNewRecord(BatchUpdateTypeUserQuota, user.Id, delta)
+		require.NoError(t, s.addNewRecord(t.Context(), BatchUpdateTypeUserQuota, user.Id, delta))
 		increment := 1
 		if delta < 0 {
 			increment = -1
 		}
-		s.addNewRecord(BatchUpdateTypeUserQuota, user.Id, increment)
+		require.NoError(t, s.addNewRecord(t.Context(), BatchUpdateTypeUserQuota, user.Id, increment))
 		require.Error(t, s.Flush(t.Context()))
 		assert.Equal(t, 100, userQuota(t, db, user.Id))
 	}
 }
+
+func TestDurableStatisticsSurviveStoreReplacement(t *testing.T) {
+	first, db := newAccountingFixture(t)
+	first.deps.BatchEnabled = func() bool { return true }
+	user := createAccountingUser(t, db, 100)
+	require.NoError(t, first.RecordUsage(t.Context(), user.Id, 17, 1))
+
+	// Replacing the Store models a process restart: no in-memory batch state is
+	// shared, but the PostgreSQL delivery rows remain available to the worker.
+	second := New(Dependencies{DB: db, BatchEnabled: func() bool { return true }})
+	require.NoError(t, second.Flush(t.Context()))
+	var updated entity.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, 17, updated.UsedQuota)
+	assert.Equal(t, 1, updated.RequestCount)
+	var pending int64
+	require.NoError(t, db.Model(&quotaBatchDelivery{}).Count(&pending).Error)
+	assert.Zero(t, pending)
+	var receipts int64
+	require.NoError(t, db.Table("quota_batch_receipts").Count(&receipts).Error)
+	assert.EqualValues(t, 1, receipts)
+}
+
+func TestRecordChannelUsageWritesDirectlyWhenBatchDisabled(t *testing.T) {
+	s, db := newAccountingFixture(t)
+	channel := channelentity.Channel{Name: "direct-channel", Key: "fixture", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, s.RecordChannelUsage(t.Context(), channel.Id, 13))
+	require.NoError(t, db.First(&channel, channel.Id).Error)
+	assert.EqualValues(t, 13, channel.UsedQuota)
+}
+
+func TestBalancePublicationInvalidatesColdFillWithoutApplyingDeltaTwice(t *testing.T) {
+	cache := testdb.UseCache(t)
+	previousRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = true
+	t.Cleanup(func() { common.RedisEnabled = previousRedisEnabled })
+	s, db := newAccountingFixture(t)
+	s.deps.Redis = cache
+	s.deps.CacheEnabled = func() bool { return true }
+	user := createAccountingUser(t, db, 100)
+	token := createAccountingToken(t, db, 100)
+	users := usercache.New(db)
+	tokens := tokencache.New(db)
+	_, err := users.GetUserCache(user.Id)
+	require.NoError(t, err)
+	_, err = tokens.GetByKey(token.Key, false)
+	require.NoError(t, err)
+
+	// Simulate a cold-cache fill after the PostgreSQL commit but before the
+	// publisher runs: both hashes now already contain the new balance.
+	require.NoError(t, db.Model(&entity.User{}).Where("id = ?", user.Id).Update("quota", gorm.Expr("quota - ?", 10)).Error)
+	require.NoError(t, db.Model(&entity.Token{}).Where("id = ?", token.Id).Updates(map[string]any{
+		"remain_quota": gorm.Expr("remain_quota - ?", 10),
+		"used_quota":   gorm.Expr("used_quota + ?", 10),
+	}).Error)
+	require.NoError(t, users.InvalidateUserCache(user.Id))
+	require.NoError(t, tokens.Invalidate(token.Key))
+	_, err = users.GetUserCache(user.Id)
+	require.NoError(t, err)
+	_, err = tokens.GetByKey(token.Key, false)
+	require.NoError(t, err)
+
+	require.NoError(t, s.PublishUserDelta(t.Context(), user.Id, -10))
+	require.NoError(t, s.PublishTokenDelta(t.Context(), token.Id, token.Key, -10))
+	cachedUser, err := users.GetUserCache(user.Id)
+	require.NoError(t, err)
+	cachedToken, err := tokens.GetByKey(token.Key, false)
+	require.NoError(t, err)
+	assert.Equal(t, 90, cachedUser.Quota)
+	assert.Equal(t, 90, cachedToken.RemainQuota)
+}
+
+func TestConcurrentStoresFlushEachDeliveryOnce(t *testing.T) {
+	first, db := newAccountingFixture(t)
+	first.deps.BatchEnabled = func() bool { return true }
+	user := createAccountingUser(t, db, 100)
+	deltas := make([]quotaBatchDelta, quotaBatchDeliveryLimit+25)
+	for i := range deltas {
+		deltas[i] = quotaBatchDelta{UpdateType: BatchUpdateTypeUsedQuota, EntityID: user.Id, Delta: 1}
+	}
+	require.NoError(t, first.enqueueBatchDeltas(t.Context(), deltas))
+	second := New(Dependencies{DB: db, BatchEnabled: func() bool { return true }})
+	errs := make(chan error, 2)
+	var wait sync.WaitGroup
+	wait.Add(2)
+	for _, store := range []*Store{first, second} {
+		go func(store *Store) {
+			defer wait.Done()
+			errs <- store.Flush(t.Context())
+		}(store)
+	}
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	var updated entity.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, quotaBatchDeliveryLimit+25, updated.UsedQuota)
+	assert.Zero(t, updated.RequestCount)
+	var pending int64
+	require.NoError(t, db.Model(&quotaBatchDelivery{}).Count(&pending).Error)
+	assert.Zero(t, pending)
+}
+
 func TestLedgerInstancesKeepIndependentBatchesAndStopDrainsPendingUsage(t *testing.T) {
 	first, db := newAccountingFixture(t)
 	user := createAccountingUser(t, db, 100)
@@ -147,7 +259,7 @@ func TestLedgerInstancesKeepIndependentBatchesAndStopDrainsPendingUsage(t *testi
 	require.NoError(t, first.DecreaseUserQuota(t.Context(), user.Id, 10, false))
 	require.NoError(t, second.DecreaseUserQuota(t.Context(), user.Id, 20, false))
 	require.NoError(t, first.Flush(t.Context()))
-	assert.Equal(t, 90, userQuota(t, db, user.Id))
+	assert.Equal(t, 70, userQuota(t, db, user.Id))
 	ctx, cancel := context.WithCancel(t.Context())
 	second.Start(ctx, time.Hour)
 	cancel()

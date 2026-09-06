@@ -2,6 +2,8 @@ BEGIN;
 
 DROP TABLE auth_assertion_receipts;
 
+DROP TABLE quota_batch_deliveries;
+
 DROP TABLE quota_batch_receipts;
 
 DROP TABLE vendors;

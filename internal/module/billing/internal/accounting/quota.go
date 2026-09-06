@@ -5,27 +5,47 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
+	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"gorm.io/gorm"
 )
 
-// PublishUserDelta applies a committed wallet change to a live metadata hash.
-// A cold cache is left empty so its next read hydrates the committed database row.
+// PublishUserDelta invalidates a cache projection after a committed wallet
+// change. Applying a delta is unsafe here: a concurrent cold-cache fill may
+// already contain the new database value, which would make HINCRBY count the
+// same mutation twice. The next read hydrates the authoritative balance.
 func (s *Store) PublishUserDelta(ctx context.Context, id int, delta int64) error {
 	if !s.deps.CacheEnabled() {
 		return nil
 	}
-	_, err := s.cacheApplyUserQuotaDelta(ctx, id, delta)
-	return err
+	return usercache.New(s.db).InvalidateUserCache(id)
 }
 func (s *Store) PublishTokenDelta(ctx context.Context, id int, key string, delta int64) error {
 	if !s.deps.CacheEnabled() {
 		return nil
 	}
-	_, err := s.cacheApplyTokenQuotaDelta(ctx, id, key, delta)
-	return err
+	return tokencache.New(s.db).Invalidate(key)
+}
+
+func (s *Store) invalidateUserQuotaProjection(id int) {
+	if !s.deps.CacheEnabled() {
+		return
+	}
+	if err := usercache.New(s.db).InvalidateUserCache(id); err != nil {
+		common.SysLog("failed to invalidate user quota cache before balance write: " + err.Error())
+	}
+}
+
+func (s *Store) invalidateTokenQuotaProjection(key string) {
+	if !s.deps.CacheEnabled() {
+		return
+	}
+	if err := tokencache.New(s.db).Invalidate(key); err != nil {
+		common.SysLog("failed to invalidate token quota cache before balance write: " + err.Error())
+	}
 }
 
 func (s *Store) IncreaseUserQuota(ctx context.Context, id, quota int, direct bool) error {
@@ -38,23 +58,22 @@ func (s *Store) IncreaseUserQuota(ctx context.Context, id, quota int, direct boo
 	if err := common.ValidateWalletQuota(quota); err != nil {
 		return err
 	}
-	if !direct && s.deps.BatchEnabled() {
-		s.addNewRecord(BatchUpdateTypeUserQuota, id, quota)
-	} else {
-		result := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ? AND quota <= ?", id, common.MaxWalletQuota-quota).Update("quota", gorm.Expr("quota + ?", quota))
-		if result.Error != nil {
-			return result.Error
+	// The direct parameter is retained for the legacy adapter. Wallet balances
+	// are always committed to PostgreSQL; only statistics use the batch outbox.
+	s.invalidateUserQuotaProjection(id)
+	result := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ? AND quota <= ?", id, common.MaxWalletQuota-quota).Update("quota", gorm.Expr("quota + ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		var count int64
+		if err := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Count(&count).Error; err != nil {
+			return err
 		}
-		if result.RowsAffected != 1 {
-			var count int64
-			if err := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
-				return gorm.ErrRecordNotFound
-			}
-			return contract.ErrWalletQuotaLimitExceeded
+		if count == 0 {
+			return gorm.ErrRecordNotFound
 		}
+		return contract.ErrWalletQuotaLimitExceeded
 	}
 	if err := s.PublishUserDelta(context.WithoutCancel(ctx), id, int64(quota)); err != nil {
 		common.SysLog("failed to increase user quota cache: " + err.Error())
@@ -69,12 +88,19 @@ func (s *Store) DecreaseUserQuota(ctx context.Context, id, quota int, direct boo
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	if !direct && s.deps.BatchEnabled() {
-		s.addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
-	} else {
-		if err := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error; err != nil {
-			return err
-		}
+	if err := common.ValidateWalletQuota(quota); err != nil {
+		return err
+	}
+	// A debit is also a durable balance mutation. Do not enqueue it behind a
+	// best-effort cache update, because a process exit between those steps would
+	// turn a successful reservation into an unrecorded debit.
+	s.invalidateUserQuotaProjection(id)
+	result := s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
 	}
 	if err := s.PublishUserDelta(context.WithoutCancel(ctx), id, -int64(quota)); err != nil {
 		common.SysLog("failed to decrease user quota cache: " + err.Error())
@@ -89,6 +115,9 @@ func (s *Store) IncreaseTokenQuota(ctx context.Context, id int, key string, quot
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
+	if err := common.ValidateWalletQuota(quota); err != nil {
+		return err
+	}
 	return s.adjustTokenQuota(ctx, id, key, quota)
 }
 func (s *Store) DecreaseTokenQuota(ctx context.Context, id int, key string, quota int) error {
@@ -98,15 +127,19 @@ func (s *Store) DecreaseTokenQuota(ctx context.Context, id int, key string, quot
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
+	if err := common.ValidateWalletQuota(quota); err != nil {
+		return err
+	}
 	return s.adjustTokenQuota(ctx, id, key, -quota)
 }
 func (s *Store) adjustTokenQuota(ctx context.Context, id int, key string, delta int) error {
-	if s.deps.BatchEnabled() {
-		s.addNewRecord(BatchUpdateTypeTokenQuota, id, delta)
-	} else {
-		if err := s.db.WithContext(ctx).Model(&entity.Token{}).Where("id = ?", id).Updates(map[string]any{"remain_quota": gorm.Expr("remain_quota + ?", delta), "used_quota": gorm.Expr("used_quota - ?", delta), "accessed_time": common.GetTimestamp()}).Error; err != nil {
-			return err
-		}
+	s.invalidateTokenQuotaProjection(key)
+	result := s.db.WithContext(ctx).Model(&entity.Token{}).Where("id = ?", id).Updates(map[string]any{"remain_quota": gorm.Expr("remain_quota + ?", delta), "used_quota": gorm.Expr("used_quota - ?", delta), "accessed_time": common.GetTimestamp()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
 	}
 	if err := s.PublishTokenDelta(context.WithoutCancel(ctx), id, key, int64(delta)); err != nil {
 		common.SysLog("failed to adjust token quota cache: " + err.Error())
@@ -119,23 +152,39 @@ func (s *Store) RecordUsage(ctx context.Context, id, quota, requests int) error 
 		return err
 	}
 	if s.deps.BatchEnabled() {
-		s.addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
-		if requests != 0 {
-			s.addNewRecord(BatchUpdateTypeRequestCount, id, requests)
+		deltas := make([]quotaBatchDelta, 0, 2)
+		if quota != 0 {
+			deltas = append(deltas, quotaBatchDelta{UpdateType: BatchUpdateTypeUsedQuota, EntityID: id, Delta: quota})
 		}
-		return nil
+		if requests != 0 {
+			deltas = append(deltas, quotaBatchDelta{UpdateType: BatchUpdateTypeRequestCount, EntityID: id, Delta: requests})
+		}
+		return s.enqueueBatchDeltas(ctx, deltas)
 	}
 	return s.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Updates(map[string]any{"used_quota": gorm.Expr("used_quota + ?", quota), "request_count": gorm.Expr("request_count + ?", requests)}).Error
 }
 
-// QueueChannelUsage joins channel accounting to the same transaction as wallet,
-// token and user usage deltas. False asks the channel module to write directly.
-func (s *Store) QueueChannelUsage(id, quota int) bool {
-	if !s.deps.BatchEnabled() {
-		return false
+// RecordChannelUsage persists channel usage. Batch mode places the statistic
+// in the durable outbox; otherwise it is updated directly in PostgreSQL. Both
+// branches return write errors so callers never retry through a second path.
+func (s *Store) RecordChannelUsage(ctx context.Context, id, quota int) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	s.addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)
-	return true
+	if quota == 0 {
+		return nil
+	}
+	if s.deps.BatchEnabled() {
+		return s.addNewRecord(ctx, BatchUpdateTypeChannelUsedQuota, id, quota)
+	}
+	result := s.db.WithContext(ctx).Table("channels").Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeltaUpdateUserQuota(ctx context.Context, id, delta int) error {

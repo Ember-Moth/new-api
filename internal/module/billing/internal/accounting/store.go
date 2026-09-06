@@ -16,15 +16,12 @@ type Dependencies struct {
 	BatchEnabled func() bool
 }
 type Store struct {
-	db                *gorm.DB
-	deps              Dependencies
-	batchUpdateStores []map[int]int
-	batchUpdateLocks  []sync.Mutex
-	batchFlushMutex   sync.Mutex
-	pendingQuotaBatch *quotaBatch
-	workerMu          sync.Mutex
-	cancel            context.CancelFunc
-	done              chan struct{}
+	db              *gorm.DB
+	deps            Dependencies
+	batchFlushMutex sync.Mutex
+	workerMu        sync.Mutex
+	cancel          context.CancelFunc
+	done            chan struct{}
 }
 
 func New(deps Dependencies) *Store {
@@ -34,12 +31,7 @@ func New(deps Dependencies) *Store {
 	if deps.BatchEnabled == nil {
 		deps.BatchEnabled = func() bool { return false }
 	}
-	s := &Store{db: deps.DB, deps: deps}
-	for range BatchUpdateTypeCount {
-		s.batchUpdateStores = append(s.batchUpdateStores, make(map[int]int))
-		s.batchUpdateLocks = append(s.batchUpdateLocks, sync.Mutex{})
-	}
-	return s
+	return &Store{db: deps.DB, deps: deps}
 }
 
 func (s *Store) Start(ctx context.Context, interval time.Duration) {
@@ -62,7 +54,7 @@ func (s *Store) Start(ctx context.Context, interval time.Duration) {
 			case <-runCtx.Done():
 				return
 			case <-timer.C:
-				_ = s.batchUpdate(runCtx)
+				_ = s.Flush(runCtx)
 			}
 		}
 	}()

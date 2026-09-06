@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -92,7 +92,7 @@ func TestTryReserveQuotaWithoutRedis(t *testing.T) {
 	assert.Equal(t, 55, getTokenFromDB(t, token.Id).RemainQuota)
 }
 
-func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
+func TestBatchReserveUsesPostgresAuthoritativeBalance(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	useUserCacheMiniRedis(t)
@@ -102,7 +102,7 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	reserved, err := TryReserveUserQuota(user.Id, 8)
 	require.NoError(t, err)
 	assert.True(t, reserved)
-	assert.Equal(t, 10, getUserQuotaFromDB(t, user.Id), "batch delta is not flushed yet")
+	assert.Equal(t, 2, getUserQuotaFromDB(t, user.Id), "the durable reservation is committed before cache publication")
 
 	reserved, err = TryReserveUserQuota(user.Id, 3)
 	require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 3, false)
 	require.NoError(t, err)
 	assert.False(t, reserved)
-	assert.Equal(t, 9, getTokenFromDB(t, token.Id).RemainQuota)
+	assert.Equal(t, 2, getTokenFromDB(t, token.Id).RemainQuota)
 
 	require.NoError(t, FlushQuotaUpdates())
 	assert.Equal(t, 2, getUserQuotaFromDB(t, user.Id))
@@ -127,7 +127,7 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	assert.Equal(t, 7, reloadedToken.UsedQuota)
 }
 
-func TestCachedQuotaScriptReloadKeepsBalanceAfterScriptCacheFlush(t *testing.T) {
+func TestReserveKeepsBalanceAfterCacheScriptFlush(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	useUserCacheMiniRedis(t)
@@ -145,7 +145,7 @@ func TestCachedQuotaScriptReloadKeepsBalanceAfterScriptCacheFlush(t *testing.T) 
 	assert.Equal(t, 11, getUserQuotaFromDB(t, user.Id))
 }
 
-func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
+func TestReserveUsesDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	server := useUserCacheMiniRedis(t)
@@ -154,7 +154,7 @@ func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	require.NoError(t, populateUserCache(user))
 	server.Close()
 
-	// Redis 故障时降级为数据库条件更新：服务保持可用且不会超扣。
+	// Redis 故障不影响 PostgreSQL-authoritative reservation。
 	reserved, err := TryReserveUserQuota(user.Id, 5)
 	require.NoError(t, err)
 	assert.True(t, reserved)
@@ -166,7 +166,7 @@ func TestReserveFallsBackToDatabaseWhenRedisIsUnavailable(t *testing.T) {
 	assert.Equal(t, 15, getUserQuotaFromDB(t, user.Id))
 }
 
-func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
+func TestReserveFailureInvalidatesProjection(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	useUserCacheMiniRedis(t)
@@ -178,9 +178,8 @@ func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
 	reserved, err := TryReserveUserQuota(user.Id, 6)
 	assert.False(t, reserved)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
-	cached, cacheErr := cacheGetUserBase(user.Id)
-	require.NoError(t, cacheErr)
-	assert.Equal(t, 10, cached.Quota)
+	_, cacheErr := cacheGetUserBase(user.Id)
+	assert.Error(t, cacheErr, "failed durable reservation invalidates the projection")
 
 	token := createReserveTestToken(t, 12)
 	_, err = GetTokenByKey(token.Key, true)
@@ -189,13 +188,11 @@ func TestSynchronousReserveCompensatesCacheWhenPersistenceFails(t *testing.T) {
 	reserved, err = TryReserveTokenQuota(token.Id, token.Key, 7, false)
 	assert.False(t, reserved)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
-	cachedToken, cacheErr := tokencache.New(DB).Cached(token.Key)
-	require.NoError(t, cacheErr)
-	assert.Equal(t, 12, cachedToken.RemainQuota)
-	assert.Zero(t, cachedToken.UsedQuota)
+	_, cacheErr = tokencache.New(DB).Cached(token.Key)
+	assert.Error(t, cacheErr, "failed durable reservation invalidates the projection")
 }
 
-func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.T) {
+func TestTokenCacheInvalidationFencesStaleSnapshot(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
 	server := useUserCacheMiniRedis(t)
@@ -205,31 +202,23 @@ func TestTokenCacheInitPreservesLiveQuotaAndFenceBlocksStaleSnapshot(t *testing.
 	require.NoError(t, err)
 	stale := *loaded
 
-	err = AccountingStore().PublishTokenDelta(t.Context(), token.Id, token.Key, -70)
-	require.NoError(t, err)
+	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 70))
 
-	// 已存在的哈希只刷新 TTL：数据库快照不得覆盖已被原子预扣的余额。
+	// A committed balance mutation invalidates the hash and fences a stale
+	// snapshot until the cache can safely hydrate the new database balance.
 	code, err := tokencache.New(DB).Initialize(stale)
 	require.NoError(t, err)
-	assert.Equal(t, 2, code)
-	cached, err := tokencache.New(DB).Cached(token.Key)
-	require.NoError(t, err)
-	assert.Equal(t, 30, cached.RemainQuota)
-
-	// 变更期间：fence 删除缓存并拦截并发读者手中的过期快照。
-	require.NoError(t, InvalidateTokenCacheForMutation(token.Key))
-	code, err = tokencache.New(DB).Initialize(stale)
-	require.NoError(t, err)
-	assert.Zero(t, code, "the pre-mutation snapshot must not be published while fenced")
+	assert.Zero(t, code)
 	_, err = tokencache.New(DB).Cached(token.Key)
 	assert.Error(t, err)
 
-	// fence 过期后可重新从数据库水合。
+	// After the fence expires, a read hydrates the committed PostgreSQL value.
 	server.FastForward(time.Duration(tokencache.FenceSeconds+1) * time.Second)
 	fresh, err := GetTokenByKey(token.Key, false)
 	require.NoError(t, err)
-	assert.Equal(t, 100, fresh.RemainQuota)
-	cached, err = tokencache.New(DB).Cached(token.Key)
+	assert.Equal(t, 30, fresh.RemainQuota)
+	assert.Equal(t, 70, fresh.UsedQuota)
+	cached, err := tokencache.New(DB).Cached(token.Key)
 	require.NoError(t, err)
-	assert.Equal(t, 100, cached.RemainQuota)
+	assert.Equal(t, 30, cached.RemainQuota)
 }

@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -656,18 +657,19 @@ func (r *Runtime) EditChannelByTag(tag string, newTag *string, modelMapping *str
 	})
 }
 
-func (r *Runtime) UpdateChannelUsedQuota(id, quota int) {
-	if r.queueQuota != nil && r.queueQuota(id, quota) {
-		return
+func (r *Runtime) UpdateChannelUsedQuota(ctx context.Context, id, quota int) error {
+	if r.queueQuota != nil {
+		return r.queueQuota(ctx, id, quota)
 	}
-	r.updateChannelUsedQuota(id, quota)
+	return r.updateChannelUsedQuota(ctx, id, quota)
 }
 
-func (r *Runtime) updateChannelUsedQuota(id int, quota int) {
-	err := r.db.Model(&Channel{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error
+func (r *Runtime) updateChannelUsedQuota(ctx context.Context, id int, quota int) error {
+	err := r.db.WithContext(ctx).Model(&Channel{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, quota, err))
 	}
+	return err
 }
 
 func (r *Runtime) DeleteChannelByStatus(status int64) (int64, error) {

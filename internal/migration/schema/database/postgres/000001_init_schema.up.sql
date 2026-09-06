@@ -745,4 +745,18 @@ CREATE TABLE quota_batch_receipts (
     applied_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE quota_batch_deliveries (
+    id uuid PRIMARY KEY,
+    update_type smallint NOT NULL,
+    entity_id bigint NOT NULL,
+    delta bigint NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT quota_batch_deliveries_update_type_check CHECK (update_type BETWEEN 0 AND 4),
+    CONSTRAINT quota_batch_deliveries_entity_id_check CHECK (entity_id > 0),
+    CONSTRAINT quota_batch_deliveries_delta_check CHECK (delta <> 0)
+);
+
+CREATE INDEX idx_quota_batch_deliveries_created_at
+    ON quota_batch_deliveries USING btree (created_at, id);
+
 COMMIT;

@@ -207,6 +207,9 @@ func Run(assets router.WebAssets) {
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
 		common.SysLog("batch update enabled with interval " + strconv.Itoa(common.BatchUpdateInterval) + "s")
+	}
+	// Controls drain durable deliveries even when their own requests use direct updates.
+	if common.IsControlPlane {
 		ledger.Start(runCtx, time.Duration(common.BatchUpdateInterval)*time.Second)
 	}
 

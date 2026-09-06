@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -32,7 +33,7 @@ type Runtime struct {
 	snapshotAbilities            []Ability
 	db                           *gorm.DB
 	changed                      func()
-	queueQuota                   func(int, int) bool
+	queueQuota                   func(context.Context, int, int) error
 	channelStatusLock            sync.Mutex
 	channelKeyLocks              sync.Map
 	fixLock                      sync.Mutex
@@ -44,7 +45,7 @@ type Runtime struct {
 	taskAliasRebuildMu           sync.Mutex
 }
 
-func New(db *gorm.DB, changed func(), queueQuota func(int, int) bool, configs ...SnapshotConfig) *Runtime {
+func New(db *gorm.DB, changed func(), queueQuota func(context.Context, int, int) error, configs ...SnapshotConfig) *Runtime {
 	if changed == nil {
 		changed = func() {}
 	}

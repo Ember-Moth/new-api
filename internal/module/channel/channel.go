@@ -39,7 +39,7 @@ type Dependencies struct {
 	DB                *gorm.DB
 	Pricing           CatalogPricing
 	RoutingChanged    func()
-	QueueUsedQuota    func(int, int) bool
+	QueueUsedQuota    func(context.Context, int, int) error
 	Providers         ProviderRequests
 	DisableChannel    func(types.ChannelError, string)
 	NotifyModelUpdate func(string, string)
