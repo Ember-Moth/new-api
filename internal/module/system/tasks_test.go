@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/system"
@@ -39,7 +42,9 @@ func TestLogCleanupManagementCompletesOnClickHouse(t *testing.T) {
 	} {
 		require.NoError(t, logDB.Create(&record).Error)
 	}
-	tasks := system.New(system.Dependencies{DB: database, NodeName: "cleanup-test", Master: true, Logs: system.LogOperations{Count: model.CountOldLog, DeleteBatch: model.DeleteOldLogBatch}})
+	cache := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { require.NoError(t, cache.Close()) })
+	tasks := system.New(system.Dependencies{Cache: cache, DB: database, NodeName: "cleanup-test", Master: true, Logs: system.LogOperations{Count: model.CountOldLog, DeleteBatch: model.DeleteOldLogBatch}})
 	handler := systemhttp.New(tasks)
 	router := gin.New()
 	router.POST("/tasks/cleanup", handler.CreateLogCleanupSystemTask)
@@ -67,8 +72,7 @@ func TestLogCleanupManagementCompletesOnClickHouse(t *testing.T) {
 		if err != nil || completed == nil || completed.Status != system.SystemTaskStatusSucceeded {
 			return false
 		}
-		var locks int64
-		return database.Model(&system.SystemTaskLock{}).Where("task_id = ?", completed.TaskID).Count(&locks).Error == nil && locks == 0
+		return true
 	}, 10*time.Second, 20*time.Millisecond)
 	var state system.LogCleanupState
 	require.NoError(t, completed.DecodeState(&state))

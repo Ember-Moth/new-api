@@ -1384,3 +1384,8 @@ python3 /tmp/verify-new-api-clickhouse-only.py
 ### 第四十七批：节点心跳迁入 DragonflyDB
 
 系统实例注册、读取和离线清理由 DragonflyDB 接管，24 小时自动过期，Lua 保证离线删除与心跳更新的原子性。PostgreSQL 初始 schema 移除节点状态表和索引，应用启动要求共享 DragonflyDB。原节点回归迁入真实 DragonflyDB 集成套件；新库两角色各两轮启动、业务数据保留、节点缓存 TTL 与主库无节点状态表验证通过。执行租约、短期流程、配置发布和可靠结算继续推进。
+
+
+### 第四十八批：系统任务执行租约迁入 DragonflyDB
+
+按任务类型的 TTL 租约、续期和持有者校验改为 DragonflyDB，移除 PostgreSQL `system_task_locks` 表及模型。任务执行历史、完成结果和执行者记录仍持久化，并通过行锁与租约检查防止旧执行者覆盖结果。真实 DragonflyDB/PostgreSQL 并发、到期、故障保护回归及新库双角色两轮启动验证见 [控制面与数据面拆分](control-data-plane.md)。后续继续短期流程、配置发布与可靠结算。

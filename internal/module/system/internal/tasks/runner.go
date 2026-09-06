@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +19,7 @@ type LogOperations struct {
 	DeleteBatch func(context.Context, int64, int) (int64, error)
 }
 type Dependencies struct {
+	Cache    *redis.Client
 	DB       *gorm.DB
 	NodeName string
 	Master   bool
@@ -35,7 +37,7 @@ type Runtime struct {
 }
 
 func New(deps Dependencies) *Runtime {
-	r := &Runtime{Store: &Store{db: deps.DB}, handlers: make(map[string]SystemTaskHandler), wakeup: make(chan struct{}, 1), nodeName: deps.NodeName, master: deps.Master, logs: deps.Logs}
+	r := &Runtime{Store: &Store{db: deps.DB, cache: deps.Cache}, handlers: make(map[string]SystemTaskHandler), wakeup: make(chan struct{}, 1), nodeName: deps.NodeName, master: deps.Master, logs: deps.Logs}
 	r.RegisterSystemTaskHandler(logCleanupHandler{runtime: r})
 	return r
 }
@@ -202,7 +204,9 @@ func (r *Runtime) runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		if task == nil {
 			continue
 		}
-		claimedTask, claimed, err := r.ClaimSystemTask(ctx, task.ID, handler.Type(), runnerID, systemTaskLockUntil())
+		// Each claim attempt has a unique owner even when the same process retries.
+		owner := common.GetRandomString(32)
+		claimedTask, claimed, err := r.ClaimSystemTask(ctx, task.ID, handler.Type(), owner, systemTaskLockUntil())
 		if err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("system task claim failed: %v", err))
 			continue
@@ -210,11 +214,12 @@ func (r *Runtime) runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		if !claimed {
 			continue
 		}
+		logger.LogDebug(ctx, "system task claimed: runner=%s task=%s owner=%s", runnerID, task.TaskID, owner)
 		dispatchHandler := handler
 		dispatchTask := claimedTask
 		gopool.Go(func() {
-			r.runWithLeaseHeartbeat(ctx, dispatchTask, runnerID, func(ctx context.Context) {
-				dispatchHandler.Run(ctx, dispatchTask, runnerID)
+			r.runWithLeaseHeartbeat(ctx, dispatchTask, owner, func(ctx context.Context) {
+				dispatchHandler.Run(ctx, dispatchTask, owner)
 			})
 		})
 	}

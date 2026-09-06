@@ -63,3 +63,24 @@ python3 /tmp/verify-new-api-planes.py
 两角色再次在新建数据库上各启动两轮，确认 PostgreSQL 无节点状态表、DragonflyDB 上报与 TTL 正常，缺少 DragonflyDB 配置在迁移前被拒绝，业务数据和 ClickHouse 日志重启保留。日志位于 `/tmp/new-api-instance-{tests,full-tests,build,vet,startup}.log`。
 
 下一批继续迁移执行租约和短期认证流程；配置版本发布与可靠结算尚未完成。
+
+## 第三批：系统任务执行租约迁入 DragonflyDB
+
+系统任务按类型使用 DragonflyDB TTL 租约，领取使用 SET NX，续期和释放使用 Lua 校验任务与执行者。每次调度尝试生成独立执行者标识。PostgreSQL 初始 schema 移除 `system_task_locks` 表及索引；任务请求、执行历史、完成结果与执行者标识仍作为业务事实持久化。
+
+任务进度/完成提交与过期恢复持有同一任务行锁，并验证 DragonflyDB 租约；过期或外来执行者不能覆盖结果。SQL 领取失败会尝试释放自身缓存租约，清理失败则等待 TTL 到期。缓存故障会阻止领取、续期、提交以及过期判定，不会回退到无锁执行。失联任务目前保留明确失败记录；安全自动重试及外部副作用幂等仍属第四阶段，不能把这一批视为全部后台任务的 exactly-once 保证。
+
+实际验证使用 PostgreSQL 18.6 (Homebrew)、ClickHouse 26.9.1.762、DragonflyDB df-v1.40.2，DSN 同上文：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+真实 DragonflyDB + PostgreSQL 回归覆盖并发领取唯一执行者、续期、外来释放不影响持有者、TTL 到期、旧执行者更新/完成被拒绝、过期恢复解除活动任务限制、旧租约释放不影响新任务、缓存不可用时禁止提交。PostgreSQL 事务回归覆盖领取写入失败后的缓存租约释放。新库两角色两轮启动确认不再创建节点或租约表，业务数据、任务主表及 ClickHouse 日志初始化正常。
+
+输出记录：`/tmp/new-api-lease-{tests,dragonfly,regression,full-tests,build,vet,startup}.log`。独立 Nginx/容器入口验证仍待补；短期认证状态、配置发布、计费可靠交付及其他维护任务统一调度仍未完成。

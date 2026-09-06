@@ -381,7 +381,7 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 
 func TestDetectAllChannelUpstreamModelUpdatesRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&system.SystemTask{}, &system.SystemTaskLock{}))
+	require.NoError(t, db.AutoMigrate(&system.SystemTask{}))
 
 	tasks := system.New(system.Dependencies{DB: db})
 	existing, err := tasks.CreateSystemTask(t.Context(), system.SystemTaskTypeModelUpdate, nil, nil)

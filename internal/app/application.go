@@ -202,7 +202,7 @@ func Run(assets router.WebAssets) {
 
 	// Register the periodic channel test, upstream model update, and async task
 	// polling (Midjourney / Suno / video) jobs as scheduled system tasks
-	// (DB-lease dedup across control nodes + run history), then start the runner that
+	// (DragonflyDB leases across control nodes + durable run history), then start the runner that
 	// schedules and executes them. Control-plane-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	logService := usage.New(usage.Dependencies{Performance: performance, RankingMetadata: rankingModelMetadata, Aggregates: aggregates, DB: model.LOG_DB, ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})

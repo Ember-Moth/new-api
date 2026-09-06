@@ -33,6 +33,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,6 +79,84 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("system task leases fence competing workers and recover expired executions", func(t *testing.T) {
+		first := system.New(system.Dependencies{DB: database, Cache: client})
+		second := system.New(system.Dependencies{DB: database, Cache: client})
+		const taskType = "dragonfly_task_contract"
+		const leaseKey = "system:task-lease:" + taskType
+		t.Cleanup(func() { require.NoError(t, client.Del(context.Background(), leaseKey).Err()) })
+		assert.False(t, database.Migrator().HasTable("system_task_locks"))
+		task, err := first.CreateSystemTask(t.Context(), taskType, map[string]int{"target": 42}, nil)
+		require.NoError(t, err)
+		type outcome struct {
+			owner   string
+			claimed bool
+			err     error
+		}
+		results := make(chan outcome, 2)
+		start := make(chan struct{})
+		for owner, worker := range map[string]*system.Service{"node-a": first, "node-b": second} {
+			go func() {
+				<-start
+				_, claimed, err := worker.ClaimSystemTask(t.Context(), task.ID, task.Type, owner, common.GetTimestamp()+60)
+				results <- outcome{owner, claimed, err}
+			}()
+		}
+		close(start)
+		owner := ""
+		winners := 0
+		for range 2 {
+			result := <-results
+			require.NoError(t, result.err)
+			if result.claimed {
+				owner = result.owner
+				winners++
+			}
+		}
+		require.Equal(t, 1, winners)
+		require.NoError(t, first.RenewSystemTaskLock(t.Context(), task.TaskID, owner, common.GetTimestamp()+120))
+		ttl, err := client.PTTL(t.Context(), leaseKey).Result()
+		require.NoError(t, err)
+		assert.InDelta(t, 120, ttl.Seconds(), 2)
+		assert.ErrorIs(t, second.RenewSystemTaskLock(t.Context(), task.TaskID, "foreign", common.GetTimestamp()+600), system.ErrSystemTaskLockLost)
+		require.NoError(t, second.ReleaseSystemTaskLock(t.Context(), task.TaskID, "foreign"))
+		require.NoError(t, first.UpdateSystemTaskState(t.Context(), task.TaskID, owner, map[string]int{"processed": 1}))
+		require.NoError(t, first.ExpireStaleSystemTaskLocks(t.Context(), common.GetTimestamp()))
+		running, err := first.GetSystemTaskByTaskID(t.Context(), task.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, system.SystemTaskStatusRunning, running.Status)
+		unavailable := redis.NewClient(client.Options())
+		require.NoError(t, unavailable.Close())
+		offline := system.New(system.Dependencies{DB: database, Cache: unavailable})
+		require.Error(t, offline.ExpireStaleSystemTaskLocks(t.Context(), common.GetTimestamp()))
+		require.Error(t, offline.FinishSystemTask(t.Context(), task.TaskID, owner, system.SystemTaskStatusSucceeded, nil, ""))
+		require.Error(t, offline.RenewSystemTaskLock(t.Context(), task.TaskID, owner, common.GetTimestamp()+60))
+		running, err = first.GetSystemTaskByTaskID(t.Context(), task.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, system.SystemTaskStatusRunning, running.Status)
+		require.NoError(t, client.PExpireAt(t.Context(), leaseKey, time.Unix(1, 0)).Err())
+		assert.ErrorIs(t, first.RenewSystemTaskLock(t.Context(), task.TaskID, owner, common.GetTimestamp()+60), system.ErrSystemTaskLockLost)
+		assert.ErrorIs(t, first.UpdateSystemTaskState(t.Context(), task.TaskID, owner, map[string]int{"processed": 999}), system.ErrSystemTaskLockLost)
+		assert.ErrorIs(t, first.FinishSystemTask(t.Context(), task.TaskID, owner, system.SystemTaskStatusSucceeded, nil, ""), system.ErrSystemTaskLockLost)
+		require.NoError(t, second.ExpireStaleSystemTaskLocks(t.Context(), common.GetTimestamp()))
+		expired, err := first.GetSystemTaskByTaskID(t.Context(), task.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, system.SystemTaskStatusFailed, expired.Status)
+		assert.Nil(t, expired.ActiveKey)
+		var state map[string]int
+		require.NoError(t, expired.DecodeState(&state))
+		assert.Equal(t, 1, state["processed"])
+		next, err := second.CreateSystemTask(t.Context(), taskType, nil, nil)
+		require.NoError(t, err)
+		_, claimed, err := second.ClaimSystemTask(t.Context(), next.ID, next.Type, "replacement", common.GetTimestamp()+60)
+		require.NoError(t, err)
+		require.True(t, claimed)
+		require.NoError(t, first.ReleaseSystemTaskLock(t.Context(), task.TaskID, owner))
+		require.NoError(t, second.RenewSystemTaskLock(t.Context(), next.TaskID, "replacement", common.GetTimestamp()+60))
+		require.NoError(t, second.FinishSystemTask(t.Context(), next.TaskID, "replacement", system.SystemTaskStatusSucceeded, map[string]bool{"completed": true}, ""))
+		assert.ErrorIs(t, first.FinishSystemTask(t.Context(), task.TaskID, owner, system.SystemTaskStatusSucceeded, nil, ""), system.ErrSystemTaskLockLost)
+	})
 
 	t.Run("instance heartbeats and guarded stale deletion", func(t *testing.T) {
 		cpuUsage := 12.5

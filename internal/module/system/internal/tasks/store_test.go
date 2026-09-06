@@ -2,6 +2,10 @@ package tasks
 
 import (
 	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
 
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/testdb"
@@ -25,7 +29,7 @@ type testSystemTaskState struct {
 	Remaining int64 `json:"remaining"`
 }
 
-func createLegacyPendingSystemTask(t *testing.T, r *Runtime, taskType string) *SystemTask {
+func createPendingSystemTaskWithoutActiveKey(t *testing.T, r *Runtime, taskType string) *SystemTask {
 	t.Helper()
 	taskID, err := GenerateSystemTaskID()
 	require.NoError(t, err)
@@ -99,7 +103,7 @@ func TestSystemTaskLockPreventsConcurrentClaim(t *testing.T) {
 	payload := testSystemTaskPayload{TargetTimestamp: 1000, BatchSize: 100}
 	task, err := r.CreateSystemTask(t.Context(), SystemTaskTypeLogCleanup, payload, testSystemTaskState{})
 	require.NoError(t, err)
-	secondTask := createLegacyPendingSystemTask(t, r, SystemTaskTypeLogCleanup)
+	secondTask := createPendingSystemTaskWithoutActiveKey(t, r, SystemTaskTypeLogCleanup)
 
 	claimedTask, claimed, err := r.ClaimSystemTask(t.Context(), task.ID, SystemTaskTypeLogCleanup, "runner-a", common.GetTimestamp()+60)
 	require.NoError(t, err)
@@ -117,15 +121,10 @@ func TestSystemTaskLockPreventsConcurrentClaim(t *testing.T) {
 	assert.Equal(t, SystemTaskStatusPending, reloadedSecond.Status)
 }
 
-func TestSystemTaskClaimFailureRestoresExpiredLeaseAndPreviousTask(t *testing.T) {
+func TestSystemTaskClaimFailureReleasesLeaseAndKeepsTaskPending(t *testing.T) {
 	r := newTaskFixture(t)
-	first, err := r.CreateSystemTask(t.Context(), SystemTaskTypeLogCleanup, nil, nil)
+	task, err := r.CreateSystemTask(t.Context(), SystemTaskTypeLogCleanup, nil, nil)
 	require.NoError(t, err)
-	_, claimed, err := r.ClaimSystemTask(t.Context(), first.ID, first.Type, "runner-a", common.GetTimestamp()+60)
-	require.NoError(t, err)
-	require.True(t, claimed)
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).Where("type = ?", first.Type).Update("locked_until", common.GetTimestamp()-1).Error)
-	second := createLegacyPendingSystemTask(t, r, first.Type)
 	require.NoError(t, r.db.Exec(`
 CREATE FUNCTION test_fail_task_claim() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -138,19 +137,15 @@ $$;
 CREATE TRIGGER test_fail_task_claim BEFORE UPDATE ON system_tasks
 FOR EACH ROW EXECUTE FUNCTION test_fail_task_claim();`).Error)
 	t.Cleanup(func() { require.NoError(t, r.db.Exec("DROP FUNCTION test_fail_task_claim() CASCADE").Error) })
-	_, claimed, err = r.ClaimSystemTask(t.Context(), second.ID, second.Type, "runner-b", common.GetTimestamp()+60)
+	_, claimed, err := r.ClaimSystemTask(t.Context(), task.ID, task.Type, "runner-b", common.GetTimestamp()+60)
 	require.Error(t, err)
 	assert.False(t, claimed)
-	var lease SystemTaskLock
-	require.NoError(t, r.db.Where("type = ?", first.Type).Take(&lease).Error)
-	assert.Equal(t, first.TaskID, lease.TaskID)
-	assert.Equal(t, "runner-a", lease.LockedBy)
-	previous, err := r.GetSystemTaskByTaskID(t.Context(), first.TaskID)
+	pending, err := r.GetSystemTaskByTaskID(t.Context(), task.TaskID)
 	require.NoError(t, err)
-	assert.Equal(t, SystemTaskStatusRunning, previous.Status)
-	next, err := r.GetSystemTaskByTaskID(t.Context(), second.TaskID)
+	assert.Equal(t, SystemTaskStatusPending, pending.Status)
+	_, claimed, err = r.ClaimSystemTask(t.Context(), task.ID, task.Type, "runner-c", common.GetTimestamp()+60)
 	require.NoError(t, err)
-	assert.Equal(t, SystemTaskStatusPending, next.Status)
+	assert.True(t, claimed, "failed SQL claim must release its cache lease")
 }
 
 func TestSystemTaskParallelClaimHasOneOwner(t *testing.T) {
@@ -187,7 +182,7 @@ func TestSystemTaskParallelClaimHasOneOwner(t *testing.T) {
 	assert.Equal(t, 1, winners)
 }
 
-func TestExpiredSystemTaskLockFailsOldRunAndClaimsLegacyPendingRun(t *testing.T) {
+func TestExpiredSystemTaskLockRecoveryAllowsPendingRun(t *testing.T) {
 	r := newTaskFixture(t)
 
 	first, err := r.CreateSystemTask(t.Context(), SystemTaskTypeLogCleanup, nil, nil)
@@ -196,11 +191,10 @@ func TestExpiredSystemTaskLockFailsOldRunAndClaimsLegacyPendingRun(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).
-		Where("task_id = ?", first.TaskID).
-		Update("locked_until", common.GetTimestamp()-1).Error)
+	require.NoError(t, r.cache.PExpireAt(t.Context(), taskLeasePrefix+first.Type, time.Unix(1, 0)).Err())
 
-	second := createLegacyPendingSystemTask(t, r, SystemTaskTypeLogCleanup)
+	require.NoError(t, r.ExpireStaleSystemTaskLocks(t.Context(), common.GetTimestamp()))
+	second := createPendingSystemTaskWithoutActiveKey(t, r, SystemTaskTypeLogCleanup)
 	claimedTask, claimed, err := r.ClaimSystemTask(t.Context(), second.ID, SystemTaskTypeLogCleanup, "runner-b", common.GetTimestamp()+60)
 	require.NoError(t, err)
 	require.True(t, claimed)
@@ -224,9 +218,7 @@ func TestExpireStaleSystemTaskLockFailsOldRunAndAllowsNewRun(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).
-		Where("task_id = ?", first.TaskID).
-		Update("locked_until", common.GetTimestamp()-1).Error)
+	require.NoError(t, r.cache.PExpireAt(t.Context(), taskLeasePrefix+first.Type, time.Unix(1, 0)).Err())
 
 	require.NoError(t, r.ExpireStaleSystemTaskLocks(t.Context(), common.GetTimestamp()))
 
@@ -237,9 +229,9 @@ func TestExpireStaleSystemTaskLockFailsOldRunAndAllowsNewRun(t *testing.T) {
 	assert.Equal(t, "task lease expired", reloadedFirst.Error)
 	assert.Nil(t, reloadedFirst.ActiveKey)
 
-	var lockCount int64
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).Where("task_id = ?", first.TaskID).Count(&lockCount).Error)
-	assert.Equal(t, int64(0), lockCount)
+	count, err := r.cache.Exists(t.Context(), taskLeasePrefix+SystemTaskTypeLogCleanup).Result()
+	require.NoError(t, err)
+	assert.Zero(t, count)
 
 	second, err := r.CreateSystemTask(t.Context(), SystemTaskTypeLogCleanup, nil, nil)
 	require.NoError(t, err)
@@ -345,9 +337,9 @@ func TestRenewSystemTaskLock(t *testing.T) {
 	newLockUntil := common.GetTimestamp() + 600
 	require.NoError(t, r.RenewSystemTaskLock(t.Context(), task.TaskID, runnerID, newLockUntil))
 
-	var lock SystemTaskLock
-	require.NoError(t, r.db.Where("task_id = ?", task.TaskID).First(&lock).Error)
-	assert.Equal(t, newLockUntil, lock.LockedUntil)
+	ttl, err := r.cache.PTTL(t.Context(), taskLeasePrefix+task.Type).Result()
+	require.NoError(t, err)
+	assert.InDelta(t, 600, ttl.Seconds(), 2)
 
 	// A different runner cannot renew a lease it does not hold.
 	assert.ErrorIs(t, r.RenewSystemTaskLock(t.Context(), task.TaskID, "runner-b", common.GetTimestamp()+600), ErrSystemTaskLockLost)
@@ -376,9 +368,9 @@ func TestFinishSystemTaskRetainsExecutor(t *testing.T) {
 	assert.Equal(t, SystemTaskStatusSucceeded, reloaded.Status)
 	assert.Equal(t, runnerID, reloaded.LockedBy, "executor-of-record must be retained for history")
 
-	var lockCount int64
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).Where("task_id = ?", task.TaskID).Count(&lockCount).Error)
-	assert.Equal(t, int64(0), lockCount)
+	count, err := r.cache.Exists(t.Context(), taskLeasePrefix+SystemTaskTypeLogCleanup).Result()
+	require.NoError(t, err)
+	assert.Zero(t, count)
 }
 
 func TestSystemTaskUpdatesRequireCurrentLock(t *testing.T) {
@@ -392,9 +384,7 @@ func TestSystemTaskUpdatesRequireCurrentLock(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).
-		Where("task_id = ?", task.TaskID).
-		Updates(map[string]any{"locked_by": "runner-b"}).Error)
+	require.NoError(t, r.cache.Set(t.Context(), taskLeasePrefix+task.Type, task.TaskID+":runner-b", time.Minute).Err())
 
 	assert.ErrorIs(t, r.UpdateSystemTaskState(t.Context(), task.TaskID, runnerID, testSystemTaskState{Progress: 10}), ErrSystemTaskLockLost)
 	assert.ErrorIs(t, r.FinishSystemTask(t.Context(), task.TaskID, runnerID, SystemTaskStatusSucceeded, nil, ""), ErrSystemTaskLockLost)
@@ -411,9 +401,7 @@ func TestSystemTaskUpdatesRequireUnexpiredLock(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	require.NoError(t, r.db.Model(&SystemTaskLock{}).
-		Where("task_id = ?", task.TaskID).
-		Update("locked_until", common.GetTimestamp()-1).Error)
+	require.NoError(t, r.cache.PExpireAt(t.Context(), taskLeasePrefix+task.Type, time.Unix(1, 0)).Err())
 
 	assert.ErrorIs(t, r.UpdateSystemTaskState(t.Context(), task.TaskID, runnerID, testSystemTaskState{Progress: 10}), ErrSystemTaskLockLost)
 	assert.ErrorIs(t, r.FinishSystemTask(t.Context(), task.TaskID, runnerID, SystemTaskStatusSucceeded, nil, ""), ErrSystemTaskLockLost)
@@ -461,5 +449,7 @@ func newTaskFixture(t *testing.T) *Runtime {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
-	return New(Dependencies{DB: db, Master: true, NodeName: "test-runner"})
+	cache := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { require.NoError(t, cache.Close()) })
+	return New(Dependencies{Cache: cache, DB: db, Master: true, NodeName: "test-runner"})
 }

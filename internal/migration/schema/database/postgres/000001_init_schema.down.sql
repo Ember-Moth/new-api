@@ -14,7 +14,6 @@ DROP TABLE tokens;
 DROP TABLE tasks;
 DROP TABLE task_plugins;
 DROP TABLE system_tasks;
-DROP TABLE system_task_locks;
 DROP TABLE subscription_pre_consume_records;
 DROP TABLE subscription_plans;
 DROP TABLE subscription_orders;

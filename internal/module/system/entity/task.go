@@ -39,14 +39,6 @@ type SystemTask struct {
 	UpdatedAt int64            `json:"updated_at" gorm:"bigint;index"`
 }
 
-type SystemTaskLock struct {
-	Type        string `json:"type" gorm:"type:varchar(64);primaryKey"`
-	TaskID      string `json:"task_id" gorm:"type:varchar(64);index"`
-	LockedBy    string `json:"locked_by" gorm:"type:varchar(128);index"`
-	LockedUntil int64  `json:"locked_until" gorm:"bigint;index"`
-	UpdatedAt   int64  `json:"updated_at" gorm:"bigint;index"`
-}
-
 type SystemTaskResponse struct {
 	ID        int64            `json:"id"`
 	TaskID    string           `json:"task_id"`
@@ -69,13 +61,6 @@ func (task *SystemTask) BeforeCreate(_ *gorm.DB) error {
 	}
 	if task.UpdatedAt == 0 {
 		task.UpdatedAt = now
-	}
-	return nil
-}
-
-func (lock *SystemTaskLock) BeforeCreate(_ *gorm.DB) error {
-	if lock.UpdatedAt == 0 {
-		lock.UpdatedAt = common.GetTimestamp()
 	}
 	return nil
 }

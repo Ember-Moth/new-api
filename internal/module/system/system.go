@@ -37,7 +37,6 @@ type LogCleanupState = implementation.LogCleanupState
 type LogCleanupResult = implementation.LogCleanupResult
 type SystemTaskProgress = implementation.SystemTaskProgress
 type SystemTask = entity.SystemTask
-type SystemTaskLock = entity.SystemTaskLock
 type SystemTaskStatus = entity.SystemTaskStatus
 type SystemTaskResponse = entity.SystemTaskResponse
 
@@ -63,7 +62,7 @@ func New(deps Dependencies) *Service {
 	registry := instances.NewRegistry(deps.Cache)
 	return &Service{
 		Manager:  optionManager,
-		Runtime:  implementation.New(implementation.Dependencies{DB: deps.DB, NodeName: deps.NodeName, Master: deps.Master, Logs: deps.Logs}),
+		Runtime:  implementation.New(implementation.Dependencies{Cache: deps.Cache, DB: deps.DB, NodeName: deps.NodeName, Master: deps.Master, Logs: deps.Logs}),
 		Registry: registry, Reporter: instances.NewReporter(registry, deps.InstanceReport, deps.Master),
 	}
 }
