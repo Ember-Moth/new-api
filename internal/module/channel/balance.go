@@ -15,11 +15,11 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 
 	"github.com/shopspring/decimal"
 )
@@ -534,7 +534,9 @@ func (s *Service) RefreshAllBalances(ctx context.Context) error {
 		} else if result.RawResponse == "" {
 			// err is nil & balance <= 0 means quota is used up
 			if result.Balance <= 0 && s.disable != nil {
-				s.disable(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), "余额不足")
+				channelError := types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan())
+				channelError.KeyPoolFingerprint = ChannelKeyPoolFingerprint(channel)
+				s.disable(*channelError, "余额不足")
 			}
 		}
 		time.Sleep(common.RequestInterval)

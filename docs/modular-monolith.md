@@ -1439,3 +1439,8 @@ OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/�
 ### 第五十八批：账务持久化投递
 
 余额/预扣同步以 PostgreSQL 为权威，缓存改为失效投影；统计批量改用可跨实例接手的事务 outbox，移除 RAM 待写账务。真实数据库故障/并发/重放测试、完整 Go/RelayKit 测试和双角色启动通过。请求级幂等结算及用户缓存版本栅栏仍待后续处理，见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第五十九批：渠道自动状态与请求池隔离
+
+自动停用/恢复及 Key 自动状态放入 DragonflyDB，管理策略保留 PostgreSQL；自动投影不会随编辑写回。请求携带选 Key 时捕获的池指纹，避免迟到结果影响新池。跨客户端真实缓存回归、完整测试、RelayKit 独立构建和双角色重启转发验证通过。详细限制及后续工作见 [控制面与数据面拆分](control-data-plane.md)。

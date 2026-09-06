@@ -96,7 +96,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		t.Cleanup(func() { _ = node.Close() })
 		one := channelmodule.New(channelmodule.Dependencies{Cache: client, ReadOnly: true})
 		two := channelmodule.New(channelmodule.Dependencies{Cache: node, ReadOnly: true})
-		channel := model.Channel{Name: "shared-key-pool", Type: 1, Key: "key-a\nkey-b\nkey-c", Status: common.ChannelStatusEnabled, ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 3, MultiKeyMode: constant.MultiKeyModePolling, MultiKeyStatusList: map[int]int{1: common.ChannelStatusAutoDisabled}}}
+		channel := model.Channel{Name: "shared-key-pool", Type: 1, Key: "key-a\nkey-b\nkey-c", Status: common.ChannelStatusEnabled, ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 3, MultiKeyMode: constant.MultiKeyModePolling, MultiKeyStatusList: map[int]int{1: common.ChannelStatusManuallyDisabled}}}
 		require.NoError(t, database.Create(&channel).Error)
 		t.Cleanup(func() { require.NoError(t, database.Delete(&model.Channel{}, channel.Id).Error) })
 		var before string
@@ -155,6 +155,83 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		key, _, apiErr = two.GetNextEnabledKey(&channel)
 		require.NotNil(t, apiErr)
 		assert.Empty(t, key)
+	})
+
+	t.Run("channel automatic state is shared and isolated from configuration", func(t *testing.T) {
+		node := redis.NewClient(client.Options())
+		t.Cleanup(func() { _ = node.Close() })
+		writer := channelmodule.New(channelmodule.Dependencies{DB: database, Cache: client})
+		one := channelmodule.New(channelmodule.Dependencies{Cache: client, ReadOnly: true})
+		two := channelmodule.New(channelmodule.Dependencies{Cache: node, ReadOnly: true})
+		channel := model.Channel{Type: 1, Name: "shared-runtime", Key: "runtime-a\nruntime-b", Status: common.ChannelStatusEnabled,
+			Models: model.StringList{"runtime-model"}, Group: model.StringList{"default"},
+			ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyMode: constant.MultiKeyModeRandom}}
+		require.NoError(t, writer.InsertChannel(&channel))
+		t.Cleanup(func() {
+			require.NoError(t, database.Where("channel_id = ?", channel.Id).Delete(&model.Ability{}).Error)
+			require.NoError(t, database.Delete(&model.Channel{}, channel.Id).Error)
+			require.NoError(t, client.Del(context.Background(), "config:snapshot:channels").Err())
+		})
+		require.NoError(t, writer.ReloadChannelCache(t.Context()))
+		require.NoError(t, one.ReloadChannelCache(t.Context()))
+		require.NoError(t, two.ReloadChannelCache(t.Context()))
+		fingerprint := channelmodule.ChannelKeyPoolFingerprint(&channel)
+		requestContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+		requestContext.Request = httptest.NewRequest(http.MethodPost, "/mj/submit", nil)
+		require.Nil(t, middleware.SetupContextForSelectedChannel(requestContext, &channel, "runtime-model"))
+		assert.Equal(t, fingerprint, common.GetContextKeyString(requestContext, constant.ContextKeyChannelKeyPoolFingerprint))
+		var before string
+		require.NoError(t, database.Raw("SELECT channel_info::text FROM channels WHERE id = ?", channel.Id).Scan(&before).Error)
+		require.True(t, one.UpdateChannelStatusForKeyPool(channel.Id, "runtime-a", common.ChannelStatusAutoDisabled, "first failure", fingerprint))
+		effective, err := two.GetChannelById(channel.Id, true)
+		require.NoError(t, err)
+		assert.Equal(t, common.ChannelStatusAutoDisabled, effective.ChannelInfo.MultiKeyStatusList[0])
+		key, _, apiErr := two.GetNextEnabledKey(effective)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "runtime-b", key)
+		require.True(t, two.UpdateChannelStatusForKeyPool(channel.Id, "runtime-b", common.ChannelStatusAutoDisabled, "second failure", fingerprint))
+		selected, err := one.GetRandomSatisfiedChannel("default", "runtime-model", 0, nil)
+		require.NoError(t, err)
+		assert.Nil(t, selected)
+		var stored model.Channel
+		require.NoError(t, database.First(&stored, channel.Id).Error)
+		assert.Equal(t, common.ChannelStatusEnabled, stored.Status)
+		var after string
+		require.NoError(t, database.Raw("SELECT channel_info::text FROM channels WHERE id = ?", channel.Id).Scan(&after).Error)
+		assert.Equal(t, before, after)
+		require.True(t, one.UpdateChannelStatusForKeyPool(channel.Id, "runtime-a", common.ChannelStatusEnabled, "recovered", fingerprint))
+		// Reusing a previously overlaid object must refresh its automatic key state.
+		key, _, apiErr = two.GetNextEnabledKey(effective)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "runtime-a", key)
+		selected, err = two.GetRandomSatisfiedChannel("default", "runtime-model", 0, nil)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		assert.Equal(t, channel.Id, selected.Id)
+		require.True(t, writer.UpdateManualChannelStatus(channel.Id, common.ChannelStatusManuallyDisabled, "operator stop"))
+		require.NoError(t, writer.ReloadChannelCache(t.Context()))
+		require.NoError(t, two.ReloadChannelCache(t.Context()))
+		require.False(t, two.UpdateChannelStatusForKeyPool(channel.Id, "runtime-a", common.ChannelStatusEnabled, "late recovery", fingerprint))
+		effective, err = two.GetChannelById(channel.Id, true)
+		require.NoError(t, err)
+		assert.Equal(t, common.ChannelStatusManuallyDisabled, effective.Status)
+		require.True(t, writer.UpdateManualChannelStatus(channel.Id, common.ChannelStatusEnabled, "operator enable"))
+		rotated := channel
+		rotated.Key, rotated.Keys = "runtime-a\nruntime-new", nil
+		require.NoError(t, writer.UpdateChannel(&rotated))
+		require.NoError(t, writer.ReloadChannelCache(t.Context()))
+		require.NoError(t, two.ReloadChannelCache(t.Context()))
+		require.False(t, two.UpdateChannelStatusForKeyPool(channel.Id, "runtime-a", common.ChannelStatusAutoDisabled, "old pool failure", fingerprint))
+		currentFingerprint := channelmodule.ChannelKeyPoolFingerprint(&rotated)
+		assert.NotEqual(t, currentFingerprint, common.GetContextKeyString(requestContext, constant.ContextKeyChannelKeyPoolFingerprint), "an in-flight request retains the selected pool identity")
+		require.True(t, two.UpdateChannelStatusForKeyPool(channel.Id, "runtime-a", common.ChannelStatusAutoDisabled, "current pool failure", currentFingerprint))
+		require.False(t, two.UpdateChannelStatusForKeyPool(channel.Id, "runtime-a", common.ChannelStatusEnabled, "old pool recovery", fingerprint))
+		effective, err = two.GetChannelById(channel.Id, true)
+		require.NoError(t, err)
+		assert.Equal(t, common.ChannelStatusAutoDisabled, effective.ChannelInfo.MultiKeyStatusList[0])
+		require.NoError(t, node.Close())
+		_, err = two.GetChannelById(channel.Id, true)
+		require.Error(t, err, "cache outage must not bypass runtime state")
 	})
 
 	t.Run("plugin snapshots compile without a database and retain the last good generation", func(t *testing.T) {

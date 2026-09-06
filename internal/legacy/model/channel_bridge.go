@@ -94,6 +94,14 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	return ChannelService().UpdateChannelStatus(channelId, usingKey, status, reason)
 }
 
+func UpdateChannelStatusForKeyPool(channelId int, usingKey string, status int, reason, keyPoolFingerprint string) bool {
+	return ChannelService().UpdateChannelStatusForKeyPool(channelId, usingKey, status, reason, keyPoolFingerprint)
+}
+
+func ChannelKeyPoolFingerprint(channel *Channel) string {
+	return channelmodule.ChannelKeyPoolFingerprint(channel)
+}
+
 func EnableChannelByTag(tag string) error { return ChannelService().EnableChannelByTag(tag) }
 
 func DisableChannelByTag(tag string) error { return ChannelService().DisableChannelByTag(tag) }

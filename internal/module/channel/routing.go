@@ -1,9 +1,9 @@
 package channel
 
 import (
-	"github.com/QuantumNous/new-api/internal/shared/dto"
 	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/routing"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 	"gorm.io/gorm"
 )
 
@@ -26,4 +26,8 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 }
 func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.ChannelFilter) (bool, dto.ChannelFilterKind) {
 	return routing.ChannelSatisfiesFilters(ch, modelName, filters)
+}
+
+func ChannelKeyPoolFingerprint(ch *Channel) string {
+	return routing.ChannelKeyPoolFingerprint(ch)
 }

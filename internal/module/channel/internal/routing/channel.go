@@ -95,6 +95,29 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 }
 
 func (r *Runtime) GetNextEnabledKey(channel *Channel) (string, int, *types.NewAPIError) {
+	if channel == nil {
+		return "", 0, types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	if r.cache != nil {
+		// Callers may hold a channel selected before another data-plane instance
+		// changed its key state. Refresh a private copy so key selection observes
+		// the same shared runtime state as channel routing.
+		refreshed, err := common.DeepCopy(channel)
+		if err != nil {
+			return "", 0, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if r.snapshot.readOnly && refreshed.Status == common.ChannelStatusAutoDisabled {
+			// In a data-plane request this is a projection from the supplied
+			// snapshot. Preserve the snapshot's key pool while removing the old
+			// top-level projection before refreshing its DragonflyDB state.
+			refreshed.Status = common.ChannelStatusEnabled
+		}
+		normalizeChannelConfiguration(refreshed)
+		if err := r.applyChannelRuntimeState(refreshed); err != nil {
+			return "", 0, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		channel = refreshed
+	}
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
 		return channel.Key, 0, nil
@@ -155,10 +178,16 @@ func (r *Runtime) GetNextEnabledKey(channel *Channel) (string, int, *types.NewAP
 }
 
 func (r *Runtime) SaveChannelInfo(channel *Channel) error {
+	if err := r.normalizeChannelForWrite(channel); err != nil {
+		return err
+	}
 	return r.db.Model(channel).Update("channel_info", channel.ChannelInfo).Error
 }
 
 func (r *Runtime) SaveChannel(channel *Channel) error {
+	if err := r.normalizeChannelForWrite(channel); err != nil {
+		return err
+	}
 	return r.db.Save(channel).Error
 }
 
@@ -186,7 +215,16 @@ func (r *Runtime) GetAllChannels(startIdx int, num int, selectAll bool, idSort b
 	if selectAll {
 		err = order.Apply(r.db).Find(&channels).Error
 	} else {
-		err = order.Apply(r.db).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
+		// Load the key pool before applying shared runtime status; it is needed
+		// to select the correct DragonflyDB fingerprint even when the response
+		// must hide key material.
+		err = order.Apply(r.db).Limit(num).Offset(startIdx).Find(&channels).Error
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := r.applyRuntimeStateToChannels(channels, selectAll); err != nil {
+		return nil, err
 	}
 	return channels, err
 }
@@ -195,10 +233,11 @@ func (r *Runtime) GetChannelsByTag(tag string, idSort bool, selectAll bool, sort
 	var channels []*Channel
 	order := resolveChannelSortOptions(idSort, sortOptions)
 	query := order.Apply(r.db.Where("tag = ?", tag))
-	if !selectAll {
-		query = query.Omit("key")
-	}
 	err := query.Find(&channels).Error
+	if err != nil {
+		return nil, err
+	}
+	err = r.applyRuntimeStateToChannels(channels, selectAll)
 	return channels, err
 }
 
@@ -211,7 +250,7 @@ func (r *Runtime) SearchChannels(keyword string, group string, model string, idS
 	order := resolveChannelSortOptions(idSort, sortOptions)
 
 	// 构造基础查询
-	baseQuery := r.db.Model(&Channel{}).Omit("key")
+	baseQuery := r.db.Model(&Channel{})
 
 	// 构造WHERE子句
 	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?)"
@@ -226,19 +265,32 @@ func (r *Runtime) SearchChannels(keyword string, group string, model string, idS
 	if err != nil {
 		return nil, err
 	}
+	if err := r.applyRuntimeStateToChannels(channels, false); err != nil {
+		return nil, err
+	}
 	return channels, nil
 }
 
-// GetChannelById loads a channel directly from the database, bypassing the
-// in-memory channel cache.
-//
-// WARNING: do NOT call this on request hot paths (middleware, distribution,
-// relay submit/retry, polling). Every call is a synchronous r.db query and will
-// not see cache-only state. Use CacheGetChannel instead: it serves from the
-// in-memory cache and falls back to this function automatically when
-// MemoryCacheEnabled is false. Direct use is appropriate only where fresh r.db
-// state is required, e.g. admin CRUD, channel testing, or cache (re)building.
+// GetChannelById returns the channel configuration with the shared automatic
+// runtime status overlaid. Control-plane callers read PostgreSQL; data-plane
+// callers read the published DragonflyDB snapshot. Automatic status never
+// causes a data-plane database read.
 func (r *Runtime) GetChannelById(id int, selectAll bool) (*Channel, error) {
+	channel, err := r.getConfiguredChannelByID(id, selectAll)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.applyChannelRuntimeState(channel); err != nil {
+		return nil, err
+	}
+	if !selectAll {
+		channel.Key = ""
+		channel.Keys = nil
+	}
+	return channel, nil
+}
+
+func (r *Runtime) getConfiguredChannelByID(id int, selectAll bool) (*Channel, error) {
 	if r.snapshot.readOnly {
 		r.channelSyncLock.RLock()
 		defer r.channelSyncLock.RUnlock()
@@ -250,28 +302,28 @@ func (r *Runtime) GetChannelById(id int, selectAll bool) (*Channel, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !selectAll {
-			copied.Key = ""
-			copied.Keys = nil
-		}
+		normalizeChannelConfiguration(copied)
 		return copied, nil
 	}
 	channel := &Channel{Id: id}
-	var err error = nil
-	if selectAll {
-		err = r.db.First(channel, "id = ?", id).Error
-	} else {
-		err = r.db.Omit("key").First(channel, "id = ?", id).Error
-	}
+	var err error
+	err = r.db.First(channel, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
+	normalizeChannelConfiguration(channel)
 	return channel, nil
 }
 
 func (r *Runtime) BatchInsertChannels(channels []Channel) error {
 	if len(channels) == 0 {
 		return nil
+	}
+	for i := range channels {
+		if channels[i].Status == common.ChannelStatusAutoDisabled {
+			return errors.New("automatic channel status is runtime-only")
+		}
+		normalizeChannelConfiguration(&channels[i])
 	}
 	tx := r.db.Begin()
 	if tx.Error != nil {
@@ -327,6 +379,13 @@ func (r *Runtime) BatchDeleteChannels(ids []int) (int64, error) {
 }
 
 func (r *Runtime) InsertChannel(channel *Channel) error {
+	if channel == nil {
+		return errors.New("channel is nil")
+	}
+	if channel.Status == common.ChannelStatusAutoDisabled {
+		return errors.New("automatic channel status is runtime-only")
+	}
+	normalizeChannelConfiguration(channel)
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(channel).Error; err != nil {
 			return err
@@ -336,6 +395,20 @@ func (r *Runtime) InsertChannel(channel *Channel) error {
 }
 
 func (r *Runtime) UpdateChannel(channel *Channel) error {
+	// The automatic status and auto key entries are projections kept in
+	// DragonflyDB. A channel returned from GetChannelById may include them for
+	// administration, so strip those projections before writing configuration.
+	if err := r.normalizeChannelForWrite(channel); err != nil {
+		return err
+	}
+	var previousChannel *Channel
+	previousFingerprint := ""
+	if !r.snapshot.readOnly && r.db != nil && channel != nil {
+		if previous, err := r.getConfiguredChannelByID(channel.Id, true); err == nil {
+			previousChannel = previous
+			previousFingerprint = ChannelKeyPoolFingerprint(previous)
+		}
+	}
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
 		var keyStr string
@@ -374,7 +447,7 @@ func (r *Runtime) UpdateChannel(channel *Channel) error {
 			}
 		}
 	}
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(channel).Updates(channel).Error; err != nil {
 			return err
 		}
@@ -383,6 +456,21 @@ func (r *Runtime) UpdateChannel(channel *Channel) error {
 		}
 		return r.UpdateAbilities(channel, tx)
 	})
+	if err != nil {
+		return err
+	}
+	if previousChannel != nil && previousFingerprint != ChannelKeyPoolFingerprint(channel) {
+		// A key-pool replacement starts with a clean runtime state. Clear both
+		// fingerprints so a later rollback to an older pool does not resurrect
+		// an obsolete failure marker.
+		if err := r.clearChannelRuntimeState(previousChannel); err != nil {
+			return err
+		}
+		if err := r.clearChannelRuntimeState(channel); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) UpdateChannelResponseTime(channel *Channel, responseTime int64) {
@@ -412,7 +500,10 @@ func (r *Runtime) DeleteChannel(channel *Channel) error {
 		return err
 	}
 	err = r.DeleteAbilities(channel)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.clearChannelRuntimeState(channel)
 }
 
 // GetChannelKeyLock returns or creates a mutex for the given channel ID
@@ -446,58 +537,6 @@ func (r *Runtime) CleanupChannelKeyLocks() {
 	})
 }
 
-func (r *Runtime) handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason string) {
-	keys := channel.GetKeys()
-	if len(keys) == 0 {
-		channel.Status = status
-	} else {
-		keyIndex := -1
-		for i, key := range keys {
-			if key == usingKey {
-				keyIndex = i
-				break
-			}
-		}
-		if keyIndex < 0 {
-			if usingKey != "" {
-				common.SysLog(fmt.Sprintf("failed to update multi-key status: channel_id=%d, using key not found", channel.Id))
-				return
-			}
-			channel.Status = status
-			info := channel.GetOtherInfo()
-			info["status_reason"] = reason
-			info["status_time"] = common.GetTimestamp()
-			channel.SetOtherInfo(info)
-			return
-		}
-		if channel.ChannelInfo.MultiKeyStatusList == nil {
-			channel.ChannelInfo.MultiKeyStatusList = make(map[int]int)
-		}
-		if status == common.ChannelStatusEnabled {
-			delete(channel.ChannelInfo.MultiKeyStatusList, keyIndex)
-		} else {
-			channel.ChannelInfo.MultiKeyStatusList[keyIndex] = status
-			if channel.ChannelInfo.MultiKeyDisabledReason == nil {
-				channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
-			}
-			if channel.ChannelInfo.MultiKeyDisabledTime == nil {
-				channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
-			}
-			channel.ChannelInfo.MultiKeyDisabledReason[keyIndex] = reason
-			channel.ChannelInfo.MultiKeyDisabledTime[keyIndex] = common.GetTimestamp()
-		}
-		if !hasEnabledMultiKey(keys, channel.ChannelInfo.MultiKeyStatusList) {
-			channel.Status = common.ChannelStatusAutoDisabled
-			info := channel.GetOtherInfo()
-			info["status_reason"] = "All keys are disabled"
-			info["status_time"] = common.GetTimestamp()
-			channel.SetOtherInfo(info)
-		} else if status == common.ChannelStatusEnabled {
-			channel.Status = common.ChannelStatusEnabled
-		}
-	}
-}
-
 func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 	for i := range keys {
 		if statusList == nil {
@@ -512,93 +551,165 @@ func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 }
 
 func (r *Runtime) UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {
-	if common.MemoryCacheEnabled {
-		r.channelStatusLock.Lock()
-		defer r.channelStatusLock.Unlock()
+	return r.UpdateChannelStatusForKeyPool(channelId, usingKey, status, reason, "")
+}
+
+// UpdateChannelStatusForKeyPool applies an automatic status transition only
+// when the caller observed the same key pool as the current configuration.
+// The empty fingerprint keeps the legacy adapter compatible for callers that
+// do not carry a channel snapshot; request paths should pass the fingerprint.
+func (r *Runtime) UpdateChannelStatusForKeyPool(channelId int, usingKey string, status int, reason, keyPoolFingerprint string) bool {
+	switch status {
+	case common.ChannelStatusAutoDisabled:
+		return r.updateAutomaticChannelStatus(channelId, usingKey, status, reason, keyPoolFingerprint)
+	case common.ChannelStatusEnabled:
+		// Existing automatic recovery callers use this method. Manual HTTP
+		// operations call UpdateManualChannelStatus so an automatic recovery can
+		// never turn a manually disabled channel back on.
+		return r.updateAutomaticChannelStatus(channelId, usingKey, status, reason, keyPoolFingerprint)
+	case common.ChannelStatusManuallyDisabled:
+		return r.UpdateManualChannelStatus(channelId, status, reason)
+	default:
+		return false
+	}
+}
+
+// UpdateManualChannelStatus changes the persistent channel status requested by
+// an administrator. It is deliberately separate from automatic recovery:
+// status 2 remains authoritative even when an old automatic state is present.
+func (r *Runtime) UpdateManualChannelStatus(channelId int, status int, reason string) bool {
+	if r.snapshot.readOnly || r.db == nil {
+		return false
+	}
+	if status != common.ChannelStatusEnabled && status != common.ChannelStatusManuallyDisabled {
+		return false
 	}
 
-	// Serialize local key-status edits. The shared polling cursor is held in
-	// DragonflyDB and is never persisted as channel configuration.
+	r.channelStatusLock.Lock()
+	defer r.channelStatusLock.Unlock()
 	keyLock := r.GetChannelKeyLock(channelId)
 	keyLock.Lock()
 	defer keyLock.Unlock()
 
-	if common.MemoryCacheEnabled {
-		channelCache, _ := r.CacheGetChannel(channelId)
-		if channelCache == nil {
-			return false
-		}
-		if channelCache.ChannelInfo.IsMultiKey {
-			beforeStatus := channelCache.Status
-			// 如果是多Key模式，更新缓存中的状态
-			r.handlerMultiKeyUpdate(channelCache, usingKey, status, reason)
-			if beforeStatus != channelCache.Status {
-				r.CacheUpdateChannelStatus(channelId, channelCache.Status)
-			}
-			//r.CacheUpdateChannel(channelCache)
-			//return true
-		} else {
-			// 如果缓存渠道存在，且状态已是目标状态，直接返回
-			if channelCache.Status == status {
-				return false
-			}
-			r.CacheUpdateChannelStatus(channelId, status)
-		}
-	}
-
-	shouldUpdateAbilities := false
-	defer func() {
-		if shouldUpdateAbilities {
-			err := r.UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled)
-			if err != nil {
-				common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
-			}
-		}
-	}()
-	channel, err := r.GetChannelById(channelId, true)
+	channel, err := r.getConfiguredChannelByID(channelId, true)
 	if err != nil {
 		return false
-	} else {
-		if channel.Status == status {
+	}
+	changed := channel.Status != status
+	if status == common.ChannelStatusEnabled {
+		state, stateErr := r.readChannelRuntimeState(context.Background(), channel)
+		if stateErr != nil {
+			common.SysLog(fmt.Sprintf("failed to read channel runtime status: channel_id=%d, error=%v", channelId, stateErr))
 			return false
 		}
+		changed = changed || state.Status == common.ChannelStatusAutoDisabled || len(state.Keys) > 0
+	}
+	if !changed {
+		return false
+	}
 
-		if channel.ChannelInfo.IsMultiKey {
-			beforeStatus := channel.Status
-			r.handlerMultiKeyUpdate(channel, usingKey, status, reason)
-			if beforeStatus != channel.Status {
-				shouldUpdateAbilities = true
-			}
-		} else {
-			info := channel.GetOtherInfo()
-			info["status_reason"] = reason
-			info["status_time"] = common.GetTimestamp()
-			channel.SetOtherInfo(info)
-			channel.Status = status
-			shouldUpdateAbilities = true
-		}
-		err = r.saveChannelStatus(channel)
-		if err != nil {
-			common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
-			return false
-		}
+	info := channel.GetOtherInfo()
+	info["status_reason"] = reason
+	info["status_time"] = common.GetTimestamp()
+	channel.SetOtherInfo(info)
+	channel.Status = status
+	if err := r.saveChannelStatus(channel); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update channel status: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
+		return false
+	}
+	if err := r.clearChannelRuntimeState(channel); err != nil {
+		common.SysLog(fmt.Sprintf("failed to clear channel runtime status: channel_id=%d, error=%v", channelId, err))
+		return false
+	}
+	if err := r.UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
 	}
 	return true
 }
 
+func (r *Runtime) updateAutomaticChannelStatus(channelId int, usingKey string, status int, reason, keyPoolFingerprint string) bool {
+	keyLock := r.GetChannelKeyLock(channelId)
+	keyLock.Lock()
+	defer keyLock.Unlock()
+
+	// This read uses the published snapshot on a data-plane instance. In
+	// particular, it must not fall through to PostgreSQL when DragonflyDB is
+	// unavailable.
+	channel, err := r.getConfiguredChannelByID(channelId, true)
+	if err != nil {
+		return false
+	}
+	if channel.Status == common.ChannelStatusManuallyDisabled {
+		return false
+	}
+	if keyPoolFingerprint != "" && keyPoolFingerprint != ChannelKeyPoolFingerprint(channel) {
+		return false
+	}
+	if channel.ChannelInfo.IsMultiKey && usingKey != "" {
+		found := false
+		for _, key := range channel.GetKeys() {
+			if key == usingKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// The request was generated from an older key pool. Do not apply its
+			// key index to the current pool.
+			return false
+		}
+	}
+	if !channel.ChannelInfo.IsMultiKey && usingKey != "" && channel.Key != usingKey {
+		// A single-key request can also arrive after the channel credential was
+		// rotated. Treat it as stale for the same reason as an old multi-key
+		// request.
+		return false
+	}
+	changed, err := r.changeChannelRuntimeStatus(channel, usingKey, status, reason)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to update channel runtime status: channel_id=%d, status=%d, error=%v", channelId, status, err))
+		return false
+	}
+	return changed
+}
+
 func (r *Runtime) EnableChannelByTag(tag string) error {
+	if r.snapshot.readOnly || r.db == nil {
+		return errors.New("channel configuration is read-only")
+	}
+	var channels []Channel
+	if err := r.db.Where("tag = ?", tag).Find(&channels).Error; err != nil {
+		return err
+	}
 	err := r.db.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
 	if err != nil {
 		return err
+	}
+	for i := range channels {
+		if err := r.clearChannelRuntimeState(&channels[i]); err != nil {
+			return err
+		}
 	}
 	err = r.UpdateAbilityStatusByTag(tag, true)
 	return err
 }
 
 func (r *Runtime) DisableChannelByTag(tag string) error {
+	if r.snapshot.readOnly || r.db == nil {
+		return errors.New("channel configuration is read-only")
+	}
+	var channels []Channel
+	if err := r.db.Where("tag = ?", tag).Find(&channels).Error; err != nil {
+		return err
+	}
 	err := r.db.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusManuallyDisabled).Error
 	if err != nil {
 		return err
+	}
+	for i := range channels {
+		if err := r.clearChannelRuntimeState(&channels[i]); err != nil {
+			return err
+		}
 	}
 	err = r.UpdateAbilityStatusByTag(tag, false)
 	return err
@@ -673,13 +784,76 @@ func (r *Runtime) updateChannelUsedQuota(ctx context.Context, id int, quota int)
 }
 
 func (r *Runtime) DeleteChannelByStatus(status int64) (int64, error) {
+	if status == common.ChannelStatusAutoDisabled && r.cache != nil && !r.snapshot.readOnly {
+		channels, err := r.listEffectiveChannels(context.Background(), ListFilter{Status: 0, Type: -1}, nil, ChannelSortOptions{})
+		if err != nil {
+			return 0, err
+		}
+		ids := make([]int, 0, len(channels))
+		for _, channel := range channels {
+			if channel.Status == common.ChannelStatusAutoDisabled {
+				ids = append(ids, channel.Id)
+			}
+		}
+		return r.deleteChannelsByIDs(channels, ids)
+	}
 	result := r.db.Where("status = ?", status).Delete(&Channel{})
 	return result.RowsAffected, result.Error
 }
 
 func (r *Runtime) DeleteDisabledChannel() (int64, error) {
+	if r.cache != nil && !r.snapshot.readOnly {
+		channels, err := r.listEffectiveChannels(context.Background(), ListFilter{Status: 0, Type: -1}, nil, ChannelSortOptions{})
+		if err != nil {
+			return 0, err
+		}
+		ids := make([]int, 0, len(channels))
+		for _, channel := range channels {
+			if channel.Status != common.ChannelStatusEnabled {
+				ids = append(ids, channel.Id)
+			}
+		}
+		return r.deleteChannelsByIDs(channels, ids)
+	}
 	result := r.db.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
 	return result.RowsAffected, result.Error
+}
+
+func (r *Runtime) deleteChannelsByIDs(channels []*Channel, ids []int) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx := r.db.Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	result := tx.Where("id IN ?", ids).Delete(&Channel{})
+	if result.Error != nil {
+		tx.Rollback()
+		return 0, result.Error
+	}
+	if err := tx.Where("channel_id IN ?", ids).Delete(&Ability{}).Error; err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		for _, id := range ids {
+			if channel.Id != id {
+				continue
+			}
+			if err := r.clearChannelRuntimeState(channel); err != nil {
+				return 0, err
+			}
+			break
+		}
+	}
+	return result.RowsAffected, nil
 }
 
 func (r *Runtime) GetPaginatedTags(offset int, limit int) ([]*string, error) {
@@ -758,7 +932,10 @@ func (r *Runtime) GetChannelsByIds(ids []int) ([]*Channel, error) {
 	}
 	var channels []*Channel
 	err := r.db.Where("id in (?)", ids).Find(&channels).Error
-	return channels, err
+	if err != nil {
+		return nil, err
+	}
+	return channels, r.applyRuntimeStateToChannels(channels, true)
 }
 
 func (r *Runtime) BatchSetChannelTag(ids []int, tag *string) error {
@@ -819,8 +996,11 @@ func (r *Runtime) GetChannelsByType(startIdx int, num int, idSort bool, channelT
 	if idSort {
 		order = "id desc"
 	}
-	err := r.db.Where("type = ?", channelType).Order(order).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
-	return channels, err
+	err := r.db.Where("type = ?", channelType).Order(order).Limit(num).Offset(startIdx).Find(&channels).Error
+	if err != nil {
+		return nil, err
+	}
+	return channels, r.applyRuntimeStateToChannels(channels, false)
 }
 
 // Count channels of specific type

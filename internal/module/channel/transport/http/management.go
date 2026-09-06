@@ -905,7 +905,7 @@ func (h *Handler) UpdateChannelStatus(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	changed := h.channel.UpdateChannelStatus(id, "", req.Status, "manual operation")
+	changed := h.channel.UpdateManualChannelStatus(id, req.Status, "manual operation")
 	if changed {
 		h.channel.InitChannelCache()
 	}
@@ -929,7 +929,7 @@ func (h *Handler) BatchUpdateChannelStatus(c *gin.Context) {
 	}
 	changedCount := 0
 	for _, id := range req.Ids {
-		if h.channel.UpdateChannelStatus(id, "", req.Status, "manual batch operation") {
+		if h.channel.UpdateManualChannelStatus(id, req.Status, "manual batch operation") {
 			changedCount++
 		}
 	}
@@ -1318,6 +1318,10 @@ func (h *Handler) ManageMultiKeys(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		if err = h.channel.ClearChannelRuntimeKeyStatus(channel, keyIndex); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 
 		h.channel.InitChannelCache()
 		c.JSON(http.StatusOK, gin.H{
@@ -1360,6 +1364,10 @@ func (h *Handler) ManageMultiKeys(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		if err = h.channel.ClearChannelRuntimeKeyStatus(channel, keyIndex); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 
 		h.channel.InitChannelCache()
 		c.JSON(http.StatusOK, gin.H{
@@ -1381,6 +1389,10 @@ func (h *Handler) ManageMultiKeys(c *gin.Context) {
 
 		err = h.channel.UpdateChannel(channel)
 		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if err = h.channel.ClearChannelRuntimeStatus(channel); err != nil {
 			common.ApiError(c, err)
 			return
 		}

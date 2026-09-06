@@ -1,13 +1,29 @@
 package routing
 
 import (
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
 func (r *Runtime) IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {
 	if group == "" || modelName == "" || channelID <= 0 {
 		return false
+	}
+	if r.snapshot.readOnly || common.MemoryCacheEnabled {
+		channel, err := r.CacheGetChannel(channelID)
+		if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled {
+			return false
+		}
+		if channel.ChannelInfo.IsMultiKey && !hasEnabledMultiKey(channel.GetKeys(), channel.ChannelInfo.MultiKeyStatusList) {
+			return false
+		}
+		r.channelSyncLock.RLock()
+		defer r.channelSyncLock.RUnlock()
+		if isChannelIDInList(r.group2model2channels[group][modelName], channelID) {
+			return true
+		}
+		normalized := ratio_setting.RoutingMatchModelName(modelName)
+		return normalized != "" && normalized != modelName && isChannelIDInList(r.group2model2channels[group][normalized], channelID)
 	}
 	if !common.MemoryCacheEnabled {
 		return r.isChannelEnabledForGroupModelDB(group, modelName, channelID)

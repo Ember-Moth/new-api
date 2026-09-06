@@ -13,17 +13,17 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/shared/dto"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/helper"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting"
-	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 
 	"github.com/gin-gonic/gin"
 )
@@ -407,6 +407,11 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	}
 
 	relayInfo.InitChannelMeta(c)
+	// Keep the pool identity captured alongside the selected request key.
+	// Re-reading a channel here could observe a newer pool than the request uses.
+	runtimeChannelID := relayInfo.ChannelId
+	runtimeKeyPoolFingerprint := common.GetContextKeyString(c, constant.ContextKeyChannelKeyPoolFingerprint)
+	runtimeAutoBan := common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan)
 
 	if relayInfo.RelayMode == relayconstant.RelayModeMidjourneyAction { // midjourney plus，需要从customId中获取任务信息
 		mjErr := service.CoverPlusActionToNormalAction(&midjRequest)
@@ -491,6 +496,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			c.Set("base_url", channel.GetBaseURL())
 			c.Set("channel_id", originTask.ChannelId)
 			c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
+			runtimeChannelID = originTask.ChannelId
+			runtimeKeyPoolFingerprint = model.ChannelKeyPoolFingerprint(channel)
+			runtimeAutoBan = channel.GetAutoBan()
 			logger.LogDebug(c, "Midjourney action uses origin channel: id=%s, base_url=%s", strconv.Itoa(originTask.ChannelId), channel.GetBaseURL())
 		}
 		midjRequest.Prompt = originTask.Prompt
@@ -574,12 +582,8 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	}
 	if midjResponse.Code == 3 {
 		//无实例账号自动禁用渠道（No available account instance）
-		channel, err := model.GetChannelById(midjourneyTask.ChannelId, true)
-		if err != nil {
-			common.SysLog("get_channel_null: " + err.Error())
-		}
-		if channel.GetAutoBan() && common.AutomaticDisableChannelEnabled {
-			model.UpdateChannelStatus(midjourneyTask.ChannelId, "", 2, "No available account instance")
+		if runtimeKeyPoolFingerprint != "" && runtimeAutoBan && common.AutomaticDisableChannelEnabled {
+			model.UpdateChannelStatusForKeyPool(runtimeChannelID, "", common.ChannelStatusAutoDisabled, "No available account instance", runtimeKeyPoolFingerprint)
 		}
 	}
 	if midjResponse.Code != 1 && midjResponse.Code != 21 && midjResponse.Code != 22 {

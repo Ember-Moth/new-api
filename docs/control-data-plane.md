@@ -300,3 +300,27 @@ python3 /tmp/verify-new-api-planes.py
 完整根模块与 RelayKit 测试通过；新库双角色各启动两次并完成受限数据面真实转发。日志见 `/tmp/new-api-luna-acceptance-final.log`、`/tmp/new-api-luna-startup.log`。
 
 本批保证已入库投递的事务处理，不代表请求级结算已具备完整幂等性。余额 API 仍未接收稳定请求 ID，调用者在不确定提交后重试可能形成新业务操作；旧用户缓存填充也仍可能短暂覆盖提交后的失效，需要后续版本栅栏。legacy 统计调用失败目前记录错误，尚未把统计、资金和请求结果合并为统一结算事件。
+
+## 第十四批：渠道自动运行状态迁入 DragonflyDB
+
+自动停用/恢复及多 Key 自动状态改用 DragonflyDB hash 与 Lua 原子操作，键按渠道和密钥池 HMAC 隔离；维持既有显式恢复语义，没有额外引入自动冷却时长。控制面和数据面读取同一状态，数据面不读取或写入 PostgreSQL 渠道配置。手动渠道/密钥停用仍是持久化管理策略，并优先于自动恢复。
+
+渠道选择、模型能力和别名、管理列表叠加自动状态。管理编辑会剥离自动 Key 状态，恢复顶层状态和停用原因/时间的配置基线，防止把运行投影保存到 PostgreSQL。密钥轮换清理相应池状态；请求错误与恢复携带选 Key 时捕获的池指纹，旧池结果不能影响新池，包含重叠密钥和 MJ 原任务切换渠道。
+
+真实 DragonflyDB e2e 覆盖两个独立客户端共享停用、全部 Key 失效后不再选路、单 Key 恢复、手动停用优先、PostgreSQL 配置内容不变、旧池请求隔离、缓存不可用时拒绝读取运行状态。路由包回归覆盖自动投影保存、手动停止后保存旧投影、自动原因/时间不落库。
+
+服务版本：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。沿用前文 TEST_*_DSN：
+
+```sh
+GOWORK=off make test
+GOWORK=off go test ./internal/module/channel/... ./internal/legacy/relay ./internal/transport/http/controller ./e2e -count=1
+GOWORK=off go test ./internal/transport/http/middleware ./internal/legacy/relay ./e2e -count=1
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+(cd relaykit && GOWORK=off go build ./...)
+python3 /tmp/verify-new-api-planes.py
+```
+
+完整 Go/RelayKit 测试、最后补丁的定向回归、独立 RelayKit 构建、双角色新库两轮启动及受限数据面转发通过。输出 `/tmp/new-api-luna-{acceptance-final,channel-final,request-fence,build-final,vet,startup-final}.log`。
+
+剩余工作集中在请求级配置一致性、全链路幂等结算/故障恢复、其他后台循环与容器部署验收。当前渠道状态按渠道读取，后续应批量读取并验证大规模渠道列表和选路开销；本批只验收跨实例行为，没有宣称性能提升倍数。

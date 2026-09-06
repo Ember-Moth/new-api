@@ -21,13 +21,19 @@ func (r *Runtime) GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error
 func (r *Runtime) EnabledPricingAbilities(ctx context.Context) ([]AbilityWithChannel, error) {
 	if r.snapshot.readOnly {
 		r.channelSyncLock.RLock()
-		defer r.channelSyncLock.RUnlock()
-		result := make([]AbilityWithChannel, 0, len(r.snapshotAbilities))
-		for _, ability := range r.snapshotAbilities {
-			if ability.Enabled {
-				if channel := r.channelsIDM[ability.ChannelId]; channel != nil {
-					result = append(result, AbilityWithChannel{Ability: ability, ChannelType: channel.Type})
-				}
+		abilities := append([]Ability(nil), r.snapshotAbilities...)
+		r.channelSyncLock.RUnlock()
+		result := make([]AbilityWithChannel, 0, len(abilities))
+		for _, ability := range abilities {
+			if !ability.Enabled {
+				continue
+			}
+			channel, err := r.CacheGetChannel(ability.ChannelId)
+			if err != nil {
+				return nil, err
+			}
+			if channel.Status == common.ChannelStatusEnabled && (!channel.ChannelInfo.IsMultiKey || hasEnabledMultiKey(channel.GetKeys(), channel.ChannelInfo.MultiKeyStatusList)) {
+				result = append(result, AbilityWithChannel{Ability: ability, ChannelType: channel.Type})
 			}
 		}
 		return result, nil
@@ -64,10 +70,19 @@ func (r *Runtime) GetEnabledModels() []string {
 func (r *Runtime) GetAllEnableAbilities() []Ability {
 	if r.snapshot.readOnly {
 		r.channelSyncLock.RLock()
-		defer r.channelSyncLock.RUnlock()
-		result := make([]Ability, 0, len(r.snapshotAbilities))
-		for _, ability := range r.snapshotAbilities {
-			if ability.Enabled {
+		abilities := append([]Ability(nil), r.snapshotAbilities...)
+		r.channelSyncLock.RUnlock()
+		result := make([]Ability, 0, len(abilities))
+		for _, ability := range abilities {
+			if !ability.Enabled {
+				continue
+			}
+			channel, err := r.CacheGetChannel(ability.ChannelId)
+			if err != nil {
+				common.SysError(fmt.Sprintf("failed to apply channel runtime status to ability: channel_id=%d, error=%v", ability.ChannelId, err))
+				continue
+			}
+			if channel.Status == common.ChannelStatusEnabled && (!channel.ChannelInfo.IsMultiKey || hasEnabledMultiKey(channel.GetKeys(), channel.ChannelInfo.MultiKeyStatusList)) {
 				result = append(result, ability)
 			}
 		}

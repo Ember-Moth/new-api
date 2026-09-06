@@ -84,12 +84,21 @@ func (r *Runtime) buildTaskAliasView(generation *jsplugin.RoutingGeneration) *ta
 	var channels []Channel
 	if r.snapshot.readOnly {
 		r.channelSyncLock.RLock()
+		cachedChannels := make([]*Channel, 0, len(r.channelsIDM))
 		for _, channel := range r.channelsIDM {
-			if channel.Status == common.ChannelStatusEnabled {
+			cachedChannels = append(cachedChannels, channel)
+		}
+		r.channelSyncLock.RUnlock()
+		for _, cached := range cachedChannels {
+			channel, err := r.CacheGetChannel(cached.Id)
+			if err != nil {
+				common.SysError(fmt.Sprintf("failed to apply channel runtime status to task aliases: channel_id=%d, error=%v", cached.Id, err))
+				continue
+			}
+			if channel.Status == common.ChannelStatusEnabled && (!channel.ChannelInfo.IsMultiKey || hasEnabledMultiKey(channel.GetKeys(), channel.ChannelInfo.MultiKeyStatusList)) {
 				channels = append(channels, *channel)
 			}
 		}
-		r.channelSyncLock.RUnlock()
 	} else {
 		if r.db == nil {
 			return view

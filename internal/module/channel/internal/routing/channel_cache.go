@@ -31,6 +31,7 @@ func (r *Runtime) applyChannelSnapshot(snapshot channelSnapshot) {
 	newChannel2advancedCustomConfig := make(map[int]*kitdto.AdvancedCustomConfig)
 	channels := snapshot.Channels
 	for _, channel := range channels {
+		normalizeChannelConfiguration(channel)
 		newChannelId2channel[channel.Id] = channel
 		if channel.Type == constant.ChannelTypeAdvancedCustom {
 			if config := channel.GetOtherSettings().AdvancedCustom; config != nil {
@@ -107,8 +108,6 @@ func (r *Runtime) GetRandomSatisfiedChannel(
 	}
 
 	r.channelSyncLock.RLock()
-	defer r.channelSyncLock.RUnlock()
-
 	// First, try to find channels with the exact model name.
 	channels, _ := r.filterCandidateIDs(r.group2model2channels[group][model], model, filters)
 
@@ -117,25 +116,45 @@ func (r *Runtime) GetRandomSatisfiedChannel(
 		normalizedModel := ratio_setting.RoutingMatchModelName(model)
 		channels, _ = r.filterCandidateIDs(r.group2model2channels[group][normalizedModel], model, filters)
 	}
+	// Candidate lists are built from the immutable configuration snapshot, but
+	// automatic status is shared runtime state. Release the snapshot lock before
+	// reading DragonflyDB, then use effective copies for every later decision.
+	candidateIDs := append([]int(nil), channels...)
+	r.channelSyncLock.RUnlock()
+
+	effectiveChannels := make(map[int]*Channel, len(candidateIDs))
+	for _, channelID := range candidateIDs {
+		channel, err := r.CacheGetChannel(channelID)
+		if err != nil {
+			return nil, err
+		}
+		if channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if channel.ChannelInfo.IsMultiKey && !hasEnabledMultiKey(channel.GetKeys(), channel.ChannelInfo.MultiKeyStatusList) {
+			continue
+		}
+		effectiveChannels[channelID] = channel
+	}
+	channels = channels[:0]
+	for _, channelID := range candidateIDs {
+		if _, ok := effectiveChannels[channelID]; ok {
+			channels = append(channels, channelID)
+		}
+	}
 
 	if len(channels) == 0 {
 		return nil, nil
 	}
 
 	if len(channels) == 1 {
-		if channel, ok := r.channelsIDM[channels[0]]; ok {
-			return channel, nil
-		}
-		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
+		return effectiveChannels[channels[0]], nil
 	}
 
 	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
-		if channel, ok := r.channelsIDM[channelId]; ok {
-			uniquePriorities[int(channel.GetPriority())] = true
-		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
-		}
+		channel := effectiveChannels[channelId]
+		uniquePriorities[int(channel.GetPriority())] = true
 	}
 	var sortedUniquePriorities []int
 	for priority := range uniquePriorities {
@@ -152,13 +171,10 @@ func (r *Runtime) GetRandomSatisfiedChannel(
 	var sumWeight = 0
 	var targetChannels []*Channel
 	for _, channelId := range channels {
-		if channel, ok := r.channelsIDM[channelId]; ok {
-			if channel.GetPriority() == targetPriority {
-				sumWeight += channel.GetWeight()
-				targetChannels = append(targetChannels, channel)
-			}
-		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+		channel := effectiveChannels[channelId]
+		if channel.GetPriority() == targetPriority {
+			sumWeight += channel.GetWeight()
+			targetChannels = append(targetChannels, channel)
 		}
 	}
 
@@ -198,21 +214,38 @@ func (r *Runtime) GetRandomSatisfiedChannel(
 }
 
 func (r *Runtime) CacheGetChannel(id int) (*Channel, error) {
-	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
+	if r.snapshot.readOnly {
+		return r.GetChannelById(id, true)
+	}
+	if !common.MemoryCacheEnabled {
 		return r.GetChannelById(id, true)
 	}
 	r.channelSyncLock.RLock()
-	defer r.channelSyncLock.RUnlock()
-
 	c, ok := r.channelsIDM[id]
 	if !ok {
+		r.channelSyncLock.RUnlock()
 		return nil, fmt.Errorf("渠道# %d，已不存在", id)
 	}
-	return c, nil
+	copied, err := common.DeepCopy(c)
+	r.channelSyncLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.applyChannelRuntimeState(copied); err != nil {
+		return nil, err
+	}
+	return copied, nil
 }
 
 func (r *Runtime) CacheGetChannelInfo(id int) (*ChannelInfo, error) {
-	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
+	if r.snapshot.readOnly {
+		channel, err := r.GetChannelById(id, true)
+		if err != nil {
+			return nil, err
+		}
+		return &channel.ChannelInfo, nil
+	}
+	if !common.MemoryCacheEnabled {
 		channel, err := r.GetChannelById(id, true)
 		if err != nil {
 			return nil, err
@@ -220,18 +253,32 @@ func (r *Runtime) CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 		return &channel.ChannelInfo, nil
 	}
 	r.channelSyncLock.RLock()
-	defer r.channelSyncLock.RUnlock()
-
 	c, ok := r.channelsIDM[id]
 	if !ok {
+		r.channelSyncLock.RUnlock()
 		return nil, fmt.Errorf("渠道# %d，已不存在", id)
 	}
-	return &c.ChannelInfo, nil
+	copied, err := common.DeepCopy(c)
+	r.channelSyncLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.applyChannelRuntimeState(copied); err != nil {
+		return nil, err
+	}
+	return &copied.ChannelInfo, nil
 }
 
 func (r *Runtime) CacheUpdateChannelStatus(id int, status int) {
+	// Runtime automatic status is read from DragonflyDB on every channel
+	// lookup. Mutating the published configuration snapshot here would make a
+	// transient failure look like a configuration change and could also trigger
+	// the old GetChannelById early-return race.
+	if r.snapshot.readOnly {
+		return
+	}
 	defer r.snapshot.dirty.Store(true)
-	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
+	if !common.MemoryCacheEnabled {
 		return
 	}
 	r.channelSyncLock.Lock()

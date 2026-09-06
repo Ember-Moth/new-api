@@ -18,20 +18,20 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/system"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/internal/legacy/relay"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/helper"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	hosttypes "github.com/QuantumNous/new-api/internal/shared/types"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
-	hosttypes "github.com/QuantumNous/new-api/internal/shared/types"
 
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
@@ -954,12 +954,13 @@ func testChannelForHealthCheck(ctx context.Context, channel *model.Channel, test
 	}
 
 	if allowDisable && isChannelEnabled && shouldBanChannel && channel.GetAutoBan() {
-		processChannelError(result.context, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, nil)
+		processChannelError(result.context, newChannelError(channel, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey)), newAPIError, nil)
 		summary.Disabled++
 	}
 
 	if result.localErr == nil && !isChannelEnabled && service.ShouldEnableChannel(newAPIError, channel.Status) {
-		service.EnableChannel(channel.Id, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.Name)
+		channelError := newChannelError(channel, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey))
+		service.EnableChannelForKeyPool(channel.Id, channelError.UsingKey, channel.Name, channelError.KeyPoolFingerprint)
 		summary.Enabled++
 	}
 
