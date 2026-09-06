@@ -63,10 +63,18 @@ func (c *QuotaClamp) AuditMap() map[string]interface{} {
 	if c == nil {
 		return nil
 	}
+	var original interface{} = c.Original
+	if math.IsNaN(c.Original) {
+		original = "NaN"
+	} else if math.IsInf(c.Original, 1) {
+		original = "+Inf"
+	} else if math.IsInf(c.Original, -1) {
+		original = "-Inf"
+	}
 	return map[string]interface{}{
 		"op":       c.Op,
-		"kind":     c.Kind,
-		"original": c.Original,
+		"kind":     string(c.Kind),
+		"original": original,
 		"clamped":  c.Clamped,
 	}
 }

@@ -10,13 +10,13 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/dto"
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting"
-	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,8 +48,10 @@ func RunMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 	logger.LogInfo(ctx, fmt.Sprintf("检测到未完成的任务数有: %v", len(tasks)))
 	taskChannelM := make(map[int][]string)
 	taskM := make(map[string]*model.Midjourney)
+	taskByID := make(map[int]*model.Midjourney)
 	nullTaskIds := make([]int, 0)
 	for _, task := range tasks {
+		taskByID[task.Id] = task
 		if task.MjId == "" {
 			// 统计失败的未完成任务
 			nullTaskIds = append(nullTaskIds, task.Id)
@@ -60,14 +62,14 @@ func RunMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 	}
 	if len(nullTaskIds) > 0 {
 		summary.NullTasksFailed = len(nullTaskIds)
-		err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
-			"status":   "FAILURE",
-			"progress": "100%",
-		})
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
-		} else {
-			logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
+		for _, taskID := range nullTaskIds {
+			task := taskByID[taskID]
+			if task == nil {
+				continue
+			}
+			if err := service.MarkMidjourneyBillingUnknown(ctx, task, "上游任务 ID 缺失，无法确认任务结果"); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
+			}
 		}
 	}
 	if len(taskChannelM) == 0 {
@@ -92,13 +94,14 @@ func RunMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		midjourneyChannel, err := model.CacheGetChannel(channelId)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-			err := model.MjBulkUpdate(taskIds, map[string]any{
-				"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-				"status":      "FAILURE",
-				"progress":    "100%",
-			})
-			if err != nil {
-				logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+			for _, taskID := range taskIds {
+				task := taskM[taskID]
+				if task == nil {
+					continue
+				}
+				if updateErr := service.MarkMidjourneyBillingUnknown(ctx, task, fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId)); updateErr != nil {
+					logger.LogError(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", updateErr))
+				}
 			}
 			continue
 		}
@@ -209,13 +212,18 @@ func RunMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 				task.Progress = "100%"
 				if task.Quota != 0 {
 					shouldReturnQuota = true
+					if err := service.PrepareMidjourneyRefund(task); err != nil {
+						logger.LogWarn(ctx, fmt.Sprintf("Midjourney task %s refund deferred: %v", task.MjId, err))
+					}
 				}
 			}
 			won, err := task.UpdateWithStatus(preStatus)
 			if err != nil {
 				logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
 			} else if won && shouldReturnQuota {
-				service.RefundMidjourneyQuota(ctx, task, "构图失败")
+				if !service.RefundMidjourneyQuota(ctx, task, "构图失败") {
+					logger.LogWarn(ctx, fmt.Sprintf("Midjourney task %s refund remains pending", task.MjId))
+				}
 			}
 		}
 	}

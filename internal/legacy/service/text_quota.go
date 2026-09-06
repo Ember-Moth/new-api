@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
@@ -63,6 +63,7 @@ type textQuotaSummary struct {
 	IsClaudeUsageSemantic  bool
 	UsageSemantic          string
 	AudioInputPrice        float64
+	QuotaPerUnit           float64
 	ToolSurchargeItems     []ToolSurchargeItem
 	ToolCallSurchargeQuota decimal.Decimal
 }
@@ -99,11 +100,11 @@ func isLegacyClaudeDerivedOpenAIUsage(relayInfo *relaycommon.RelayInfo, usage *d
 	return usage.ClaudeCacheCreation5mTokens > 0 || usage.ClaudeCacheCreation1hTokens > 0
 }
 
-func collectToolSurchargeItem(items []ToolSurchargeItem, name string, count int, modelName string) []ToolSurchargeItem {
+func collectToolSurchargeItem(relayInfo *relaycommon.RelayInfo, items []ToolSurchargeItem, name string, count int, modelName string) []ToolSurchargeItem {
 	if count <= 0 {
 		return items
 	}
-	price := operation_setting.GetToolPriceForModel(name, modelName)
+	price := relayInfo.ToolPriceForModel(name, modelName)
 	if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
 		return items
 	}
@@ -146,7 +147,7 @@ func mergeToolSurchargeItems(items []ToolSurchargeItem) []ToolSurchargeItem {
 
 func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary *textQuotaSummary) decimal.Decimal {
 	dGroupRatio := decimal.NewFromFloat(summary.GroupRatio)
-	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	dQuotaPerUnit := decimal.NewFromFloat(relayInfo.QuotaPerUnit())
 
 	var items []ToolSurchargeItem
 
@@ -155,15 +156,16 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 			if tool == nil {
 				continue
 			}
-			items = collectToolSurchargeItem(items, name, tool.CallCount, summary.ModelName)
+			items = collectToolSurchargeItem(relayInfo, items, name, tool.CallCount, summary.ModelName)
 		}
 	}
 	if relayInfo.RelayMode != relayconstant.RelayModeResponses &&
 		strings.HasSuffix(summary.ModelName, "search-preview") {
-		items = collectToolSurchargeItem(items, dto.BuildInToolWebSearchPreview, 1, summary.ModelName)
+		items = collectToolSurchargeItem(relayInfo, items, dto.BuildInToolWebSearchPreview, 1, summary.ModelName)
 	}
 
 	items = collectToolSurchargeItem(
+		relayInfo,
 		items,
 		dto.BuildInToolWebSearch,
 		ctx.GetInt("claude_web_search_requests"),
@@ -171,7 +173,7 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 	)
 
 	if ctx.GetBool("gemini_google_search_call") {
-		items = collectToolSurchargeItem(items, dto.BuildInToolGoogleSearch, 1, summary.ModelName)
+		items = collectToolSurchargeItem(relayInfo, items, dto.BuildInToolGoogleSearch, 1, summary.ModelName)
 	}
 
 	summary.ToolSurchargeItems = mergeToolSurchargeItems(items)
@@ -238,6 +240,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		ModelRatio:           relayInfo.PriceData.ModelRatio,
 		GroupRatio:           relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 		ModelPrice:           relayInfo.PriceData.ModelPrice,
+		QuotaPerUnit:         relayInfo.QuotaPerUnit(),
 		CacheCreationRatio:   relayInfo.PriceData.CacheCreationRatio,
 		CacheCreationRatio5m: relayInfo.PriceData.CacheCreation5mRatio,
 		CacheCreationRatio1h: relayInfo.PriceData.CacheCreation1hRatio,
@@ -269,9 +272,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 	if isOpenRouterClaudeBilling {
 		summary.PromptTokens -= summary.CacheTokens
-		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(summary.ModelName, relayInfo.PriceData.ModelRatio)
+		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(summary.ModelName, relayInfo.PriceData.ModelRatio, relayInfo)
 		if summary.CacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
-			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
+			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData, relayInfo)
 			if maybeCacheCreationTokens >= 0 && summary.PromptTokens >= maybeCacheCreationTokens {
 				summary.CacheCreationTokens = maybeCacheCreationTokens
 			}
@@ -294,7 +297,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dCacheCreationRatio := decimal.NewFromFloat(summary.CacheCreationRatio)
 	dCacheCreationRatio5m := decimal.NewFromFloat(summary.CacheCreationRatio5m)
 	dCacheCreationRatio1h := decimal.NewFromFloat(summary.CacheCreationRatio1h)
-	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	dQuotaPerUnit := decimal.NewFromFloat(summary.QuotaPerUnit)
 
 	ratio := dModelRatio.Mul(dGroupRatio)
 	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
@@ -426,7 +429,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			Mul(decimal.NewFromInt(int64(item.Count))).
 			Div(decimal.NewFromInt(1000)).
 			Mul(decimal.NewFromFloat(summary.GroupRatio)).
-			Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+			Mul(decimal.NewFromFloat(relayInfo.QuotaPerUnit()))
 		extraContent = append(extraContent, fmt.Sprintf(
 			"%s 调用 %d 次，调用花费 %s",
 			item.Name,
@@ -435,20 +438,18 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		))
 	}
 	if summary.AudioInputPrice > 0 && summary.AudioTokens > 0 {
-		q := decimal.NewFromFloat(summary.AudioInputPrice).Div(decimal.NewFromInt(1000000)).Mul(decimal.NewFromInt(int64(summary.AudioTokens))).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+		q := decimal.NewFromFloat(summary.AudioInputPrice).Div(decimal.NewFromInt(1000000)).Mul(decimal.NewFromInt(int64(summary.AudioTokens))).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(relayInfo.QuotaPerUnit()))
 		extraContent = append(extraContent, fmt.Sprintf("Audio Input 花费 %s", logger.LogQuota(common.QuotaFromDecimal(q))))
 	}
 
 	if !summary.hasBillableUsage() {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
-	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	billingErr := SettleBilling(ctx, relayInfo, summary.Quota, summary.hasBillableUsage())
+	if billingErr != nil {
+		logger.LogError(ctx, "billing settlement pending: "+billingErr.Error())
 	}
 
 	logModel := summary.ModelName
@@ -520,6 +521,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 
+	if billingErr != nil {
+		other.SetPublic("billing_status", "pending")
+		other.SetAdmin("billing_request_id", relayInfo.RequestId)
+	} else {
+		other.SetPublic("billing_status", "settled")
+	}
 	attachQuotaSaturation(ctx, relayInfo, other)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

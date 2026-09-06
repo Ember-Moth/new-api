@@ -280,6 +280,7 @@ func Run(assets router.WebAssets) {
 	go controller.SyncTaskPlugins(runCtx)
 	tasktransport.RegisterMaintenanceTasks(systemService, tasktransport.MaintenanceWorkloads{
 		AuthArtifactCleanup:     service.RunAuthArtifactCleanup,
+		BillingRecovery:         service.RunBillingRecovery,
 		CodexCredentialRefresh:  service.RunCodexCredentialAutoRefreshOnce,
 		SubscriptionMaintenance: subscriptionService.RunMaintenance,
 	})

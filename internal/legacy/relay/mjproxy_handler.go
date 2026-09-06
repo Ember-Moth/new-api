@@ -2,7 +2,6 @@ package relay
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -27,6 +26,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func writeMidjourneyResponse(c *gin.Context, statusCode int, body []byte) *dto.MidjourneyResponse {
+	c.Writer.WriteHeader(statusCode)
+	if _, err := io.Copy(c.Writer, bytes.NewBuffer(body)); err != nil {
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "copy_response_body_failed")
+	}
+	return nil
+}
 
 func RelayMidjourneyImage(c *gin.Context) {
 	taskId := c.Param("id")
@@ -127,11 +134,11 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	midjourneyTask.FinishTime = midjRequest.FinishTime
 	midjourneyTask.ImageUrl = midjRequest.ImageUrl
 	midjourneyTask.VideoUrl = midjRequest.VideoUrl
-	videoUrlsStr, _ := json.Marshal(midjRequest.VideoUrls)
+	videoUrlsStr, _ := common.Marshal(midjRequest.VideoUrls)
 	midjourneyTask.VideoUrls = string(videoUrlsStr)
 	midjourneyTask.Status = midjRequest.Status
 	midjourneyTask.FailReason = midjRequest.FailReason
-	err = midjourneyTask.Update()
+	err = midjourneyTask.UpdateNotifyState()
 	if err != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
@@ -169,21 +176,21 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	midjourneyTask.Prompt = originTask.Prompt
 	if originTask.Buttons != "" {
 		var buttons []dto.ActionButton
-		err := json.Unmarshal([]byte(originTask.Buttons), &buttons)
+		err := common.Unmarshal([]byte(originTask.Buttons), &buttons)
 		if err == nil {
 			midjourneyTask.Buttons = buttons
 		}
 	}
 	if originTask.VideoUrls != "" {
 		var videoUrls []dto.ImgUrls
-		err := json.Unmarshal([]byte(originTask.VideoUrls), &videoUrls)
+		err := common.Unmarshal([]byte(originTask.VideoUrls), &videoUrls)
 		if err == nil {
 			midjourneyTask.VideoUrls = videoUrls
 		}
 	}
 	if originTask.Properties != "" {
 		var properties dto.Properties
-		err := json.Unmarshal([]byte(originTask.Properties), &properties)
+		err := common.Unmarshal([]byte(originTask.Properties), &properties)
 		if err == nil {
 			midjourneyTask.Properties = &properties
 		}
@@ -212,19 +219,28 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			Description: err.Error(),
 		}
 	}
-
-	userQuota, err := model.GetUserQuota(info.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
-		}
+	info.ForcePreConsume = true
+	billingPrepared, billingErr := service.PreConsumeMidjourneyBilling(c, info, priceData.Quota)
+	if billingErr != nil {
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "pre_consume_midjourney_billing_failed")
 	}
-
-	if userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
+	midjourneyTask := &model.Midjourney{
+		UserId:     info.UserId,
+		Action:     constant.MjActionSwapFace,
+		Prompt:     "InsightFace",
+		SubmitTime: info.StartTime.UnixNano() / int64(time.Millisecond),
+		StartTime:  time.Now().UnixNano() / int64(time.Millisecond),
+		Progress:   "0%",
+		ChannelId:  c.GetInt("channel_id"),
+	}
+	if _, err := service.PrepareMidjourneyTaskBilling(info, midjourneyTask, priceData.Quota, billingPrepared); err != nil {
+		_ = service.RefundMidjourneyBilling(c.Request.Context(), info)
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "prepare_midjourney_billing_failed")
+	}
+	if billingPrepared {
+		if err := service.MarkMidjourneyDispatch(c.Request.Context(), info, midjourneyTask.GetBillingChannelId()); err != nil {
+			_ = service.RefundMidjourneyBilling(c.Request.Context(), info)
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "mark_midjourney_dispatch_failed")
 		}
 	}
 	requestURL := getMjRequestPath(c.Request.URL.String())
@@ -232,43 +248,105 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
 	mjResp, _, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
+		if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游响应未知，无法确认 swap face 任务是否创建"); persistErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+		}
 		return &mjResp.Response
 	}
 	midjResponse := &mjResp.Response
-	midjourneyTask := &model.Midjourney{
-		UserId:      info.UserId,
-		Code:        midjResponse.Code,
-		Action:      constant.MjActionSwapFace,
-		MjId:        midjResponse.Result,
-		Prompt:      "InsightFace",
-		PromptEn:    "",
-		Description: midjResponse.Description,
-		State:       "",
-		SubmitTime:  info.StartTime.UnixNano() / int64(time.Millisecond),
-		StartTime:   time.Now().UnixNano() / int64(time.Millisecond),
-		FinishTime:  0,
-		ImageUrl:    "",
-		Status:      "",
-		Progress:    "0%",
-		FailReason:  "",
-		ChannelId:   c.GetInt("channel_id"),
+	midjourneyTask.Code = midjResponse.Code
+	midjourneyTask.MjId = midjResponse.Result
+	midjourneyTask.Description = midjResponse.Description
+	if mjResp.StatusCode != http.StatusOK {
+		if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游 HTTP 状态异常，无法确认 swap face 任务是否创建"); persistErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+		}
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_outcome_unknown")
 	}
-	billingPrepared, billingErr := service.PrepareMidjourneyTaskBilling(
-		info,
-		midjourneyTask,
-		priceData.Quota,
-		mjResp.StatusCode == http.StatusOK && midjResponse.Code == 1,
-	)
-	if billingErr != nil {
-		common.SysLog("error consuming Midjourney quota: " + billingErr.Error())
+	if midjResponse.Code != 1 {
+		if refundErr := service.RefundConfirmedMidjourneyBilling(c.Request.Context(), info); refundErr != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_refund_pending")
+		}
+		c.Writer.WriteHeader(mjResp.StatusCode)
+		respBody, marshalErr := common.Marshal(midjResponse)
+		if marshalErr != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "marshal_response_body_failed")
+		}
+		_, copyErr := io.Copy(c.Writer, bytes.NewBuffer(respBody))
+		if copyErr != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "copy_response_body_failed")
+		}
+		return nil
 	}
-	err = midjourneyTask.Insert()
+	if strings.TrimSpace(midjourneyTask.MjId) == "" {
+		if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游成功响应缺少稳定任务 ID"); persistErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+		}
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_identity_unknown")
+	}
+	if existing := model.GetByOnlyMJId(midjourneyTask.MjId); existing != nil {
+		if existing.UserId != info.UserId || existing.ChannelId != midjourneyTask.ChannelId {
+			if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游任务 ID 已属于其他用户"); persistErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+			}
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_identity_conflict")
+		}
+		if billingPrepared && existing.BillingRequestID == info.RequestId {
+			if settled, settleErr := service.SettleMidjourneyTaskBilling(info, existing, true); settleErr != nil || !settled {
+				return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_settlement_pending")
+			}
+			body, marshalErr := common.Marshal(midjResponse)
+			if marshalErr != nil {
+				return service.MidjourneyErrorWrapper(constant.MjRequestError, "marshal_response_body_failed")
+			}
+			return writeMidjourneyResponse(c, mjResp.StatusCode, body)
+		}
+		if refundErr := service.RefundConfirmedMidjourneyBilling(c.Request.Context(), info); refundErr != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_refund_pending")
+		}
+		c.Writer.WriteHeader(mjResp.StatusCode)
+		respBody, marshalErr := common.Marshal(midjResponse)
+		if marshalErr != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "marshal_response_body_failed")
+		}
+		_, copyErr := io.Copy(c.Writer, bytes.NewBuffer(respBody))
+		if copyErr != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "copy_response_body_failed")
+		}
+		return nil
+	}
+	err = service.PersistMidjourneyTaskWithBilling(midjourneyTask, billingPrepared)
 	if err != nil {
+		if existing := model.GetByOnlyMJId(midjourneyTask.MjId); existing != nil {
+			if existing.UserId == info.UserId && existing.ChannelId == midjourneyTask.ChannelId && billingPrepared && existing.BillingRequestID == info.RequestId {
+				if settled, settleErr := service.SettleMidjourneyTaskBilling(info, existing, true); settleErr == nil && settled {
+					body, marshalErr := common.Marshal(midjResponse)
+					if marshalErr == nil {
+						return writeMidjourneyResponse(c, mjResp.StatusCode, body)
+					}
+				}
+			} else if existing.UserId == info.UserId && existing.ChannelId == midjourneyTask.ChannelId && billingPrepared {
+				if refundErr := service.RefundConfirmedMidjourneyBilling(c.Request.Context(), info); refundErr == nil {
+					body, marshalErr := common.Marshal(midjResponse)
+					if marshalErr == nil {
+						return writeMidjourneyResponse(c, mjResp.StatusCode, body)
+					}
+				}
+			} else if billingPrepared {
+				if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "本地任务写入失败，需核对上游 swap face 结果"); persistErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+				}
+			}
+		} else if billingPrepared {
+			if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "本地任务写入失败，需核对上游 swap face 结果"); persistErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+			}
+		}
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
 	}
 	billingApplied, billingErr := service.SettleMidjourneyTaskBilling(info, midjourneyTask, billingPrepared)
-	if billingErr != nil {
-		common.SysLog("error settling Midjourney quota: " + billingErr.Error())
+	if billingPrepared && (billingErr != nil || !billingApplied) {
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_settlement_pending")
 	}
 	if billingApplied {
 		billingChannelId := midjourneyTask.GetBillingChannelId()
@@ -285,11 +363,9 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			Group:     info.UsingGroup,
 			Other:     other,
 		})
-		model.UpdateUserUsedQuotaAndRequestCount(info.UserId, midjourneyTask.Quota)
-		model.UpdateChannelUsedQuota(billingChannelId, midjourneyTask.Quota)
 	}
 	c.Writer.WriteHeader(mjResp.StatusCode)
-	respBody, err := json.Marshal(midjResponse)
+	respBody, err := common.Marshal(midjResponse)
 	if err != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "unmarshal_response_body_failed")
 	}
@@ -325,7 +401,7 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 	}
 	midjResponse := &midjResponseWithStatus.Response
 	c.Writer.WriteHeader(midjResponseWithStatus.StatusCode)
-	respBody, err := json.Marshal(midjResponse)
+	respBody, err := common.Marshal(midjResponse)
 	if err != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "unmarshal_response_body_failed")
 	}
@@ -348,7 +424,7 @@ func RelayMidjourneyTask(c *gin.Context, relayMode int) *dto.MidjourneyResponse 
 			}
 		}
 		midjourneyTask := coverMidjourneyTaskDto(c, originTask)
-		respBody, err = json.Marshal(midjourneyTask)
+		respBody, err = common.Marshal(midjourneyTask)
 		if err != nil {
 			return &dto.MidjourneyResponse{
 				Code:        4,
@@ -359,7 +435,7 @@ func RelayMidjourneyTask(c *gin.Context, relayMode int) *dto.MidjourneyResponse 
 		var condition = struct {
 			IDs []string `json:"ids"`
 		}{}
-		err = c.BindJSON(&condition)
+		err = common.UnmarshalBodyReusable(c, &condition)
 		if err != nil {
 			return &dto.MidjourneyResponse{
 				Code:        4,
@@ -377,7 +453,7 @@ func RelayMidjourneyTask(c *gin.Context, relayMode int) *dto.MidjourneyResponse 
 		if tasks == nil {
 			tasks = make([]dto.MidjourneyDto, 0)
 		}
-		respBody, err = json.Marshal(tasks)
+		respBody, err = common.Marshal(tasks)
 		if err != nil {
 			return &dto.MidjourneyResponse{
 				Code:        4,
@@ -534,23 +610,40 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	billingPrepared := false
+	if consumeQuota {
+		relayInfo.ForcePreConsume = true
+		billingPrepared, err = service.PreConsumeMidjourneyBilling(c, relayInfo, priceData.Quota)
+		if err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "pre_consume_midjourney_billing_failed")
 		}
 	}
-
-	if consumeQuota && userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
+	midjourneyTask := &model.Midjourney{
+		UserId:     relayInfo.UserId,
+		Action:     midjRequest.Action,
+		Prompt:     midjRequest.Prompt,
+		SubmitTime: time.Now().UnixNano() / int64(time.Millisecond),
+		Progress:   "0%",
+		ChannelId:  c.GetInt("channel_id"),
+	}
+	if _, err := service.PrepareMidjourneyTaskBilling(relayInfo, midjourneyTask, priceData.Quota, billingPrepared); err != nil {
+		_ = service.RefundMidjourneyBilling(c.Request.Context(), relayInfo)
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "prepare_midjourney_billing_failed")
+	}
+	if billingPrepared {
+		if err := service.MarkMidjourneyDispatch(c.Request.Context(), relayInfo, midjourneyTask.GetBillingChannelId()); err != nil {
+			_ = service.RefundMidjourneyBilling(c.Request.Context(), relayInfo)
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "mark_midjourney_dispatch_failed")
 		}
 	}
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
+		if billingPrepared {
+			if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游响应未知，无法确认 Midjourney 任务是否创建"); persistErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+			}
+		}
 		return &midjResponseWithStatus.Response
 	}
 	midjResponse := &midjResponseWithStatus.Response
@@ -562,24 +655,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	// 23-队列已满，请稍后再试 {"code":23,"description":"队列已满，请稍后尝试","result":"14001929738841620","properties":{"discordInstanceId":"1118138338562560102"}}
 	// 24-prompt包含敏感词 {"code":24,"description":"可能包含敏感词","properties":{"promptEn":"nude body","bannedWord":"nude"}}
 	// other: 提交错误，description为错误描述
-	midjourneyTask := &model.Midjourney{
-		UserId:      relayInfo.UserId,
-		Code:        midjResponse.Code,
-		Action:      midjRequest.Action,
-		MjId:        midjResponse.Result,
-		Prompt:      midjRequest.Prompt,
-		PromptEn:    "",
-		Description: midjResponse.Description,
-		State:       "",
-		SubmitTime:  time.Now().UnixNano() / int64(time.Millisecond),
-		StartTime:   0,
-		FinishTime:  0,
-		ImageUrl:    "",
-		Status:      "",
-		Progress:    "0%",
-		FailReason:  "",
-		ChannelId:   c.GetInt("channel_id"),
-	}
+	providerCode := midjResponse.Code
+	midjourneyTask.Code = providerCode
+	midjourneyTask.MjId = midjResponse.Result
+	midjourneyTask.Description = midjResponse.Description
 	if midjResponse.Code == 3 {
 		//无实例账号自动禁用渠道（No available account instance）
 		if runtimeKeyPoolFingerprint != "" && runtimeAutoBan && common.AutomaticDisableChannelEnabled {
@@ -619,25 +698,98 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		midjourneyTask.Progress = "100%"
 		midjourneyTask.Status = "SUCCESS"
 	}
-	billingPrepared, billingErr := service.PrepareMidjourneyTaskBilling(
-		relayInfo,
-		midjourneyTask,
-		priceData.Quota,
-		consumeQuota && midjResponseWithStatus.StatusCode == http.StatusOK,
-	)
-	if billingErr != nil {
-		common.SysLog("error consuming Midjourney quota: " + billingErr.Error())
+	accepted := providerCode == 1 || providerCode == 21 || providerCode == 22
+	if midjResponseWithStatus.StatusCode != http.StatusOK {
+		accepted = false
 	}
-	err = midjourneyTask.Insert()
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "insert_midjourney_task_failed",
+	if billingPrepared && midjResponseWithStatus.StatusCode != http.StatusOK {
+		if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游 HTTP 状态异常，无法确认 Midjourney 任务是否创建"); persistErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
 		}
+		return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_outcome_unknown")
+	}
+	if !accepted {
+		if billingPrepared {
+			if strings.TrimSpace(midjourneyTask.MjId) != "" {
+				if existing := model.GetByOnlyMJId(midjourneyTask.MjId); existing != nil && existing.UserId != relayInfo.UserId || existing.ChannelId != midjourneyTask.ChannelId {
+					if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游错误响应的任务 ID 已属于其他用户"); persistErr != nil {
+						logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+					}
+					return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_identity_conflict")
+				}
+			}
+			if refundErr := service.RefundConfirmedMidjourneyBilling(c.Request.Context(), relayInfo); refundErr != nil {
+				return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_refund_pending")
+			}
+		}
+		if !billingPrepared {
+			midjourneyTask.BillingPending = false
+			midjourneyTask.BillingAction = ""
+			midjourneyTask.BillingOperationID = ""
+			midjourneyTask.BillingTargetQuota = 0
+			midjourneyTask.BillingDelta = 0
+			if err := service.PersistMidjourneyTaskWithBilling(midjourneyTask, false); err != nil {
+				return &dto.MidjourneyResponse{Code: 4, Description: "insert_midjourney_task_failed"}
+			}
+		}
+		return writeMidjourneyResponse(c, midjResponseWithStatus.StatusCode, responseBody)
+	}
+	if strings.TrimSpace(midjourneyTask.MjId) == "" {
+		if billingPrepared {
+			if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游成功响应缺少稳定任务 ID"); persistErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+			}
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_identity_unknown")
+		}
+		return writeMidjourneyResponse(c, midjResponseWithStatus.StatusCode, responseBody)
+	}
+	if existing := model.GetByOnlyMJId(midjourneyTask.MjId); existing != nil {
+		if existing.UserId != relayInfo.UserId || existing.ChannelId != midjourneyTask.ChannelId {
+			if billingPrepared {
+				if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "上游任务 ID 已属于其他用户"); persistErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+				}
+			}
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_task_identity_conflict")
+		}
+		if billingPrepared && existing.BillingRequestID == relayInfo.RequestId {
+			if settled, settleErr := service.SettleMidjourneyTaskBilling(relayInfo, existing, true); settleErr != nil || !settled {
+				return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_settlement_pending")
+			}
+			return writeMidjourneyResponse(c, midjResponseWithStatus.StatusCode, responseBody)
+		}
+		if billingPrepared {
+			if refundErr := service.RefundConfirmedMidjourneyBilling(c.Request.Context(), relayInfo); refundErr != nil {
+				return service.MidjourneyErrorWrapper(constant.MjRequestError, "midjourney_billing_refund_pending")
+			}
+		}
+		return writeMidjourneyResponse(c, midjResponseWithStatus.StatusCode, responseBody)
+	}
+	if err := service.PersistMidjourneyTaskWithBilling(midjourneyTask, billingPrepared); err != nil {
+		if existing := model.GetByOnlyMJId(midjourneyTask.MjId); existing != nil {
+			if existing.UserId == relayInfo.UserId && existing.ChannelId == midjourneyTask.ChannelId && billingPrepared && existing.BillingRequestID == relayInfo.RequestId {
+				if settled, settleErr := service.SettleMidjourneyTaskBilling(relayInfo, existing, true); settleErr == nil && settled {
+					return writeMidjourneyResponse(c, midjResponseWithStatus.StatusCode, responseBody)
+				}
+			} else if existing.UserId == relayInfo.UserId && existing.ChannelId == midjourneyTask.ChannelId && billingPrepared {
+				if refundErr := service.RefundConfirmedMidjourneyBilling(c.Request.Context(), relayInfo); refundErr == nil {
+					return writeMidjourneyResponse(c, midjResponseWithStatus.StatusCode, responseBody)
+				}
+			} else if billingPrepared {
+				if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "本地任务写入失败，需核对上游 Midjourney 结果"); persistErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+				}
+			}
+		} else if billingPrepared {
+			if persistErr := service.PersistMidjourneyUnknownTask(c.Request.Context(), midjourneyTask, priceData.Quota, "本地任务写入失败，需核对上游 Midjourney 结果"); persistErr != nil {
+				logger.LogWarn(c, fmt.Sprintf("persist unknown Midjourney task failed: %v", persistErr))
+			}
+		}
+		return &dto.MidjourneyResponse{Code: 4, Description: "insert_midjourney_task_failed"}
 	}
 	billingApplied, billingErr := service.SettleMidjourneyTaskBilling(relayInfo, midjourneyTask, billingPrepared)
-	if billingErr != nil {
-		common.SysLog("error settling Midjourney quota: " + billingErr.Error())
+	if billingPrepared && (billingErr != nil || !billingApplied) {
+		return &dto.MidjourneyResponse{Code: 4, Description: "midjourney_billing_settlement_pending"}
 	}
 	if billingApplied {
 		billingChannelId := midjourneyTask.GetBillingChannelId()
@@ -654,8 +806,6 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			Group:     relayInfo.UsingGroup,
 			Other:     other,
 		})
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, midjourneyTask.Quota)
-		model.UpdateChannelUsedQuota(billingChannelId, midjourneyTask.Quota)
 	}
 
 	if midjResponse.Code == 22 { //22-排队中，说明任务已存在

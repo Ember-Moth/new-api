@@ -6,17 +6,15 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/helper"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
-	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
@@ -73,11 +71,11 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 	adaptor.Init(info)
 
-	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	passThroughGlobal := info.GlobalPassThroughRequestEnabled()
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughGlobal &&
 		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		service.ShouldChatCompletionsUseResponsesPolicy(info.ChatResponsesPolicy(), info.ChannelId, info.ChannelType, info.OriginModelName) {
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := textRequestViaResponses(c, info, adaptor, request)
 		if newApiErr != nil {
@@ -85,7 +83,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 
 		var containAudioTokens = usage.CompletionTokenDetails.AudioTokens > 0 || usage.PromptTokensDetails.AudioTokens > 0
-		var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
+		var containsAudioRatios = info.ContainsAudioRatio(info.OriginModelName) || info.ContainsAudioCompletionRatio(info.OriginModelName)
 
 		if containAudioTokens && containsAudioRatios {
 			service.PostAudioConsumeQuota(c, info, usage, "")
@@ -163,7 +161,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 
 		// remove disabled fields for OpenAI API
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled, info)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
@@ -214,7 +212,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	var containAudioTokens = usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0
-	var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
+	var containsAudioRatios = info.ContainsAudioRatio(info.OriginModelName) || info.ContainsAudioCompletionRatio(info.OriginModelName)
 
 	if containAudioTokens && containsAudioRatios {
 		service.PostAudioConsumeQuota(c, info, usage.(*dto.Usage), "")

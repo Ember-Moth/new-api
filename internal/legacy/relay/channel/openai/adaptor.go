@@ -13,13 +13,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/ai360"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/lingyiwanwu"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/openrouter"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 
 	//"github.com/QuantumNous/new-api/internal/legacy/relay/channel/minimax"
@@ -27,11 +27,9 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/common_handler"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
-	"github.com/QuantumNous/new-api/internal/config/setting/reasoning"
 	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
@@ -253,9 +251,10 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	// projection even without a protocol conversion hop. Native top-level
 	// reasoning_effort stays untouched unless a modifier or conversion applies.
 	// OpenRouter retains its own dialect normalization below.
-	preserveSuffix := model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) || model_setting.ShouldPreserveThinkingSuffix(info.UpstreamModelName)
-	upstreamEffort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName)
-	originEffort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName)
+	convOptions := info.ConvOptions()
+	preserveSuffix := convOptions.ShouldPreserveThinkingSuffix(info.OriginModelName) || convOptions.ShouldPreserveThinkingSuffix(info.UpstreamModelName)
+	upstreamEffort, _ := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName, convOptions.PreserveEffortTail)
+	originEffort, _ := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName, convOptions.PreserveEffortTail)
 	renderReasoning := len(request.Reasoning) > 0 || len(info.RequestConversionChain) > 1 || request.ReasoningConversion != nil || info.ReasoningState() != nil ||
 		!preserveSuffix && (upstreamEffort != "" || originEffort != "")
 	if info.ChannelType != constant.ChannelTypeOpenRouter && !renderReasoning {
@@ -286,7 +285,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 		// 合并 effort 尾巴产生的意图
 		mergeEffortSuffix := func(modelName string) error {
-			rawEffort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(modelName)
+			rawEffort, _ := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(modelName, convOptions.PreserveEffortTail)
 			if rawEffort == "" {
 				return nil
 			}
@@ -305,7 +304,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			if err := mergeEffortSuffix(info.UpstreamModelName); err != nil {
 				return nil, kitreasoning.AsClientError(err)
 			}
-			if _, baseModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName); baseModel != info.UpstreamModelName {
+			if _, baseModel := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName, convOptions.PreserveEffortTail); baseModel != info.UpstreamModelName {
 				info.UpstreamModelName = baseModel
 				request.Model = baseModel
 			}
@@ -386,7 +385,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	}
 
 	if info.ChannelType != constant.ChannelTypeOpenRouter && renderReasoning {
-		effort, baseModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName)
+		effort, baseModel := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName, convOptions.PreserveEffortTail)
 		if preserveSuffix {
 			effort = ""
 		}
@@ -413,7 +412,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			return nil, kitreasoning.AsClientError(err)
 		}
 		if !preserveSuffix && info.OriginModelName != info.UpstreamModelName {
-			originEffort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName)
+			originEffort, _ := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName, convOptions.PreserveEffortTail)
 			if err := mergeSuffix(info.OriginModelName, originEffort); err != nil {
 				return nil, kitreasoning.AsClientError(err)
 			}
@@ -671,14 +670,15 @@ func detectImageMimeType(filename string) string {
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
 	//  转换模型推理力度后缀
-	effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model)
-	preserveSuffix := model_setting.ShouldPreserveThinkingSuffix(request.Model) || (info != nil && model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName))
+	convOptions := info.ConvOptions()
+	effort, originModel := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(request.Model, convOptions.PreserveEffortTail)
+	preserveSuffix := convOptions.ShouldPreserveThinkingSuffix(request.Model) || (info != nil && convOptions.ShouldPreserveThinkingSuffix(info.OriginModelName))
 	if preserveSuffix {
 		effort = ""
 	}
 	originEffort := ""
 	if info != nil && !preserveSuffix {
-		originEffort, _ = reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName)
+		originEffort, _ = kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName, convOptions.PreserveEffortTail)
 	}
 	crossProtocol := info != nil && len(info.RequestConversionChain) > 1
 	if (info == nil || info.ChannelType != constant.ChannelTypeOpenRouter) && !crossProtocol && effort == "" && originEffort == "" && request.ReasoningConversion == nil && info.ReasoningState() == nil {
@@ -714,7 +714,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 		return nil, kitreasoning.AsClientError(err)
 	}
 	if !preserveSuffix && info != nil && info.OriginModelName != request.Model {
-		originEffort, _ := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName)
+		originEffort, _ := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.OriginModelName, convOptions.PreserveEffortTail)
 		if err := mergeSuffix(info.OriginModelName, originEffort); err != nil {
 			return nil, kitreasoning.AsClientError(err)
 		}

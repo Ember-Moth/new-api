@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	hosttypes "github.com/QuantumNous/new-api/internal/shared/types"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	hosttypes "github.com/QuantumNous/new-api/internal/shared/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -43,7 +43,7 @@ func TestAttachQuotaSaturationNestsUnderAdminInfo(t *testing.T) {
 	sat, ok := adminInfo["quota_saturation"].(map[string]interface{})
 	require.True(t, ok, "quota_saturation should be nested under admin_info")
 	require.Equal(t, "QuotaFromDecimal", sat["op"])
-	require.Equal(t, common.QuotaClampOverflow, sat["kind"])
+	require.Equal(t, string(common.QuotaClampOverflow), sat["kind"])
 	require.Equal(t, common.MaxQuota, sat["clamped"])
 }
 

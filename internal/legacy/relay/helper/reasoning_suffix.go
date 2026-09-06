@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	hostreasoning "github.com/QuantumNous/new-api/internal/config/setting/reasoning"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
-	hostreasoning "github.com/QuantumNous/new-api/internal/config/setting/reasoning"
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,7 +25,7 @@ func ApplyReasoningModelSuffix(c *gin.Context, info *relaycommon.RelayInfo, outb
 	if info == nil {
 		return nil
 	}
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
+	if info.GlobalPassThroughRequestEnabled() ||
 		info.ChannelMeta != nil && info.ChannelSetting.PassThroughBodyEnabled {
 		return nil
 	}
@@ -208,10 +207,11 @@ func parseHostModelSuffix(name string, opts *convmeta.Options) (string, reasonin
 	if name == "" {
 		return name, reasoning.Intent{}, false, nil
 	}
-	return hostreasoning.ParseLegacyModelSuffix(
+	return hostreasoning.ParseLegacyModelSuffixWithCallbacks(
 		name,
 		opts.Claude.ThinkingAdapterEnabled,
 		opts.Gemini.ThinkingAdapterEnabled,
+		opts.ShouldPreserveEffortTail,
 	)
 }
 

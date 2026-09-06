@@ -7,17 +7,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/claude"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/constant"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -57,7 +56,7 @@ type Adaptor struct {
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
 	// Vertex AI's generateContent schema does not expose the Gemini API's
 	// function-call identity fields. Strip both sides at this provider boundary.
-	if model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled {
+	if info.RemoveFunctionResponseIDEnabled() {
 		removeFunctionCallIDs(request)
 	}
 	geminiAdaptor := gemini.Adaptor{}
@@ -299,7 +298,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		if !ok {
 			return nil, fmt.Errorf("expected Gemini generateContent request, got %T", result.Value)
 		}
-		if model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled {
+		if info.RemoveFunctionResponseIDEnabled() {
 			removeFunctionCallIDs(geminiRequest)
 		}
 		c.Set("request_model", request.Model)

@@ -11,19 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/shared/dto"
-	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/internal/legacy/relay"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 func TestServeTaskPluginProtocolWaitsForDurableSubmissionBeforeWriting(t *testing.T) {
@@ -148,8 +146,8 @@ func TestServeTaskPluginProtocolDisconnectDuringSubmissionFinishesDurableWithout
 }
 
 func TestServeTaskPluginProtocolDisconnectBeforeDurableBarrierPersistsAndSettlesWithoutRefund(t *testing.T) {
-	events := make([]string, 0, 3)
-	database := setupTaskSubmissionDatabase(t, true, &events)
+	database := setupControllerBillingDatabase(t)
+	seedTaskBillingIdentity(t, database, 71, 81, 1, "sk-task-test-81", 100_000)
 	previousLogConsumeEnabled := common.LogConsumeEnabled
 	common.LogConsumeEnabled = false
 	t.Cleanup(func() { common.LogConsumeEnabled = previousLogConsumeEnabled })
@@ -163,7 +161,6 @@ func TestServeTaskPluginProtocolDisconnectBeforeDurableBarrierPersistsAndSettles
 	c, recorder := newPluginProtocolTestContext(true, true)
 	requestContext, cancel := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestContext)
-	billing := &taskSubmissionTestBilling{events: &events}
 	submitStarted := make(chan struct{})
 	releaseSubmit := make(chan struct{})
 	observationStarted := make(chan struct{}, 1)
@@ -171,7 +168,15 @@ func TestServeTaskPluginProtocolDisconnectBeforeDurableBarrierPersistsAndSettles
 
 	deps := pluginProtocolTestDeps()
 	deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+		info.TokenKey = "sk-task-test-81"
+		info.TokenUnlimited = false
+		info.ChannelId = 1
+		info.UserSetting.BillingPreference = "wallet_only"
+		info.LockedChannel = &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "disconnect-before-durable", Key: "channel-key"}
+		billing, apiErr := service.NewBillingSession(nil, info, 7)
+		require.Nil(t, apiErr)
 		info.Billing = billing
+		require.NoError(t, service.MarkBillingDispatch(info))
 		info.TaskRelayInfo.PublicTaskID = "task_disconnect_persisted"
 		info.TaskRelayInfo.LockedChannel = &model.Channel{
 			Id:   1,
@@ -214,13 +219,12 @@ func TestServeTaskPluginProtocolDisconnectBeforeDurableBarrierPersistsAndSettles
 		require.FailNow(t, "detached submission did not finish")
 	}
 
-	assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
-	assert.Zero(t, billing.refunds)
 	var persisted model.Task
 	require.NoError(t, database.Where("task_id = ?", "task_disconnect_persisted").First(&persisted).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusNotStart), persisted.Status)
 	assert.Equal(t, 7, persisted.Quota)
 	assert.Equal(t, "upstream_disconnect_persisted", persisted.PrivateData.UpstreamTaskID)
+	assertTaskBillingBalances(t, database, 71, 81, 1, 99_993, 99_993, 7, 7, 1, 7)
 	assert.Empty(t, recorder.Header().Get("Content-Type"))
 	assert.Empty(t, recorder.Body.String())
 	assert.False(t, recorder.Flushed)
@@ -239,44 +243,14 @@ func TestServeTaskPluginProtocolDisconnectDuringTerminalSettlementStopsOnlyObser
 		}};
 	`)
 
-	previousDB := model.DB
-	previousMemoryCache := common.MemoryCacheEnabled
-	database, err := testdb.Open(t, &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Task{}))
-	model.DB = database
-	common.MemoryCacheEnabled = false
-	t.Cleanup(func() {
-		model.DB = previousDB
-		common.MemoryCacheEnabled = previousMemoryCache
-	})
-	baseURL := "https://example.com"
-	channel := model.Channel{
-		Type:    constant.ChannelTypeTaskPlugin,
-		Name:    "terminal-settlement",
-		Key:     "test-key",
-		BaseURL: &baseURL,
-		Status:  common.ChannelStatusEnabled,
-	}
-	require.NoError(t, database.Create(&channel).Error)
-	task := model.Task{
-		TaskID:    "task_terminal_disconnect",
-		Platform:  constant.TaskPlatform(pinned.Plugin.Meta.Key),
-		UserId:    71,
-		ChannelId: channel.Id,
-		Quota:     10,
-		Status:    model.TaskStatusSubmitted,
-		PrivateData: model.TaskPrivateData{
-			UpstreamTaskID: "upstream-terminal",
-		},
-	}
-	require.NoError(t, database.Create(&task).Error)
+	database := setupControllerBillingDatabase(t)
+	seedTaskBillingIdentity(t, database, 71, 81, 1, "sk-task-test-81", 100_000)
+	var task model.Task
 
 	c, recorder := newPluginProtocolTestContext(true, true)
+	common.SetContextKey(c, common.RequestIdKey, "request-terminal-disconnect")
 	requestContext, cancel := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestContext)
-	billingEvents := make([]string, 0)
-	billing := &taskSubmissionTestBilling{events: &billingEvents}
 	observationStarted := make(chan struct{})
 	settlementStarted := make(chan struct{})
 	releaseSettlement := make(chan struct{})
@@ -299,13 +273,35 @@ func TestServeTaskPluginProtocolDisconnectDuringTerminalSettlementStopsOnlyObser
 	t.Cleanup(func() { service.GetTaskAdaptorFunc = previousAdaptorFactory })
 
 	deps := pluginProtocolTestDeps()
-	deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+	deps.submit = func(submitContext *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+		info.TokenKey = "sk-task-test-81"
+		info.TokenUnlimited = false
+		info.ChannelId = 1
+		info.UserSetting.BillingPreference = "wallet_only"
+		billing, apiErr := service.NewBillingSession(nil, info, 10)
+		require.Nil(t, apiErr)
 		info.Billing = billing
-		return &taskSubmissionOutcome{
-			Result:    &relay.TaskSubmitResult{},
-			Task:      &task,
-			RelayInfo: info,
-		}, nil
+		require.NoError(t, service.MarkBillingDispatch(info))
+		task = model.Task{
+			TaskID:    "task_terminal_disconnect",
+			Platform:  constant.TaskPlatform(pinned.Plugin.Meta.Key),
+			UserId:    71,
+			ChannelId: 1,
+			Quota:     10,
+			Status:    model.TaskStatusSubmitted,
+			Progress:  "0%",
+			PrivateData: model.TaskPrivateData{
+				UpstreamTaskID:        "upstream-terminal",
+				BillingSource:         service.BillingSourceWallet,
+				BillingRequestID:      info.RequestId,
+				BillingTokenUnlimited: false,
+				TokenId:               81,
+			},
+		}
+		require.NoError(t, service.PrepareTaskSubmissionBilling(info, &task))
+		require.NoError(t, database.Create(&task).Error)
+		require.NoError(t, service.SettleTaskSubmissionBilling(submitContext, info, &task))
+		return &taskSubmissionOutcome{Result: &relay.TaskSubmitResult{}, Task: &task, RelayInfo: info}, nil
 	}
 	deps.loadTask = func(ctx context.Context, _ int, _ constant.TaskPlatform, _ string) (*model.Task, bool, error) {
 		close(observationStarted)
@@ -320,7 +316,7 @@ func TestServeTaskPluginProtocolDisconnectDuringTerminalSettlementStopsOnlyObser
 		service.DispatchPlatformUpdate(
 			context.Background(),
 			task.Platform,
-			map[int][]string{channel.Id: {"upstream-terminal"}},
+			map[int][]string{1: {"upstream-terminal"}},
 			map[string]*model.Task{"upstream-terminal": &task},
 		)
 	}()
@@ -340,7 +336,6 @@ func TestServeTaskPluginProtocolDisconnectDuringTerminalSettlementStopsOnlyObser
 		require.FailNow(t, "protocol observation did not stop after terminal disconnect")
 	}
 	assert.Equal(t, []string{"response.created"}, pluginProtocolTestSSEEventTypes(recorder.Body.String()))
-	assert.Zero(t, billing.refunds)
 
 	close(releaseSettlement)
 	select {
@@ -354,8 +349,9 @@ func TestServeTaskPluginProtocolDisconnectDuringTerminalSettlementStopsOnlyObser
 	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), persisted.Status)
 	assert.Equal(t, "100%", persisted.Progress)
 	assert.Equal(t, 10, persisted.Quota)
+	assert.False(t, persisted.BillingPending)
+	assertTaskBillingBalances(t, database, 71, 81, 1, 99_990, 99_990, 10, 10, 1, 10)
 	assert.True(t, adaptor.completed)
-	assert.Empty(t, billingEvents)
 }
 
 type terminalSettlementPollingAdaptor struct {
@@ -1459,6 +1455,12 @@ func newPluginProtocolTestContext(stream, requestBodyStream bool) (*gin.Context,
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`))
 	common.SetContextKey(c, constant.ContextKeyUserId, 71)
 	common.SetContextKey(c, constant.ContextKeyTokenId, 81)
+	common.SetContextKey(c, constant.ContextKeyTokenKey, "sk-task-test-81")
+	common.SetContextKey(c, constant.ContextKeyTokenUnlimited, false)
+	common.SetContextKey(c, constant.ContextKeyUserQuota, 100_000)
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
+	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{BillingPreference: "wallet_only"})
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
 	c.Set("resolved_task_model", "video-model")
 	c.Set(pluginruntime.ContextKeyProtocolRequest, pluginruntime.ProtocolRequestContext{

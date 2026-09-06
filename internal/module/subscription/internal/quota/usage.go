@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"gorm.io/gorm" // Update subscription used amount by delta (positive consume more, negative refund).
+	"gorm.io/gorm/clause"
 )
 
 func (s *Store) PostConsumeUserSubscriptionDelta(ctx context.Context, userSubscriptionId int, delta int64) error {
@@ -18,8 +19,48 @@ func (s *Store) PostConsumeUserSubscriptionDelta(ctx context.Context, userSubscr
 	if delta == 0 {
 		return nil
 	}
-	_, err := adjustSubscriptionUsage(s.db.WithContext(ctx), userSubscriptionId, delta)
+	_, err := s.PostConsumeUserSubscriptionDeltaTx(ctx, s.db, userSubscriptionId, delta)
 	return err
+}
+
+// PostConsumeUserSubscriptionDeltaTx applies a subscription usage delta in
+// the caller's transaction. It is the only form billing sessions and
+// operation receipts should use when token/funding changes must be atomic.
+func (s *Store) PostConsumeUserSubscriptionDeltaTx(ctx context.Context, tx *gorm.DB, userSubscriptionId int, delta int64) (*SubscriptionPreConsumeResult, error) {
+	if userSubscriptionId <= 0 {
+		return nil, errors.New("invalid userSubscriptionId")
+	}
+	if tx == nil {
+		return nil, errors.New("subscription transaction is nil")
+	}
+	if delta == 0 {
+		return &SubscriptionPreConsumeResult{UserSubscriptionId: userSubscriptionId}, nil
+	}
+	return adjustSubscriptionUsage(tx.WithContext(ctx), userSubscriptionId, delta)
+}
+
+// PostConsumeUserSubscriptionDeltaForUserTx binds the subscription leg to the
+// request owner before applying a delta. Callers handling a raw subscription
+// id must use this form so another user's subscription cannot be charged by a
+// replayed operation identity.
+func (s *Store) PostConsumeUserSubscriptionDeltaForUserTx(ctx context.Context, tx *gorm.DB, userID, userSubscriptionId int, delta int64) (*SubscriptionPreConsumeResult, error) {
+	if userID <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if userSubscriptionId <= 0 {
+		return nil, errors.New("invalid userSubscriptionId")
+	}
+	if tx == nil {
+		return nil, errors.New("subscription transaction is nil")
+	}
+	var sub UserSubscription
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", userSubscriptionId, userID).First(&sub).Error; err != nil {
+		return nil, err
+	}
+	if delta == 0 {
+		return &SubscriptionPreConsumeResult{UserSubscriptionId: userSubscriptionId, AmountTotal: sub.AmountTotal, AmountUsedBefore: sub.AmountUsed, AmountUsedAfter: sub.AmountUsed}, nil
+	}
+	return adjustSubscriptionUsage(tx.WithContext(ctx), userSubscriptionId, delta)
 }
 
 // adjustSubscriptionUsage keeps arithmetic in PostgreSQL numeric until the

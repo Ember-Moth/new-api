@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,19 +10,20 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/shared/dto"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/helper"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 	"github.com/QuantumNous/new-api/internal/shared/types"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/gin-gonic/gin"
 )
 
@@ -248,14 +250,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	info.OriginModelName = modelName
 	var priceData types.PriceData
 	var err error
-	useTiered := billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr
+	useTiered := helper.BillingModeForRequest(info, modelName) == billing_setting.BillingModeTieredExpr
 	var exprStr string
 	var exists bool
 	if useTiered {
-		exprStr, exists = billing_setting.GetBillingExpr(modelName)
+		exprStr, exists = helper.BillingExprForRequest(info, modelName)
 	} else if info.IsModelMapped {
-		if billing_setting.GetBillingMode(info.UpstreamModelName) == billing_setting.BillingModeTieredExpr {
-			if tailExpr, tailOK := billing_setting.GetBillingExpr(info.UpstreamModelName); tailOK && strings.TrimSpace(tailExpr) != "" {
+		if helper.BillingModeForRequest(info, info.UpstreamModelName) == billing_setting.BillingModeTieredExpr {
+			if tailExpr, tailOK := helper.BillingExprForRequest(info, info.UpstreamModelName); tailOK && strings.TrimSpace(tailExpr) != "" {
 				exprStr = tailExpr
 				exists = true
 				useTiered = true
@@ -284,10 +286,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			return nil, service.TaskErrorWrapper(runErr, "model_price_error", http.StatusBadRequest)
 		}
 		groupRatioInfo := helper.HandleGroupRatio(c, info)
-		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		quota, clamp := common.QuotaRoundChecked(cost * info.QuotaPerUnit() * groupRatioInfo.GroupRatio)
 		noteTaskQuotaClamp(info, clamp)
 		priceData = types.PriceData{Quota: quota, QuotaToPreConsume: quota, GroupRatioInfo: groupRatioInfo}
-		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * common.QuotaPerUnit, EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts}
+		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * info.QuotaPerUnit(), EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: info.QuotaPerUnit(), ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts}
 	} else {
 		priceData, err = helper.ModelPriceHelperPerCall(c, info)
 		if err != nil {
@@ -339,6 +341,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 9. 发送请求
+	if err := service.MarkBillingDispatch(info); err != nil {
+		return nil, service.TaskErrorWrapperLocal(err, "billing_dispatch_pending", http.StatusServiceUnavailable)
+	}
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
@@ -348,6 +353,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
+			if err := service.ResolveRejectedBillingDispatch(info); err != nil {
+				return nil, service.TaskErrorWrapperLocal(err, "billing_rejection_pending", http.StatusServiceUnavailable)
+			}
+		}
 		responseBody, _ := io.ReadAll(resp.Body)
 		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 	}
@@ -461,7 +471,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
+	if realtimeResp := tryRealtimeFetch(c.Request.Context(), originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
 		respBody = realtimeResp
 		return
 	}
@@ -500,7 +510,10 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。
 // 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
 // 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
-func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
+func tryRealtimeFetch(ctx context.Context, task *model.Task, isOpenAIVideoAPI bool) []byte {
+	if task == nil || strings.TrimSpace(task.PrivateData.UpstreamTaskID) == "" {
+		return nil
+	}
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
 		return nil
@@ -552,7 +565,29 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 	}
 
-	if !snap.Equal(task.Snapshot()) {
+	terminalTransition := (task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure) && snap.Status != task.Status
+	if terminalTransition {
+		if service.TaskSubmissionBillingPending(task) {
+			// The initial session/zero-delta receipt must commit before this
+			// user-triggered fetch publishes the terminal status. Preserve the
+			// observed payload and leave the task eligible for control polling.
+			task.Status = snap.Status
+			task.Progress = snap.Progress
+			_, _ = task.UpdateWithStatus(snap.Status)
+		} else {
+			if err := service.PrepareTaskTerminalBilling(ctx, adaptor, task, ti); err != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("task %s terminal billing plan remains pending: %v", task.TaskID, err))
+			}
+			won, updateErr := task.UpdateWithStatusAndBilling(snap.Status)
+			if updateErr != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("task %s terminal billing marker update failed: %v", task.TaskID, updateErr))
+			} else if won {
+				if !service.SettlePreparedTaskBilling(ctx, adaptor, task, ti) && task.Quota != 0 {
+					logger.LogWarn(ctx, fmt.Sprintf("task %s terminal billing remains pending", task.TaskID))
+				}
+			}
+		}
+	} else if !snap.Equal(task.Snapshot()) {
 		_, _ = task.UpdateWithStatus(snap.Status)
 	}
 
@@ -619,25 +654,26 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 	return &dto.TaskDto{
-		ID:         task.ID,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-		TaskID:     task.TaskID,
-		Platform:   string(task.Platform),
-		UserId:     task.UserId,
-		Group:      task.Group,
-		ChannelId:  task.ChannelId,
-		Quota:      task.Quota,
-		Action:     constant.NormalizeTaskAction(task.Action),
-		Status:     string(task.Status),
-		FailReason: task.FailReason,
-		ResultURL:  task.GetResultURL(),
-		SubmitTime: task.SubmitTime,
-		StartTime:  task.StartTime,
-		FinishTime: task.FinishTime,
-		Progress:   task.Progress,
-		Properties: task.Properties,
-		Username:   task.Username,
-		Data:       task.Data,
+		ID:            task.ID,
+		CreatedAt:     task.CreatedAt,
+		UpdatedAt:     task.UpdatedAt,
+		TaskID:        task.TaskID,
+		Platform:      string(task.Platform),
+		UserId:        task.UserId,
+		Group:         task.Group,
+		ChannelId:     task.ChannelId,
+		Quota:         task.Quota,
+		BillingStatus: service.TaskBillingStatus(task),
+		Action:        constant.NormalizeTaskAction(task.Action),
+		Status:        string(task.Status),
+		FailReason:    task.FailReason,
+		ResultURL:     task.GetResultURL(),
+		SubmitTime:    task.SubmitTime,
+		StartTime:     task.StartTime,
+		FinishTime:    task.FinishTime,
+		Progress:      task.Progress,
+		Properties:    task.Properties,
+		Username:      task.Username,
+		Data:          task.Data,
 	}
 }

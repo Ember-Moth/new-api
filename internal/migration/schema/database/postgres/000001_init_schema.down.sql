@@ -6,6 +6,10 @@ DROP TABLE quota_batch_deliveries;
 
 DROP TABLE quota_batch_receipts;
 
+DROP TABLE billing_adjustment_receipts;
+
+DROP TABLE billing_sessions;
+
 DROP TABLE vendors;
 DROP TABLE users;
 DROP TABLE user_subscriptions;

@@ -9,11 +9,10 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,7 +39,7 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		return nil, err
 	}
 	if request.MaxTokens == nil {
-		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
+		defaultMaxTokens, _ := info.ConvOptions().Claude.DefaultMaxTokensFor(request.Model)
 		request.MaxTokens = &defaultMaxTokens
 	}
 	// ApplyClaudeThinkingModel no longer rewrites request.Model. Do not write
@@ -100,7 +99,7 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 	if anthropicBeta != "" {
 		req.Set("anthropic-beta", anthropicBeta)
 	}
-	model_setting.GetClaudeSettings().WriteHeaders(info.OriginModelName, req)
+	info.WriteClaudeHeaders(info.OriginModelName, req)
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {

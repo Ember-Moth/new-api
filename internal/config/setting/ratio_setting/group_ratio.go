@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/config/setting/config"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/types"
 )
 
@@ -61,6 +61,24 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 
 func GetGroupRatioCopy() map[string]float64 {
 	return groupRatioMap.ReadAll()
+}
+
+// GetGroupGroupRatioCopy returns an independent copy of the nested group
+// override map for request-level configuration snapshots.
+func GetGroupGroupRatioCopy() map[string]map[string]float64 {
+	values := groupGroupRatioMap.ReadAll()
+	if len(values) == 0 {
+		return nil
+	}
+	copyValues := make(map[string]map[string]float64, len(values))
+	for group, overrides := range values {
+		copyOverrides := make(map[string]float64, len(overrides))
+		for usingGroup, ratio := range overrides {
+			copyOverrides[usingGroup] = ratio
+		}
+		copyValues[group] = copyOverrides
+	}
+	return copyValues
 }
 
 func ContainsGroupRatio(name string) bool {

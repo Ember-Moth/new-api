@@ -5,13 +5,15 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"time"
 
+	commonRelay "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
-	commonRelay "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -48,27 +50,64 @@ const (
 const TaskRefundLegacyCutoff int64 = 1771718400 // 2026-02-22 00:00:00 UTC
 
 type Task struct {
-	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt  int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt  int64                 `json:"updated_at"`
-	TaskID     string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform   constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId     int                   `json:"user_id" gorm:"index"`
-	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId  int                   `json:"channel_id" gorm:"index"`
-	Quota      int                   `json:"quota"`
-	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason string                `json:"fail_reason"`
-	SubmitTime int64                 `json:"submit_time" gorm:"index"`
-	StartTime  int64                 `json:"start_time" gorm:"index"`
-	FinishTime int64                 `json:"finish_time" gorm:"index"`
-	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties Properties            `json:"properties" gorm:"type:json"`
-	Username   string                `json:"username,omitempty" gorm:"-"`
+	ID        int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	CreatedAt int64                 `json:"created_at" gorm:"index"`
+	UpdatedAt int64                 `json:"updated_at"`
+	TaskID    string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform  constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId    int                   `json:"user_id" gorm:"index"`
+	Group     string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId int                   `json:"channel_id" gorm:"index"`
+	Quota     int                   `json:"quota"`
+	// Billing fields are a durable hand-off between terminal status changes and
+	// the accounting transaction. A non-empty BillingOperationID means the
+	// task's money movement has not yet been acknowledged by that transaction.
+	BillingPending     bool             `json:"-" gorm:"column:billing_pending;not null"`
+	BillingAction      string           `json:"-" gorm:"column:billing_action;type:varchar(32);not null;default:''"`
+	BillingOperationID string           `json:"-" gorm:"column:billing_operation_id;type:varchar(128);not null;default:''"`
+	BillingTargetQuota int              `json:"-" gorm:"column:billing_target_quota;not null;default:0"`
+	BillingDelta       int              `json:"-" gorm:"column:billing_delta;not null;default:0"`
+	BillingAudit       TaskBillingAudit `json:"-" gorm:"column:billing_audit;type:json"`
+	Action             string           `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
+	Status             TaskStatus       `json:"status" gorm:"type:varchar(20);index"` // 任务状态
+	FailReason         string           `json:"fail_reason"`
+	SubmitTime         int64            `json:"submit_time" gorm:"index"`
+	StartTime          int64            `json:"start_time" gorm:"index"`
+	FinishTime         int64            `json:"finish_time" gorm:"index"`
+	Progress           string           `json:"progress" gorm:"type:varchar(20);index"`
+	Properties         Properties       `json:"properties" gorm:"type:json"`
+	Username           string           `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
+}
+
+// TaskBillingAudit stores admin-only accounting facts that must survive a
+// process crash between a terminal marker and its recovery log. It is kept in
+// its own column so ordinary polling updates can omit it without dropping
+// plugin state or other private task fields.
+type TaskBillingAudit struct {
+	QuotaSaturation map[string]interface{} `json:"quota_saturation,omitempty"`
+}
+
+func (a *TaskBillingAudit) Scan(val interface{}) error {
+	bytesValue := jsonScanBytes(val)
+	if len(bytesValue) == 0 {
+		*a = TaskBillingAudit{}
+		return nil
+	}
+	return common.Unmarshal(bytesValue, a)
+}
+
+func (a TaskBillingAudit) Value() (driver.Value, error) {
+	if len(a.QuotaSaturation) == 0 {
+		return nil, nil
+	}
+	b, err := common.Marshal(a)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 func (t *Task) SetData(data any) {
@@ -116,11 +155,19 @@ type TaskPrivateData struct {
 	// other private task state so public task DTOs cannot expose it by accident.
 	Execution *TaskExecutionSnapshot `json:"execution,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
-	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
-	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
-	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
-	NodeName       string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
-	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	BillingSource  string `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
+	SubscriptionId int    `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
+	TokenId        int    `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
+	// BillingRequestID is the original request identity used to tie a
+	// subscription reservation to this task's later terminal adjustment.
+	BillingRequestID string `json:"billing_request_id,omitempty"`
+	// BillingTokenUnlimited and BillingPlayground preserve the authorization
+	// snapshot used when the task was submitted. They avoid changing a terminal
+	// ledger decision when token settings are edited later.
+	BillingTokenUnlimited bool                `json:"billing_token_unlimited,omitempty"`
+	BillingPlayground     bool                `json:"billing_playground,omitempty"`
+	NodeName              string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
+	BillingContext        *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
 	// ResponsesBackground records that the openai_responses create request
 	// asked for background:true. Every task is durable and survives client
 	// disconnect regardless; this only echoes the protocol-level request
@@ -201,7 +248,8 @@ func (p *TaskPrivateData) Scan(val interface{}) error {
 func (p TaskPrivateData) Value() (driver.Value, error) {
 	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
 		p.Execution == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
-		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
+		p.TokenId == 0 && p.BillingRequestID == "" && !p.BillingTokenUnlimited &&
+		!p.BillingPlayground && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 {
 		return nil, nil
 	}
@@ -240,6 +288,12 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 		if relayInfo.OriginModelName != "" {
 			properties.OriginModelName = relayInfo.OriginModelName
 		}
+	}
+	if relayInfo != nil {
+		privateData.BillingRequestID = relayInfo.RequestId
+		privateData.BillingTokenUnlimited = relayInfo.TokenUnlimited
+		privateData.BillingPlayground = relayInfo.IsPlayground
+		privateData.TokenId = relayInfo.TokenId
 	}
 
 	// 使用预生成的公开 ID（如果有），否则新生成
@@ -473,6 +527,44 @@ func (Task *Task) InsertWithContext(ctx context.Context) error {
 	return DB.WithContext(ctx).Create(Task).Error
 }
 
+// LockTaskForBilling loads a task under the shared row lock used by billing
+// state transitions. Callers must keep the surrounding transaction open until
+// the ledger receipt and the quota marker have both been committed.
+func LockTaskForBilling(tx *gorm.DB, id int64) (*Task, error) {
+	if tx == nil {
+		return nil, errors.New("task billing transaction is nil")
+	}
+	if id <= 0 {
+		return nil, errors.New("task billing id is invalid")
+	}
+	var task Task
+	if err := lockForUpdate(tx).Where("id = ?", id).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// UpdateBillingStateTx updates only the durable billing hand-off fields. It
+// deliberately does not use Save so a stale polling snapshot cannot overwrite
+// task result data while a billing retry repairs its marker.
+func (t *Task) UpdateBillingStateTx(tx *gorm.DB) error {
+	if tx == nil {
+		return errors.New("task billing transaction is nil")
+	}
+	if t == nil || t.ID <= 0 {
+		return errors.New("task billing id is invalid")
+	}
+	return tx.Model(&Task{}).Where("id = ?", t.ID).Updates(map[string]any{
+		"quota":                t.Quota,
+		"billing_pending":      t.BillingPending,
+		"billing_action":       t.BillingAction,
+		"billing_operation_id": t.BillingOperationID,
+		"billing_target_quota": t.BillingTargetQuota,
+		"billing_delta":        t.BillingDelta,
+		"billing_audit":        t.BillingAudit,
+	}).Error
+}
+
 type taskSnapshot struct {
 	Status       TaskStatus
 	Progress     string
@@ -521,15 +613,26 @@ func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
 }
 
-// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Returns (true, nil) if this caller won the update, (false, nil) if
-// another process already moved the task out of fromStatus. PostgreSQL counts
-// matching rows even when the update writes the same values.
-//
-// Uses Model().Select("*").Updates() instead of Save() because GORM's Save
-// falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
-// zero rows, which silently bypasses the CAS guard.
+// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS)
+// for ordinary polling fields. Quota and billing hand-off fields are omitted
+// so a stale read-only polling snapshot cannot overwrite a concurrent ledger
+// commit. Use UpdateWithStatusAndBilling when the status transition and a new
+// billing marker must be persisted together.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
+	result := DB.Model(t).Where("status = ?", fromStatus).
+		Omit("quota", "billing_pending", "billing_action", "billing_operation_id", "billing_target_quota", "billing_delta", "billing_audit").
+		Select("*").Updates(t)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// UpdateWithStatusAndBilling performs the same status CAS while including the
+// quota and billing marker columns. This is the atomic hand-off used when a
+// terminal status is published alongside a completion, refund, or unknown
+// billing intent.
+func (t *Task) UpdateWithStatusAndBilling(fromStatus TaskStatus) (bool, error) {
 	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
@@ -541,7 +644,7 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 // WARNING: This function has NO CAS (Compare-And-Swap) guard — it will overwrite
 // any concurrent status changes. DO NOT use in billing/quota lifecycle flows
 // (e.g., timeout, success, failure transitions that trigger refunds or settlements).
-// For status transitions that involve billing, use Task.UpdateWithStatus() instead.
+// For status transitions that involve billing, use Task.UpdateWithStatusAndBilling() instead.
 func TaskBulkUpdateByID(ids []int64, params map[string]any) error {
 	if len(ids) == 0 {
 		return nil

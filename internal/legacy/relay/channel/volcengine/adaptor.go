@@ -10,15 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	channelconstant "github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/claude"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/constant"
+	channelconstant "github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -307,8 +306,8 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		return nil, errors.New("request is nil")
 	}
 
-	if !model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) &&
-		!model_setting.ShouldPreserveThinkingSuffix(info.UpstreamModelName) &&
+	if !info.ConvOptions().ShouldPreserveThinkingSuffix(info.OriginModelName) &&
+		!info.ConvOptions().ShouldPreserveThinkingSuffix(info.UpstreamModelName) &&
 		strings.HasSuffix(info.UpstreamModelName, "-thinking") &&
 		strings.HasPrefix(info.UpstreamModelName, "deepseek") {
 		info.UpstreamModelName = strings.TrimSuffix(info.UpstreamModelName, "-thinking")

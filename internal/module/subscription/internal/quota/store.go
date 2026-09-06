@@ -17,3 +17,13 @@ type UserSubscription = entity.UserSubscription
 type SubscriptionPlan = entity.SubscriptionPlan
 
 func New(db *gorm.DB, catalog *catalog.Store) *Store { return &Store{db: db, catalog: catalog} }
+
+// WithTx binds quota operations to an existing PostgreSQL transaction. This
+// is used by billing sessions so the subscription reservation, token debit,
+// and durable lifecycle record commit or roll back together.
+func (s *Store) WithTx(tx *gorm.DB) *Store {
+	if tx == nil {
+		return nil
+	}
+	return &Store{db: tx, catalog: s.catalog}
+}

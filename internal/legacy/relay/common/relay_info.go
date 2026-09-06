@@ -4,20 +4,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	settingconfig "github.com/QuantumNous/new-api/internal/config/setting/config"
+	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
+	hosttypes "github.com/QuantumNous/new-api/internal/shared/types"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
-	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
-	hosttypes "github.com/QuantumNous/new-api/internal/shared/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -190,6 +195,12 @@ type RelayInfo struct {
 
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options
+	// ConfigSnapshot is captured once when the request is created. Channel
+	// retries may replace ChannelMeta, but this pointer must remain unchanged
+	// until pricing, conversion, and settlement are complete.
+	ConfigSnapshot           *settingconfig.RequestConfigSnapshot
+	RealtimeOutcomeUncertain bool // stream ended before its outstanding work had a terminal outcome
+	TaskSubmissionUncertain  bool // submission may have reached the provider; never blindly retry/refund
 
 	conversionDiagnostics          []types.ConversionDiagnostic
 	conversionDiagnosticKeys       map[conversionDiagnosticKey]struct{}
@@ -261,7 +272,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Channel identity feeds the converter options snapshot (e.g.
 	// OpenRouterDialect); drop the cache so a cross-channel retry rebuilds it.
 	info.convOptions = nil
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelMeta.ChannelSetting.PassThroughBodyEnabled {
+	if info.GlobalPassThroughRequestEnabled() || channelMeta.ChannelSetting.PassThroughBodyEnabled {
 		info.ReasoningEffort = ""
 		info.ReasoningConversion = nil
 	} else {
@@ -540,6 +551,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	originModelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 	info := &RelayInfo{
 		Request:         request,
+		ConfigSnapshot:  settingconfig.CurrentRequestConfigSnapshot(),
 		ReasoningEffort: reasoningEffort,
 
 		RequestId:  reqId,
@@ -864,31 +876,62 @@ func (info *RelayInfo) IncrSendResponseCount() {
 	info.SendResponseCount++
 }
 
-// ConvOptions snapshots host settings for the converters. Rebuilt on each
-// call site's first use; cached so one relay session sees one snapshot.
+// ConvOptions snapshots host settings for the converters. Channel-specific
+// fields are rebuilt on a retry, while every callback that reads system
+// settings closes over the request's immutable ConfigSnapshot.
 func (info *RelayInfo) ConvOptions() *convmeta.Options {
 	if info != nil && info.convOptions != nil {
 		return info.convOptions
 	}
 
-	claudeSettings := model_setting.GetClaudeSettings()
-	geminiSettings := model_setting.GetGeminiSettings()
 	options := &convmeta.Options{
-		Claude: convmeta.ClaudeOptions{
+		OpenRouterDialect: info != nil && info.GetChannelType() == constant.ChannelTypeOpenRouter,
+	}
+	if info != nil && info.ConfigSnapshot != nil && info.ConfigSnapshot.Conversion != nil {
+		conversion := info.ConfigSnapshot.Conversion
+		claude := conversion.Claude
+		if claude != nil {
+			defaultMaxTokens := cloneDefaultMaxTokens(claude.DefaultMaxTokens)
+			options.Claude = convmeta.ClaudeOptions{
+				ThinkingAdapterEnabled:                claude.ThinkingAdapterEnabled,
+				ThinkingAdapterBudgetTokensPercentage: claude.ThinkingAdapterBudgetTokensPercentage,
+				DefaultMaxTokens:                      defaultMaxTokens,
+			}
+		}
+		gemini := conversion.Gemini
+		if gemini != nil {
+			safetySetting := cloneGeminiSafetySetting(gemini.SafetySettings)
+			supportsImagine := cloneGeminiImagineModels(gemini.SupportedImagineModels)
+			options.Gemini = convmeta.GeminiOptions{
+				ThinkingAdapterEnabled:                gemini.ThinkingAdapterEnabled,
+				ThinkingAdapterBudgetTokensPercentage: gemini.ThinkingAdapterBudgetTokensPercentage,
+				FunctionCallThoughtSignatureEnabled:   gemini.FunctionCallThoughtSignatureEnabled,
+				SupportsImagine:                       supportsImagine,
+				SafetySetting:                         safetySetting,
+			}
+		}
+		options.PreserveThinkingSuffix = snapshotThinkingSuffixMatcher(conversion.ThinkingModelBlacklist)
+		options.PreserveEffortTail = snapshotEffortTailMatcher(conversion.EffortTailModelIDs)
+	} else {
+		// RelayInfo values created by standalone relaykit integrations or old
+		// tests may not have passed through request generation. Keep that API
+		// usable until the application publishes its first request snapshot.
+		claudeSettings := model_setting.GetClaudeSettings()
+		geminiSettings := model_setting.GetGeminiSettings()
+		options.Claude = convmeta.ClaudeOptions{
 			ThinkingAdapterEnabled:                claudeSettings.ThinkingAdapterEnabled,
 			ThinkingAdapterBudgetTokensPercentage: claudeSettings.ThinkingAdapterBudgetTokensPercentage,
 			DefaultMaxTokens:                      claudeSettings.GetDefaultMaxTokens,
-		},
-		Gemini: convmeta.GeminiOptions{
+		}
+		options.Gemini = convmeta.GeminiOptions{
 			ThinkingAdapterEnabled:                geminiSettings.ThinkingAdapterEnabled,
 			ThinkingAdapterBudgetTokensPercentage: geminiSettings.ThinkingAdapterBudgetTokensPercentage,
 			FunctionCallThoughtSignatureEnabled:   geminiSettings.FunctionCallThoughtSignatureEnabled,
 			SupportsImagine:                       model_setting.IsGeminiModelSupportImagine,
 			SafetySetting:                         model_setting.GetGeminiSafetySetting,
-		},
-		OpenRouterDialect:      info != nil && info.GetChannelType() == constant.ChannelTypeOpenRouter,
-		PreserveThinkingSuffix: model_setting.ShouldPreserveThinkingSuffix,
-		PreserveEffortTail:     model_setting.ShouldPreserveEffortTail,
+		}
+		options.PreserveThinkingSuffix = model_setting.ShouldPreserveThinkingSuffix
+		options.PreserveEffortTail = model_setting.ShouldPreserveEffortTail
 	}
 	if info != nil {
 		if info.ChannelMeta != nil {
@@ -897,6 +940,389 @@ func (info *RelayInfo) ConvOptions() *convmeta.Options {
 		info.convOptions = options
 	}
 	return options
+}
+
+func cloneDefaultMaxTokens(values map[string]int) func(string) int {
+	defaultMaxTokens := 8192
+	if value, ok := values["default"]; ok {
+		defaultMaxTokens = value
+	}
+	return func(modelName string) int {
+		if value, ok := values[modelName]; ok {
+			return value
+		}
+		return defaultMaxTokens
+	}
+}
+
+func cloneGeminiImagineModels(values []string) func(string) bool {
+	models := append([]string(nil), values...)
+	return func(modelName string) bool {
+		for _, model := range models {
+			if model == modelName {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func cloneGeminiSafetySetting(values map[string]string) func(string) string {
+	settings := make(map[string]string, len(values))
+	for key, value := range values {
+		settings[key] = value
+	}
+	return func(category string) string {
+		if value := settings[category]; value != "" {
+			return value
+		}
+		if value := settings["default"]; value != "" {
+			return value
+		}
+		return "OFF"
+	}
+}
+
+func snapshotThinkingSuffixMatcher(entries []string) func(string) bool {
+	exact := make(map[string]struct{}, len(entries))
+	regexes := make([]*regexp.Regexp, 0)
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.HasPrefix(entry, "re:") {
+			pattern := strings.TrimPrefix(entry, "re:")
+			if pattern == "" {
+				continue
+			}
+			compiled, err := regexp.Compile(pattern)
+			if err != nil {
+				continue
+			}
+			regexes = append(regexes, compiled)
+			continue
+		}
+		exact[entry] = struct{}{}
+	}
+	return func(modelName string) bool {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			return false
+		}
+		if _, ok := exact[modelName]; ok {
+			return true
+		}
+		for _, regex := range regexes {
+			if regex.MatchString(modelName) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func snapshotEffortTailMatcher(entries []string) func(string) bool {
+	exact := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry != "" {
+			exact[entry] = struct{}{}
+		}
+	}
+	return func(modelName string) bool {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			return false
+		}
+		if _, ok := exact[modelName]; ok {
+			return true
+		}
+		if slash := strings.LastIndex(modelName, "/"); slash >= 0 {
+			_, ok := exact[modelName[slash+1:]]
+			return ok
+		}
+		return false
+	}
+}
+
+// GlobalPassThroughRequestEnabled is request-scoped for generated RelayInfo
+// values. The fallback preserves behavior for hand-built RelayInfo values
+// before the first options snapshot is published.
+func (info *RelayInfo) GlobalPassThroughRequestEnabled() bool {
+	if info != nil && info.ConfigSnapshot != nil && info.ConfigSnapshot.Conversion != nil {
+		return info.ConfigSnapshot.Conversion.GlobalPassThroughRequestEnabled
+	}
+	return model_setting.GetGlobalSettings().PassThroughRequestEnabled
+}
+
+func (info *RelayInfo) RemoveFunctionResponseIDEnabled() bool {
+	if info != nil && info.ConfigSnapshot != nil && info.ConfigSnapshot.Conversion != nil && info.ConfigSnapshot.Conversion.Gemini != nil {
+		return info.ConfigSnapshot.Conversion.Gemini.RemoveFunctionResponseIdEnabled
+	}
+	return model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled
+}
+
+func (info *RelayInfo) GeminiVersionSetting(modelName string) string {
+	if info != nil && info.ConfigSnapshot != nil && info.ConfigSnapshot.Conversion != nil && info.ConfigSnapshot.Conversion.Gemini != nil {
+		settings := info.ConfigSnapshot.Conversion.Gemini.VersionSettings
+		if value, ok := settings[modelName]; ok {
+			return value
+		}
+		return settings["default"]
+	}
+	return model_setting.GetGeminiVersionSetting(modelName)
+}
+
+func (info *RelayInfo) ChatResponsesPolicy() model_setting.ChatCompletionsToResponsesPolicy {
+	if info == nil || info.ConfigSnapshot == nil || info.ConfigSnapshot.Conversion == nil {
+		return model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy
+	}
+	policy := info.ConfigSnapshot.Conversion.ChatCompletionsToResponsesPolicy
+	return model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled:       policy.Enabled,
+		AllChannels:   policy.AllChannels,
+		ChannelIDs:    append([]int(nil), policy.ChannelIDs...),
+		ChannelTypes:  append([]int(nil), policy.ChannelTypes...),
+		ModelPatterns: append([]string(nil), policy.ModelPatterns...),
+	}
+}
+
+func (info *RelayInfo) QuotaPerUnit() float64 {
+	if info != nil && info.ConfigSnapshot != nil {
+		return info.ConfigSnapshot.Pricing.QuotaPerUnit
+	}
+	return common.QuotaPerUnit
+}
+
+func (info *RelayInfo) PreConsumedQuotaSetting() int {
+	if info != nil && info.ConfigSnapshot != nil {
+		return info.ConfigSnapshot.Pricing.PreConsumedQuota
+	}
+	return common.PreConsumedQuota
+}
+
+func (info *RelayInfo) EnableFreeModelPreConsume() bool {
+	if info != nil && info.ConfigSnapshot != nil {
+		return info.ConfigSnapshot.Pricing.EnableFreeModelPreConsume
+	}
+	return operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+}
+
+func (info *RelayInfo) GrokViolationDeduction() (bool, float64) {
+	if info != nil && info.ConfigSnapshot != nil {
+		pricing := info.ConfigSnapshot.Pricing
+		return pricing.GrokViolationDeductionEnabled, pricing.GrokViolationDeductionAmount
+	}
+	settings := model_setting.GetGrokSettings()
+	if settings == nil {
+		return false, 0
+	}
+	return settings.ViolationDeductionEnabled, settings.ViolationDeductionAmount
+}
+
+func (info *RelayInfo) WriteClaudeHeaders(originModel string, headers *http.Header) {
+	if info == nil || headers == nil || info.ConfigSnapshot == nil || info.ConfigSnapshot.Conversion == nil || info.ConfigSnapshot.Conversion.Claude == nil {
+		model_setting.GetClaudeSettings().WriteHeaders(originModel, headers)
+		return
+	}
+	configured, ok := info.ConfigSnapshot.Conversion.Claude.HeadersSettings[originModel]
+	if !ok {
+		return
+	}
+	for headerKey, headerValues := range configured {
+		values := append([]string(nil), headers.Values(headerKey)...)
+		values = append(values, headerValues...)
+		merged := make([]string, 0, len(values))
+		seen := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			for _, item := range strings.Split(value, ",") {
+				item = strings.TrimSpace(item)
+				if item == "" {
+					continue
+				}
+				if _, exists := seen[item]; exists {
+					continue
+				}
+				seen[item] = struct{}{}
+				merged = append(merged, item)
+			}
+		}
+		if len(merged) > 0 {
+			headers.Set(headerKey, strings.Join(merged, ","))
+		}
+	}
+}
+
+func (info *RelayInfo) ModelPrice(name string) (float64, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetModelPrice(name, false)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	price, ok := info.ConfigSnapshot.Pricing.ModelPrice[name]
+	return price, ok
+}
+
+func (info *RelayInfo) DefaultModelPrice(name string) (float64, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		price, ok := ratio_setting.GetDefaultModelPriceMap()[name]
+		return price, ok
+	}
+	price, ok := info.ConfigSnapshot.Pricing.DefaultModelPrice[name]
+	return price, ok
+}
+
+func (info *RelayInfo) ModelRatio(name string) (float64, bool, string) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetModelRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	ratio, ok := info.ConfigSnapshot.Pricing.ModelRatio[name]
+	if !ok {
+		return 37.5, info.ConfigSnapshot.Pricing.SelfUseModeEnabled, name
+	}
+	return ratio, true, name
+}
+
+func (info *RelayInfo) CompletionRatio(name string) float64 {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetCompletionRatio(name)
+	}
+	return ratio_setting.GetCompletionRatioFromMap(name, info.ConfigSnapshot.Pricing.CompletionRatio)
+}
+
+func (info *RelayInfo) CacheRatio(name string) (float64, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetCacheRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	ratio, ok := info.ConfigSnapshot.Pricing.CacheRatio[name]
+	if !ok {
+		return 1, false
+	}
+	return ratio, true
+}
+
+func (info *RelayInfo) CreateCacheRatio(name string) (float64, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetCreateCacheRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	ratio, ok := info.ConfigSnapshot.Pricing.CreateCacheRatio[name]
+	if !ok {
+		return 1.25, false
+	}
+	return ratio, true
+}
+
+func (info *RelayInfo) ImageRatio(name string) (float64, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetImageRatio(name)
+	}
+	ratio, ok := info.ConfigSnapshot.Pricing.ImageRatio[name]
+	if !ok {
+		return 1, false
+	}
+	return ratio, true
+}
+
+func (info *RelayInfo) AudioRatio(name string) float64 {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetAudioRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	if ratio, ok := info.ConfigSnapshot.Pricing.AudioRatio[name]; ok {
+		return ratio
+	}
+	return 1
+}
+
+func (info *RelayInfo) AudioCompletionRatio(name string) float64 {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetAudioCompletionRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	if ratio, ok := info.ConfigSnapshot.Pricing.AudioCompletionRatio[name]; ok {
+		return ratio
+	}
+	return 1
+}
+
+func (info *RelayInfo) ContainsAudioRatio(name string) bool {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.ContainsAudioRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	_, ok := info.ConfigSnapshot.Pricing.AudioRatio[name]
+	return ok
+}
+
+func (info *RelayInfo) ContainsAudioCompletionRatio(name string) bool {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.ContainsAudioCompletionRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	_, ok := info.ConfigSnapshot.Pricing.AudioCompletionRatio[name]
+	return ok
+}
+
+func (info *RelayInfo) ToolPriceForModel(toolName, modelName string) float64 {
+	if info == nil || info.ConfigSnapshot == nil {
+		return operation_setting.GetToolPriceForModel(toolName, modelName)
+	}
+	return operation_setting.GetToolPriceForModelFromSnapshot(toolName, modelName, info.ConfigSnapshot.Pricing.ToolPrices)
+}
+
+func (info *RelayInfo) GroupRatio(name string) float64 {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetGroupRatio(name)
+	}
+	if ratio, ok := info.ConfigSnapshot.Pricing.GroupRatio[name]; ok {
+		return ratio
+	}
+	return 1
+}
+
+func (info *RelayInfo) GroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.GetGroupGroupRatio(userGroup, usingGroup)
+	}
+	group, ok := info.ConfigSnapshot.Pricing.GroupGroupRatio[userGroup]
+	if !ok {
+		return -1, false
+	}
+	ratio, ok := group[usingGroup]
+	if !ok {
+		return -1, false
+	}
+	return ratio, true
+}
+
+func (info *RelayInfo) BillingMode(name string) string {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ""
+	}
+	if mode, ok := info.ConfigSnapshot.Billing.BillingMode[name]; ok {
+		return mode
+	}
+	return "ratio"
+}
+
+func (info *RelayInfo) BillingExpr(name string) (string, bool) {
+	if info == nil || info.ConfigSnapshot == nil {
+		return "", false
+	}
+	expr, ok := info.ConfigSnapshot.Billing.BillingExpr[name]
+	return expr, ok
+}
+
+func (info *RelayInfo) HasConfiguredModelRatio(name string) bool {
+	if info == nil || info.ConfigSnapshot == nil {
+		return ratio_setting.HasConfiguredModelRatio(name)
+	}
+	name = ratio_setting.FormatMatchingModelName(name)
+	_, ok := info.ConfigSnapshot.Pricing.ModelRatio[name]
+	return ok
 }
 
 func (info *RelayInfo) SetFirstResponseTime() {
@@ -1047,8 +1473,12 @@ func FailTaskInfo(reason string) *TaskInfo {
 // store: 数据存储授权字段，涉及用户隐私（仅 OpenAI、Responses API 支持，默认允许透传，禁用后可能导致 Codex 无法使用）
 // safety_identifier: 安全标识符，用于向 OpenAI 报告违规用户（仅 OpenAI 支持，涉及用户隐私）
 // stream_options.include_obfuscation: 响应流混淆控制字段（仅 OpenAI Responses API 支持）
-func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, channelPassThroughEnabled bool) ([]byte, error) {
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
+func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, channelPassThroughEnabled bool, relayInfos ...*RelayInfo) ([]byte, error) {
+	globalPassThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	if len(relayInfos) > 0 && relayInfos[0] != nil {
+		globalPassThrough = relayInfos[0].GlobalPassThroughRequestEnabled()
+	}
+	if globalPassThrough || channelPassThroughEnabled {
 		return jsonData, nil
 	}
 	if !hasRemovableDisabledField(jsonData, channelOtherSettings) {
@@ -1141,8 +1571,12 @@ func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.Channel
 
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data
 // Currently supports removing functionResponse.id field which Vertex AI does not support
-func RemoveGeminiDisabledFields(jsonData []byte) ([]byte, error) {
-	if !model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled {
+func RemoveGeminiDisabledFields(jsonData []byte, relayInfos ...*RelayInfo) ([]byte, error) {
+	removeFunctionResponseID := model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled
+	if len(relayInfos) > 0 && relayInfos[0] != nil {
+		removeFunctionResponseID = relayInfos[0].RemoveFunctionResponseIDEnabled()
+	}
+	if !removeFunctionResponseID {
 		return jsonData, nil
 	}
 

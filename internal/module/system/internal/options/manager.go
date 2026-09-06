@@ -28,11 +28,16 @@ type Dependencies struct {
 	AliasPlugin       func(*jsplugin.RoutingGeneration, string) (string, bool)
 }
 type Manager struct {
-	store     *store
-	mu        sync.Mutex
-	deps      Dependencies
-	version   string
-	snapshots *configsync.Store
+	store   *store
+	mu      sync.Mutex
+	deps    Dependencies
+	version string
+	// runtimeSnapshotDirty fences single-key runtime applications after a
+	// failed multi-key reload. The source globals may then be partially
+	// applied, so publishing them would expose a mixed request generation;
+	// only a subsequent successful full reload may clear this flag.
+	runtimeSnapshotDirty bool
+	snapshots            *configsync.Store
 }
 
 func New(deps Dependencies) *Manager {
@@ -169,10 +174,8 @@ func (r *Manager) reloadLocked(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, row := range rows {
-		if err := r.ApplyRuntime(row.Key, row.Value); err != nil {
-			return err
-		}
+	if err := r.applyRuntimeBatch(rows, version, true); err != nil {
+		return err
 	}
 	r.version = version
 	return nil

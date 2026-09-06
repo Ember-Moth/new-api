@@ -11,18 +11,17 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/helper"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -178,7 +177,7 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 
 // buildAwsRequestBody prepares the payload for AWS requests, applying passthrough rules when enabled.
 func buildAwsRequestBody(c *gin.Context, info *relaycommon.RelayInfo, awsClaudeReq any) ([]byte, error) {
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if info.GlobalPassThroughRequestEnabled() || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return nil, errors.Wrap(err, "get request body for pass-through fail")

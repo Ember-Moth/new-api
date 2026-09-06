@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/internal/shared/types"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -1022,4 +1022,23 @@ func BenchmarkRatioBilling_Parallel(b *testing.B) {
 			ratioQuota(usage, false, 1.5, 5.0, 0.1, 1.0, 1.5)
 		}
 	})
+}
+
+func TestRealtimeTieredBillingUsesAudioAndCacheSubcategories(t *testing.T) {
+	info := &relaycommon.RelayInfo{TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+		BillingMode: "tiered_expr", ModelName: "realtime-test", ExprVersion: 1,
+		ExprString:   `tier("base", p + c * 2 + cr * 0.1 + ai * 3 + ao * 4)`,
+		QuotaPerUnit: 1_000_000, GroupRatio: 1,
+	}}
+	usage := &dto.RealtimeUsage{
+		InputTokens: 100, OutputTokens: 40, TotalTokens: 140,
+		InputTokenDetails:  dto.InputTokenDetails{TextTokens: 50, CachedTokens: 20, AudioTokens: 30},
+		OutputTokenDetails: dto.OutputTokenDetails{TextTokens: 30, AudioTokens: 10},
+	}
+	params := realtimeTieredTokenParams(info, usage)
+	applies, quota, result := TryTieredSettle(info, params)
+	require.True(t, applies)
+	require.NotNil(t, result)
+	assert.Equal(t, 242, quota)
+	assert.Equal(t, float64(100), params.Len)
 }

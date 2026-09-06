@@ -6,15 +6,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/helper"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,7 +79,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if info.GlobalPassThroughRequestEnabled() || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
@@ -98,7 +97,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 
 		// remove disabled fields for OpenAI Responses API
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled, info)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}

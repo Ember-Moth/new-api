@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	settingconfig "github.com/QuantumNous/new-api/internal/config/setting/config"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
@@ -14,6 +15,96 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRelayInfoKeepsPublishedRequestConfigAcrossGenerationChanges(t *testing.T) {
+	previous := settingconfig.CurrentRequestConfigSnapshot()
+	t.Cleanup(func() { settingconfig.PublishRequestConfigSnapshot(previous) })
+
+	first := &settingconfig.RequestConfigSnapshot{
+		Pricing: settingconfig.RequestPricingSnapshot{
+			ModelRatio:      map[string]float64{"snapshot-model": 1},
+			GroupRatio:      map[string]float64{"default": 1},
+			QuotaPerUnit:    100,
+			CompletionRatio: map[string]float64{"snapshot-model": 2},
+			ToolPrices:      map[string]float64{"web_search": 10},
+		},
+		Billing: settingconfig.RequestBillingSnapshot{
+			BillingMode: map[string]string{"snapshot-model": "tiered_expr"},
+			BillingExpr: map[string]string{"snapshot-model": `tier("old", p * 1)`},
+		},
+		Conversion: &settingconfig.RequestConversionSnapshot{
+			GlobalPassThroughRequestEnabled: true,
+			Claude: &settingconfig.ClaudeConversionSnapshot{
+				DefaultMaxTokens: map[string]int{"default": 10},
+			},
+			Gemini: &settingconfig.GeminiConversionSnapshot{
+				SafetySettings: map[string]string{"default": "BLOCK_NONE"},
+			},
+		},
+	}
+	settingconfig.PublishRequestConfigSnapshot(first)
+	old := &RelayInfo{ConfigSnapshot: settingconfig.CurrentRequestConfigSnapshot()}
+	oldOptions := old.ConvOptions()
+
+	second := &settingconfig.RequestConfigSnapshot{
+		Pricing: settingconfig.RequestPricingSnapshot{
+			ModelRatio:   map[string]float64{"snapshot-model": 3},
+			GroupRatio:   map[string]float64{"default": 4},
+			QuotaPerUnit: 200,
+		},
+		Billing: settingconfig.RequestBillingSnapshot{
+			BillingMode: map[string]string{"snapshot-model": "ratio"},
+			BillingExpr: map[string]string{"snapshot-model": `tier("new", p * 3)`},
+		},
+		Conversion: &settingconfig.RequestConversionSnapshot{
+			GlobalPassThroughRequestEnabled: false,
+			Claude: &settingconfig.ClaudeConversionSnapshot{
+				DefaultMaxTokens: map[string]int{"default": 20},
+			},
+			Gemini: &settingconfig.GeminiConversionSnapshot{
+				SafetySettings: map[string]string{"default": "OFF"},
+			},
+		},
+	}
+	settingconfig.PublishRequestConfigSnapshot(second)
+	newInfo := &RelayInfo{ConfigSnapshot: settingconfig.CurrentRequestConfigSnapshot()}
+
+	assert.Equal(t, 1.0, old.ConfigSnapshot.Pricing.ModelRatio["snapshot-model"])
+	assert.Equal(t, 3.0, newInfo.ConfigSnapshot.Pricing.ModelRatio["snapshot-model"])
+	oldModelRatio, _, _ := old.ModelRatio("snapshot-model")
+	newModelRatio, _, _ := newInfo.ModelRatio("snapshot-model")
+	assert.Equal(t, 1.0, oldModelRatio)
+	assert.Equal(t, 3.0, newModelRatio)
+	assert.Equal(t, 1.0, old.GroupRatio("default"))
+	assert.Equal(t, 4.0, newInfo.GroupRatio("default"))
+	oldExpr, oldExprOK := old.BillingExpr("snapshot-model")
+	newExpr, newExprOK := newInfo.BillingExpr("snapshot-model")
+	assert.True(t, oldExprOK)
+	assert.True(t, newExprOK)
+	assert.Equal(t, `tier("old", p * 1)`, oldExpr)
+	assert.Equal(t, `tier("new", p * 3)`, newExpr)
+	assert.Equal(t, 100.0, old.QuotaPerUnit())
+	assert.Equal(t, 200.0, newInfo.QuotaPerUnit())
+	assert.True(t, old.GlobalPassThroughRequestEnabled())
+	assert.False(t, newInfo.GlobalPassThroughRequestEnabled())
+	oldMax, _ := oldOptions.Claude.DefaultMaxTokensFor("other")
+	newMax, _ := newInfo.ConvOptions().Claude.DefaultMaxTokensFor("other")
+	assert.Equal(t, 10, oldMax)
+	assert.Equal(t, 20, newMax)
+	assert.Equal(t, "BLOCK_NONE", oldOptions.Gemini.SafetySettingFor("unknown"))
+	assert.Equal(t, "OFF", newInfo.ConvOptions().Gemini.SafetySettingFor("unknown"))
+
+	oldSnapshot := old.ConfigSnapshot
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	old.RelayFormat = types.RelayFormatOpenAI
+	old.OriginModelName = "snapshot-model"
+	old.InitChannelMeta(ctx)
+	assert.Same(t, oldSnapshot, old.ConfigSnapshot)
+	assert.Equal(t, 100.0, old.QuotaPerUnit())
+	oldAfterRetryMax, _ := old.ConvOptions().Claude.DefaultMaxTokensFor("other")
+	assert.Equal(t, 10, oldAfterRetryMax)
+}
 
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	info := &RelayInfo{

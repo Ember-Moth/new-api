@@ -6,8 +6,8 @@ package reasoning
 import (
 	"strings"
 
-	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
+	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 )
 
 var (
@@ -33,6 +33,19 @@ func ParseOpenAIReasoningEffortFromModelSuffix(modelName string) (string, string
 // matched GPT/o-series, Claude, and Gemini model families. The provider prefix
 // before the final path segment is kept opaque.
 func ParseLegacyModelSuffix(modelName string, allowClaudeThinkingAlias bool, allowGeminiThinkingAlias bool) (string, kitreasoning.Intent, bool, error) {
+	return ParseLegacyModelSuffixWithCallbacks(
+		modelName,
+		allowClaudeThinkingAlias,
+		allowGeminiThinkingAlias,
+		model_setting.ShouldPreserveEffortTail,
+	)
+}
+
+// ParseLegacyModelSuffixWithCallbacks is the request-safe form of
+// ParseLegacyModelSuffix. Its callback is captured by the caller's immutable
+// request configuration, so model IDs are normalized with the same rules for
+// every retry of one request.
+func ParseLegacyModelSuffixWithCallbacks(modelName string, allowClaudeThinkingAlias bool, allowGeminiThinkingAlias bool, preserveEffortTail func(string) bool) (string, kitreasoning.Intent, bool, error) {
 	prefix, bare := splitModelNamespace(modelName)
 
 	var (
@@ -47,7 +60,7 @@ func ParseLegacyModelSuffix(modelName string, allowClaudeThinkingAlias bool, all
 	case strings.HasPrefix(bare, "gemini-"):
 		base, intent, found, err = kitreasoning.ParseGeminiModelSuffix(bare, allowGeminiThinkingAlias)
 	default:
-		effort, openAIBase := ParseOpenAIReasoningEffortFromModelSuffix(bare)
+		effort, openAIBase := kitreasoning.ParseOpenAIReasoningEffortFromModelSuffix(bare, preserveEffortTail)
 		if effort == "" {
 			return modelName, kitreasoning.Intent{}, false, nil
 		}
@@ -67,6 +80,24 @@ func ParseLegacyModelSuffix(modelName string, allowClaudeThinkingAlias bool, all
 		return modelName, kitreasoning.Intent{}, false, err
 	}
 	return prefix + base, intent, true, nil
+}
+
+// BaseModelNameWithCallbacks is the pure counterpart of BaseModelName. It is
+// used by pricing and conversion code after a request snapshot has been
+// captured.
+func BaseModelNameWithCallbacks(modelName string, allowClaudeThinkingAlias bool, allowGeminiThinkingAlias bool, preserveThinkingSuffix func(string) bool, preserveEffortTail func(string) bool) string {
+	if preserveThinkingSuffix != nil && preserveThinkingSuffix(modelName) {
+		return modelName
+	}
+	base := kitreasoning.ParseModelModifiers(modelName).Base
+	if preserveThinkingSuffix != nil && preserveThinkingSuffix(base) {
+		return base
+	}
+	legacyBase, _, found, err := ParseLegacyModelSuffixWithCallbacks(base, allowClaudeThinkingAlias, allowGeminiThinkingAlias, preserveEffortTail)
+	if err != nil || !found {
+		return base
+	}
+	return legacyBase
 }
 
 // BaseModelName strips explicit model modifiers and any enabled legacy alias.
@@ -107,18 +138,32 @@ func splitModelNamespace(modelName string) (string, string) {
 // @ modifiers and legacy aliases normalize through the same Intent, so order,
 // duplicates, and case do not matter. Temperature and topp never appear.
 func CanonicalBillingModelNames(modelName string) []string {
-	if model_setting.ShouldPreserveThinkingSuffix(modelName) {
+	return CanonicalBillingModelNamesWithCallbacks(
+		modelName,
+		model_setting.GetClaudeSettings().ThinkingAdapterEnabled,
+		model_setting.GetGeminiSettings().ThinkingAdapterEnabled,
+		model_setting.ShouldPreserveThinkingSuffix,
+		model_setting.ShouldPreserveEffortTail,
+	)
+}
+
+// CanonicalBillingModelNamesWithCallbacks is the snapshot-safe counterpart of
+// CanonicalBillingModelNames. It keeps the same candidate ordering while
+// avoiding reads from mutable model settings.
+func CanonicalBillingModelNamesWithCallbacks(modelName string, allowClaudeThinkingAlias bool, allowGeminiThinkingAlias bool, preserveThinkingSuffix func(string) bool, preserveEffortTail func(string) bool) []string {
+	if preserveThinkingSuffix != nil && preserveThinkingSuffix(modelName) {
 		return nil
 	}
 	spec := kitreasoning.ParseModelModifiers(modelName)
 	base := spec.Base
 	intent, hasThinking := billingIntentFromModifiers(spec)
 
-	if !model_setting.ShouldPreserveThinkingSuffix(base) {
-		legacyBase, legacyIntent, found, err := ParseLegacyModelSuffix(
+	if preserveThinkingSuffix == nil || !preserveThinkingSuffix(base) {
+		legacyBase, legacyIntent, found, err := ParseLegacyModelSuffixWithCallbacks(
 			base,
-			model_setting.GetClaudeSettings().ThinkingAdapterEnabled,
-			model_setting.GetGeminiSettings().ThinkingAdapterEnabled,
+			allowClaudeThinkingAlias,
+			allowGeminiThinkingAlias,
+			preserveEffortTail,
 		)
 		if err == nil && found {
 			base = legacyBase

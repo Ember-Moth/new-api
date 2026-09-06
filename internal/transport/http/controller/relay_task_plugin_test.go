@@ -9,48 +9,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/shared/dto"
-	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
-	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/internal/legacy/relay"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 	"github.com/QuantumNous/new-api/internal/shared/types"
+	"github.com/QuantumNous/new-api/internal/testdb"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
-
-type taskSubmissionTestBilling struct {
-	events    *[]string
-	settleErr error
-	onSettle  func()
-	refunds   int
-}
-
-func (b *taskSubmissionTestBilling) Settle(int) error {
-	*b.events = append(*b.events, "settle")
-	if b.onSettle != nil {
-		b.onSettle()
-	}
-	return b.settleErr
-}
-
-func (b *taskSubmissionTestBilling) Refund(*gin.Context) {
-	*b.events = append(*b.events, "refund")
-	b.refunds++
-}
-
-func (b *taskSubmissionTestBilling) NeedsRefund() bool        { return b.refunds == 0 }
-func (b *taskSubmissionTestBilling) GetPreConsumedQuota() int { return 0 }
-func (b *taskSubmissionTestBilling) Reserve(int) error {
-	*b.events = append(*b.events, "reserve")
-	return nil
-}
 
 func TestPresentTaskSubmissionUsesNativePresenterAfterPersistence(t *testing.T) {
 	plugin, err := pluginruntime.CompilePlugin(`
@@ -125,57 +99,101 @@ func TestPresentTaskSubmissionUsesHostOpenAIVideoCreateReceipt(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "task_id")
 }
 
-func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {
-	events := make([]string, 0, 3)
-	database := setupTaskSubmissionDatabase(t, false, &events)
-	_ = database
-	billing := &taskSubmissionTestBilling{events: &events}
+func TestExecuteTaskSubmissionDoesNotRefundWhenInsertFails(t *testing.T) {
+	database := setupTaskSubmissionDatabase(t, true)
 	c := taskSubmissionTestContext()
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 10, "request-task-insert-fail")
+	require.NoError(t, service.MarkBillingDispatch(info))
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		return &relay.TaskSubmitResult{
 			UpstreamTaskID: "upstream_private",
 			Platform:       constant.TaskPlatform("plugin"),
+			Quota:          10,
 		}, nil
 	})
 
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "task_insert_failed", taskErr.Code)
-	assert.Equal(t, []string{"reserve", "insert", "refund"}, events)
-	assert.Equal(t, 1, billing.refunds)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 99_990, 99_990, 10, 0, 0, 0)
+	record := taskSubmissionBillingRecord(t, database, info.RequestId)
+	assert.Equal(t, "active", record.Status)
+	assert.Equal(t, "reconcile", record.PendingAction)
 	assert.False(t, c.Writer.Written())
 }
 
-func TestExecuteTaskSubmissionSettlementFailureStaysDurableAndWritesNothing(t *testing.T) {
-	events := make([]string, 0, 3)
-	database := setupTaskSubmissionDatabase(t, true, &events)
-	billing := &taskSubmissionTestBilling{events: &events, settleErr: errors.New("settlement failed")}
+func TestExecuteTaskSubmissionMissingUpstreamIDLeavesReconciliation(t *testing.T) {
+	database := setupTaskSubmissionDatabase(t, false)
 	c := taskSubmissionTestContext()
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 10, "request-task-missing-upstream")
+	require.NoError(t, service.MarkBillingDispatch(info))
+
+	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+		return &relay.TaskSubmitResult{Platform: constant.TaskPlatform("plugin"), Quota: 10}, nil
+	})
+
+	assert.Nil(t, outcome)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "task_submission_outcome_unknown", taskErr.Code)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 99_990, 99_990, 10, 0, 0, 0)
+	var persisted model.Task
+	require.NoError(t, database.Where("task_id = ?", "task_public").First(&persisted).Error)
+	assert.True(t, persisted.BillingPending)
+	assert.Equal(t, "unknown", persisted.BillingAction)
+	assert.Equal(t, 10, persisted.BillingTargetQuota)
+	record := taskSubmissionBillingRecord(t, database, info.RequestId)
+	assert.Equal(t, "active", record.Status)
+	assert.Equal(t, "reconcile", record.PendingAction)
+}
+
+func TestExecuteTaskSubmissionSettlementFailureStaysDurableAndWritesNothing(t *testing.T) {
+	database := setupTaskSubmissionDatabase(t, false)
+	failTaskUpdate := true
+	require.NoError(t, database.Callback().Update().Before("gorm:update").Register("test:task-billing-fail-update", func(tx *gorm.DB) {
+		if failTaskUpdate && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Task" {
+			tx.AddError(errors.New("settlement failed"))
+		}
+	}))
+	c := taskSubmissionTestContext()
+	info := taskSubmissionRelayInfo(t, 10, "request-task-settlement-fail")
+	require.NoError(t, service.MarkBillingDispatch(info))
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		return &relay.TaskSubmitResult{
 			UpstreamTaskID: "upstream_private",
 			Platform:       constant.TaskPlatform("plugin"),
+			Quota:          10,
 		}, nil
 	})
 
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "task_billing_settlement_failed", taskErr.Code)
-	assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
-	assert.Zero(t, billing.refunds)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 99_990, 99_990, 10, 0, 0, 0)
 	var count int64
 	require.NoError(t, database.Model(&model.Task{}).Where("task_id = ?", "task_public").Count(&count).Error)
 	assert.Equal(t, int64(1), count)
+	var persisted model.Task
+	require.NoError(t, database.Where("task_id = ?", "task_public").First(&persisted).Error)
+	assert.True(t, persisted.BillingPending)
+	assert.Equal(t, "submission", persisted.BillingAction)
+	assert.Equal(t, 10, persisted.BillingTargetQuota)
+	record := taskSubmissionBillingRecord(t, database, info.RequestId)
+	assert.Equal(t, "active", record.Status)
+	assert.Equal(t, "settle", record.PendingAction)
+	assert.True(t, record.IntentRequiresCommit)
 	assert.False(t, c.Writer.Written())
+
+	failTaskUpdate = false
+	require.NoError(t, service.RunPendingTaskBilling(context.Background()))
+	assertTaskBillingBalances(t, database, 1, 1, 1, 99_990, 99_990, 10, 10, 1, 10)
+	require.NoError(t, database.Where("task_id = ?", "task_public").First(&persisted).Error)
+	assert.False(t, persisted.BillingPending)
 }
 
 func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
-	events := make([]string, 0, 3)
-	database := setupTaskSubmissionDatabase(t, true, &events)
+	database := setupTaskSubmissionDatabase(t, false)
 	previousLogConsumeEnabled := common.LogConsumeEnabled
 	common.LogConsumeEnabled = false
 	t.Cleanup(func() { common.LogConsumeEnabled = previousLogConsumeEnabled })
@@ -195,8 +213,8 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 			},
 		}},
 	})
-	billing := &taskSubmissionTestBilling{events: &events}
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 0, "request-public")
+	require.NoError(t, service.MarkBillingDispatch(info))
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		return &relay.TaskSubmitResult{
@@ -225,42 +243,42 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	require.NotNil(t, stored.PrivateData.Execution.TaskPlugin.Author)
 	assert.Equal(t, "Community Author", stored.PrivateData.Execution.TaskPlugin.Author.Name)
 	assert.Equal(t, "upstream-private", stored.PrivateData.UpstreamTaskID)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 100_000, 100_000, 0, 0, 1, 0)
 }
 
-func TestExecuteTaskSubmissionRefundsCancellationBeforeDurableBarrier(t *testing.T) {
-	events := make([]string, 0, 2)
-	setupTaskSubmissionDatabase(t, true, &events)
-	billing := &taskSubmissionTestBilling{events: &events}
+func TestExecuteTaskSubmissionAcceptedResultAfterCancellationPersistsAndSettles(t *testing.T) {
+	database := setupTaskSubmissionDatabase(t, false)
 	c := taskSubmissionTestContext()
 	requestContext, cancel := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestContext)
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 10, "request-task-cancel-after-submit")
+	require.NoError(t, service.MarkBillingDispatch(info))
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		cancel()
 		return &relay.TaskSubmitResult{
 			UpstreamTaskID: "upstream_private",
 			Platform:       constant.TaskPlatform("plugin"),
+			Quota:          10,
 		}, nil
 	})
 
-	assert.Nil(t, outcome)
-	require.NotNil(t, taskErr)
-	assert.Equal(t, "request_cancelled", taskErr.Code)
-	assert.Equal(t, []string{"refund"}, events)
-	assert.Equal(t, 1, billing.refunds)
+	require.Nil(t, taskErr)
+	require.NotNil(t, outcome)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 99_990, 99_990, 10, 1, 10, 10)
+	var persisted model.Task
+	require.NoError(t, database.Where("task_id = ?", "task_public").First(&persisted).Error)
+	assert.False(t, persisted.BillingPending)
 	assert.False(t, c.Writer.Written())
 }
 
 func TestExecuteTaskSubmissionDisconnectBeforeUpstreamAcceptanceSkipsSubmitAndRefunds(t *testing.T) {
-	events := make([]string, 0, 1)
-	setupTaskSubmissionDatabase(t, true, &events)
-	billing := &taskSubmissionTestBilling{events: &events}
+	database := setupTaskSubmissionDatabase(t, false)
 	c := taskSubmissionTestContext()
 	requestContext, cancel := context.WithCancel(c.Request.Context())
-	cancel()
 	c.Request = c.Request.WithContext(requestContext)
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 10, "request-task-rejected-before-send")
+	cancel()
 	submitted := false
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
@@ -272,19 +290,18 @@ func TestExecuteTaskSubmissionDisconnectBeforeUpstreamAcceptanceSkipsSubmitAndRe
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "request_cancelled", taskErr.Code)
 	assert.False(t, submitted)
-	assert.Equal(t, []string{"refund"}, events)
-	assert.Equal(t, 1, billing.refunds)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 100_000, 100_000, 0, 0, 0, 0)
+	record := taskSubmissionBillingRecord(t, database, info.RequestId)
+	assert.Equal(t, "refunded", record.Status)
 	assert.False(t, c.Writer.Written())
 }
 
 func TestExecuteTaskSubmissionCallerCancellationDuringSubmitRefundsBeforeDurableBarrier(t *testing.T) {
-	events := make([]string, 0, 1)
-	setupTaskSubmissionDatabase(t, true, &events)
-	billing := &taskSubmissionTestBilling{events: &events}
+	database := setupTaskSubmissionDatabase(t, false)
 	c := taskSubmissionTestContext()
 	requestContext, cancel := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestContext)
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 10, "request-task-cancel-during-submit")
 	submitStarted := make(chan struct{})
 	done := make(chan struct{})
 	var outcome *taskSubmissionOutcome
@@ -313,58 +330,119 @@ func TestExecuteTaskSubmissionCallerCancellationDuringSubmitRefundsBeforeDurable
 	assert.Nil(t, outcome)
 	require.NotNil(t, taskErr)
 	assert.Equal(t, "request_cancelled", taskErr.Code)
-	assert.Equal(t, []string{"refund"}, events)
-	assert.Equal(t, 1, billing.refunds)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 100_000, 100_000, 0, 0, 0, 0)
+	record := taskSubmissionBillingRecord(t, database, info.RequestId)
+	assert.Equal(t, "refunded", record.Status)
 	assert.False(t, c.Writer.Written())
 }
 
-func TestExecuteTaskSubmissionDisconnectAfterDurableInsertDoesNotRefund(t *testing.T) {
-	events := make([]string, 0, 3)
-	database := setupTaskSubmissionDatabase(t, true, &events)
+func TestExecuteTaskSubmissionCancellationAfterDurableInsertStillSettles(t *testing.T) {
+	database := setupTaskSubmissionDatabase(t, false)
 	previousLogConsumeEnabled := common.LogConsumeEnabled
 	common.LogConsumeEnabled = false
 	t.Cleanup(func() { common.LogConsumeEnabled = previousLogConsumeEnabled })
 	c := taskSubmissionTestContext()
 	requestContext, cancel := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestContext)
-	billing := &taskSubmissionTestBilling{
-		events:   &events,
-		onSettle: cancel,
-	}
-	info := taskSubmissionRelayInfo(billing)
+	info := taskSubmissionRelayInfo(t, 10, "request-task-cancel-after-insert")
+	require.NoError(t, service.MarkBillingDispatch(info))
+	require.NoError(t, database.Callback().Create().After("gorm:create").Register("test:task-submit-cancel-after-insert", func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Task" {
+			cancel()
+		}
+	}))
 
 	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
 		return &relay.TaskSubmitResult{
 			UpstreamTaskID: "upstream_private",
 			Platform:       constant.TaskPlatform("plugin"),
+			Quota:          10,
 		}, nil
 	})
 
 	require.Nil(t, taskErr)
 	require.NotNil(t, outcome)
 	assert.Equal(t, "task_public", outcome.Task.TaskID)
-	assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
-	assert.Zero(t, billing.refunds)
+	assertTaskBillingBalances(t, database, 1, 1, 1, 99_990, 99_990, 10, 1, 10, 10)
 	var count int64
 	require.NoError(t, database.Model(&model.Task{}).Where("task_id = ?", "task_public").Count(&count).Error)
 	assert.Equal(t, int64(1), count)
 	assert.False(t, c.Writer.Written())
 }
 
-func setupTaskSubmissionDatabase(t *testing.T, migrate bool, events *[]string) *gorm.DB {
+func setupControllerBillingDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
 	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousDatabaseType := common.MainDatabaseType()
+	previousMemoryCache := common.MemoryCacheEnabled
+	previousBatchUpdate := common.BatchUpdateEnabled
+	previousLogConsume := common.LogConsumeEnabled
+	previousRedisEnabled := common.RedisEnabled
 	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, database.Callback().Create().Before("gorm:create").Register("test:task-submit-order", func(*gorm.DB) {
-		*events = append(*events, "insert")
-	}))
-	if migrate {
-		require.NoError(t, database.AutoMigrate(&model.Task{}))
-	}
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	require.NoError(t, schema.UpPostgres(sqlDB))
 	model.DB = database
-	t.Cleanup(func() { model.DB = previousDB })
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
+	common.MemoryCacheEnabled = false
+	common.BatchUpdateEnabled = false
+	common.LogConsumeEnabled = false
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		common.SetMainDatabaseType(previousDatabaseType)
+		common.MemoryCacheEnabled = previousMemoryCache
+		common.BatchUpdateEnabled = previousBatchUpdate
+		common.LogConsumeEnabled = previousLogConsume
+		common.RedisEnabled = previousRedisEnabled
+	})
 	return database
+}
+
+func setupTaskSubmissionDatabase(t *testing.T, failInsert bool) *gorm.DB {
+	t.Helper()
+	database := setupControllerBillingDatabase(t)
+	seedTaskBillingIdentity(t, database, 1, 1, 1, "sk-task-test", 100_000)
+	if failInsert {
+		require.NoError(t, database.Callback().Create().Before("gorm:create").Register("test:task-submit-fail-insert", func(tx *gorm.DB) {
+			if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Task" {
+				tx.AddError(errors.New("task insert failed"))
+			}
+		}))
+	}
+	return database
+}
+
+func seedTaskBillingIdentity(t *testing.T, database *gorm.DB, userID, tokenID, channelID int, tokenKey string, quota int) {
+	t.Helper()
+	require.NoError(t, database.Create(&model.User{
+		Id:       userID,
+		Username: "task-billing-user",
+		Group:    "default",
+		Quota:    quota,
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, database.Create(&model.Token{
+		Id:             tokenID,
+		UserId:         userID,
+		Key:            tokenKey,
+		Name:           "task-billing-token",
+		Status:         common.TokenStatusEnabled,
+		RemainQuota:    quota,
+		UnlimitedQuota: false,
+	}).Error)
+	if channelID > 0 {
+		require.NoError(t, database.Create(&model.Channel{
+			Id:     channelID,
+			Type:   constant.ChannelTypeTaskPlugin,
+			Name:   "task-billing-channel",
+			Key:    "channel-key",
+			Status: common.ChannelStatusEnabled,
+		}).Error)
+	}
 }
 
 func taskSubmissionTestContext() *gin.Context {
@@ -374,16 +452,62 @@ func taskSubmissionTestContext() *gin.Context {
 	return c
 }
 
-func taskSubmissionRelayInfo(billing relaycommon.BillingSettler) *relaycommon.RelayInfo {
-	return &relaycommon.RelayInfo{
+func taskSubmissionRelayInfo(t *testing.T, preConsumed int, requestID string) *relaycommon.RelayInfo {
+	t.Helper()
+	info := &relaycommon.RelayInfo{
 		UserId:          1,
+		TokenId:         1,
+		TokenKey:        "sk-task-test",
+		TokenUnlimited:  false,
 		UsingGroup:      "default",
+		UserGroup:       "default",
+		TokenGroup:      "default",
+		UserQuota:       100_000,
 		OriginModelName: "plugin-model",
-		Billing:         billing,
+		RequestId:       requestID,
+		ForcePreConsume: true,
+		ChannelId:       1,
+		UserSetting:     dto.UserSetting{BillingPreference: "wallet_only"},
+		LockedChannel:   &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "plugin", Key: "channel-key"},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
 			PublicTaskID:  "task_public",
 			LockedChannel: &model.Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Name: "plugin"},
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 1, ChannelType: constant.ChannelTypeTaskPlugin},
 	}
+	billing, apiErr := service.NewBillingSession(nil, info, preConsumed)
+	require.Nil(t, apiErr)
+	require.NotNil(t, billing)
+	info.Billing = billing
+	return info
+}
+
+type taskSubmissionBillingState struct {
+	Status               string `gorm:"column:status"`
+	PendingAction        string `gorm:"column:pending_action"`
+	IntentRequiresCommit bool   `gorm:"column:intent_requires_commit"`
+}
+
+func taskSubmissionBillingRecord(t *testing.T, database *gorm.DB, requestID string) taskSubmissionBillingState {
+	t.Helper()
+	var record taskSubmissionBillingState
+	require.NoError(t, database.Table("billing_sessions").Select("status", "pending_action", "intent_requires_commit").Where("request_id = ?", requestID).First(&record).Error)
+	return record
+}
+
+func assertTaskBillingBalances(t *testing.T, database *gorm.DB, userID, tokenID, channelID, userQuota, tokenRemain, tokenUsed, userUsed, requestCount int, channelUsed int64) {
+	t.Helper()
+	var user model.User
+	require.NoError(t, database.Select("quota", "used_quota", "request_count").Where("id = ?", userID).First(&user).Error)
+	assert.Equal(t, userQuota, user.Quota)
+	assert.Equal(t, userUsed, user.UsedQuota)
+	assert.Equal(t, requestCount, user.RequestCount)
+	var token model.Token
+	require.NoError(t, database.Select("remain_quota", "used_quota").Where("id = ?", tokenID).First(&token).Error)
+	assert.Equal(t, tokenRemain, token.RemainQuota)
+	assert.Equal(t, tokenUsed, token.UsedQuota)
+	var channel model.Channel
+	require.NoError(t, database.Select("used_quota").Where("id = ?", channelID).First(&channel).Error)
+	assert.Equal(t, channelUsed, channel.UsedQuota)
+	return
 }

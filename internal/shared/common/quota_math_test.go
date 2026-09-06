@@ -82,6 +82,25 @@ func TestQuotaFromFloatChecked(t *testing.T) {
 	}
 }
 
+func TestQuotaClampAuditMapJSONSafeForNonFiniteOriginal(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		original float64
+		encoded  string
+	}{
+		{name: "nan", original: math.NaN(), encoded: "NaN"},
+		{name: "positive infinity", original: math.Inf(1), encoded: "+Inf"},
+		{name: "negative infinity", original: math.Inf(-1), encoded: "-Inf"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clamp := (&QuotaClamp{Op: "QuotaRound", Kind: QuotaClampOverflow, Original: tc.original, Clamped: MaxQuota}).AuditMap()
+			assert.Equal(t, tc.encoded, clamp["original"])
+			_, err := Marshal(clamp)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestQuotaFromFloatStrictReturnsTypedClampError(t *testing.T) {
 	quota, err := QuotaFromFloatStrict(42.9)
 	require.NoError(t, err)

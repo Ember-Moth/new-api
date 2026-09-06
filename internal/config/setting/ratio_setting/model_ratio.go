@@ -3,9 +3,9 @@ package ratio_setting
 import (
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	hostreasoning "github.com/QuantumNous/new-api/internal/config/setting/reasoning"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/types"
 )
 
@@ -428,6 +428,26 @@ func GetCompletionRatio(name string) float64 {
 		return hardCodedRatio
 	}
 	if ratio, ok := completionRatioMap.Get(name); ok {
+		return ratio
+	}
+	return hardCodedRatio
+}
+
+// GetCompletionRatioFromMap evaluates completion pricing against an immutable
+// request snapshot. It preserves the same explicit-entry and hardcoded
+// fallback ordering as GetCompletionRatio without consulting the live map.
+func GetCompletionRatioFromMap(name string, ratios map[string]float64) float64 {
+	name = FormatMatchingModelName(name)
+	if strings.Contains(name, "/") {
+		if ratio, ok := ratios[name]; ok {
+			return ratio
+		}
+	}
+	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
+	if contain {
+		return hardCodedRatio
+	}
+	if ratio, ok := ratios[name]; ok {
 		return ratio
 	}
 	return hardCodedRatio

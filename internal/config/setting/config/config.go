@@ -40,6 +40,11 @@ func (cm *ConfigManager) Get(name string) interface{} {
 
 // LoadFromDB 从数据库加载配置
 func (cm *ConfigManager) LoadFromDB(options map[string]string) error {
+	// Runtime request snapshots copy registered maps while holding the same
+	// OptionMap read lock. Keep the lock order OptionMap -> ConfigManager for
+	// startup reloads as well, so a source update cannot race that copy.
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
 	cm.mutex.Lock()
 	defer cm.mutex.Unlock()
 
@@ -279,6 +284,15 @@ func ConfigToMap(config interface{}) (map[string]string, error) {
 
 // UpdateConfigFromMap 从map更新配置对象（导出函数）
 func UpdateConfigFromMap(config interface{}, configMap map[string]string) error {
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
+	return updateConfigFromMap(config, configMap)
+}
+
+// UpdateConfigFromMapUnlocked updates a registered config object while the
+// caller already owns common.OptionMapRWMutex. It is used by the options
+// publisher to keep a whole options generation under one lock.
+func UpdateConfigFromMapUnlocked(config interface{}, configMap map[string]string) error {
 	return updateConfigFromMap(config, configMap)
 }
 

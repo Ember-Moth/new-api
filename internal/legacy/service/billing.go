@@ -6,23 +6,26 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	billingsessions "github.com/QuantumNous/new-api/internal/module/billing/sessions"
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
 	BillingSourceWallet       = billingcontract.BillingSourceWallet
 	BillingSourceSubscription = billingcontract.BillingSourceSubscription
+	billingOperationTimeout   = 30 * time.Second
 )
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
@@ -57,8 +60,9 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // ---------------------------------------------------------------------------
 
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
-// 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
-func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+// 无预扣的按次/免费请求使用独立的持久化结算操作。
+func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, recordUsage ...bool) error {
+	withUsage := len(recordUsage) == 0 || recordUsage[0]
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
@@ -81,8 +85,14 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			))
 		}
 
-		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
-			return err
+		var settleErr error
+		if adapter, ok := relayInfo.Billing.(*BillingSession); ok && withUsage {
+			settleErr = adapter.settleWithUsage(actualQuota, relayInfo.ChannelId)
+		} else {
+			settleErr = relayInfo.Billing.Settle(actualQuota)
+		}
+		if settleErr != nil {
+			return settleErr
 		}
 
 		// 发送额度通知（订阅计费使用订阅剩余额度）
@@ -96,21 +106,26 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		return nil
 	}
 
-	// 回退：无 BillingSession 时使用旧路径
-	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
-	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+	// Free/per-call requests without a reservation still use a durable operation.
+	if relayInfo.FinalPreConsumedQuota != 0 {
+		return fmt.Errorf("reservation has no durable billing session")
 	}
-	return nil
+	adjustment := billingcontract.BillingAdjustment{OperationID: "request:" + relayInfo.RequestId + ":settlement", Source: relayInfo.BillingSource, SubscriptionID: relayInfo.SubscriptionId, Delta: actualQuota}
+	if withUsage {
+		adjustment.ChannelID, adjustment.UsageDelta, adjustment.RequestDelta = relayInfo.ChannelId, actualQuota, 1
+	}
+	_, err := applyQuotaAdjustment(relayInfo, adjustment, true)
+	return err
 }
 
 // BillingSession adapts module snapshots to the gateway's request metadata.
 // State transitions and money movement are owned by billing/sessions.
 type BillingSession struct {
-	mu        sync.Mutex
-	session   *billingsessions.Session
-	relayInfo *relaycommon.RelayInfo
-	ctx       context.Context
+	mu                  sync.Mutex
+	session             *billingsessions.Session
+	relayInfo           *relaycommon.RelayInfo
+	ctx                 context.Context
+	settlementAttempted bool
 }
 
 func billingEngine() *billingsessions.Engine {
@@ -152,7 +167,9 @@ func NewBillingSession(c *gin.Context, info *relaycommon.RelayInfo, amount int) 
 			ctx = c.Request.Context()
 		}
 	}
-	session, err := billingEngine().Begin(ctx, input, amount)
+	beginCtx, cancel := context.WithTimeout(ctx, billingOperationTimeout)
+	defer cancel()
+	session, err := billingEngine().Begin(beginCtx, input, amount)
 	if err != nil {
 		return nil, billingAPIError(err)
 	}
@@ -179,14 +196,29 @@ func (s *BillingSession) sync() {
 func (s *BillingSession) Settle(actual int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.session.Settle(s.ctx, actual)
+	s.settlementAttempted = true
+	ctx, cancel := context.WithTimeout(s.ctx, billingOperationTimeout)
+	defer cancel()
+	err := s.session.Settle(ctx, actual)
+	s.sync()
+	return err
+}
+func (s *BillingSession) settleWithUsage(actual, channelID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settlementAttempted = true
+	ctx, cancel := context.WithTimeout(s.ctx, billingOperationTimeout)
+	defer cancel()
+	err := s.session.SettleWithUsage(ctx, actual, channelID)
 	s.sync()
 	return err
 }
 func (s *BillingSession) Reserve(target int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.session.Reserve(s.ctx, target)
+	ctx, cancel := context.WithTimeout(s.ctx, billingOperationTimeout)
+	defer cancel()
+	err := s.session.Reserve(ctx, target)
 	s.sync()
 	if err != nil {
 		return billingAPIError(err)
@@ -194,9 +226,138 @@ func (s *BillingSession) Reserve(target int) error {
 	return nil
 }
 func (s *BillingSession) Refund(c *gin.Context) {
-	if err := s.session.Refund(s.ctx); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settlementAttempted {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, billingOperationTimeout)
+	defer cancel()
+	if err := s.session.Refund(ctx); err != nil {
 		logger.LogError(s.ctx, "error refunding billing session: "+err.Error())
 	}
 }
-func (s *BillingSession) NeedsRefund() bool        { return s.session.NeedsRefund() }
+func (s *BillingSession) NeedsRefund() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.settlementAttempted && s.session.NeedsRefund()
+}
 func (s *BillingSession) GetPreConsumedQuota() int { return s.session.GetPreConsumedQuota() }
+
+// RunBillingRecovery retries only durable settlement/refund intents whose
+// upstream outcome is already known. Untouched reservations remain available
+// for explicit reconciliation instead of being refunded on a timer.
+func RunBillingRecovery(ctx context.Context) error {
+	_, sessionErr := billingEngine().RecoverPending(ctx, 500)
+	taskErr := RunPendingTaskBilling(ctx)
+	return errors.Join(sessionErr, taskErr)
+}
+
+// SettleTaskSubmissionBilling commits the initial task charge and clears its
+// durable hand-off marker together. A recovery process can repeat this same
+// session settlement if the submitting process exits after inserting the task.
+func SettleTaskSubmissionBilling(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task) error {
+	if info == nil || task == nil || task.ID <= 0 {
+		return fmt.Errorf("task submission billing identity is missing")
+	}
+	var committedTask *model.Task
+	commit := func(tx *gorm.DB) error {
+		if err := CompleteTaskSubmissionBillingTx(tx, task.ID); err != nil {
+			return err
+		}
+		var err error
+		committedTask, err = model.LockTaskForBilling(tx, task.ID)
+		return err
+	}
+	if adapter, ok := info.Billing.(*BillingSession); ok {
+		adapter.mu.Lock()
+		defer adapter.mu.Unlock()
+		adapter.settlementAttempted = true
+		ctx, cancel := context.WithTimeout(adapter.ctx, billingOperationTimeout)
+		defer cancel()
+		err := adapter.session.SettleWithUsageAndCommit(ctx, task.Quota, task.ChannelId, commit)
+		adapter.sync()
+		if err == nil && committedTask != nil {
+			*task = *committedTask
+		}
+		return err
+	}
+	if info.Billing != nil || info.FinalPreConsumedQuota != 0 {
+		return fmt.Errorf("task reservation has no durable billing session")
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), billingOperationTimeout)
+	defer cancel()
+	input := billingRequest(info)
+	if task.Quota != 0 {
+		return fmt.Errorf("paid task has no durable billing reservation")
+	}
+	err := model.DB.WithContext(ctx).Transaction(commit)
+	if err == nil {
+		if committedTask != nil {
+			*task = *committedTask
+		}
+		billingEngine().PublishCommitted(input)
+	}
+	return err
+}
+
+// MarkBillingDispatch fences an asynchronous submission before network I/O.
+func MarkBillingDispatch(info *relaycommon.RelayInfo) error {
+	if info == nil {
+		return fmt.Errorf("billing request is missing")
+	}
+	if adapter, ok := info.Billing.(*BillingSession); ok {
+		adapter.mu.Lock()
+		defer adapter.mu.Unlock()
+		ctx, cancel := context.WithTimeout(adapter.ctx, billingOperationTimeout)
+		defer cancel()
+		err := adapter.session.MarkDispatch(ctx, info.ChannelId)
+		if err == nil {
+			info.TaskSubmissionUncertain = true
+			adapter.settlementAttempted = true
+		}
+		adapter.sync()
+		return err
+	}
+	info.TaskSubmissionUncertain = true
+	return nil
+}
+
+func ResolveRejectedBillingDispatch(info *relaycommon.RelayInfo) error {
+	if info == nil {
+		return fmt.Errorf("billing request is missing")
+	}
+	if adapter, ok := info.Billing.(*BillingSession); ok {
+		adapter.mu.Lock()
+		defer adapter.mu.Unlock()
+		ctx, cancel := context.WithTimeout(adapter.ctx, billingOperationTimeout)
+		defer cancel()
+		if err := adapter.session.ResolveRejectedDispatch(ctx); err != nil {
+			return err
+		}
+		adapter.settlementAttempted = false
+		adapter.sync()
+	}
+	info.TaskSubmissionUncertain = false
+	return nil
+}
+
+// PreserveUncertainBilling is used after network I/O when there is no known
+// final outcome. Unlike a failed pre-dispatch fence, failure to write this
+// marker must still block an automatic refund in the current request.
+func PreserveUncertainBilling(info *relaycommon.RelayInfo) error {
+	if info == nil {
+		return fmt.Errorf("billing request is missing")
+	}
+	if adapter, ok := info.Billing.(*BillingSession); ok {
+		adapter.mu.Lock()
+		defer adapter.mu.Unlock()
+		adapter.settlementAttempted = true
+		ctx, cancel := context.WithTimeout(adapter.ctx, billingOperationTimeout)
+		defer cancel()
+		err := adapter.session.MarkDispatch(ctx, info.GetChannelID())
+		adapter.sync()
+		return err
+	}
+	return nil
+}

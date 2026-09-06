@@ -10,11 +10,10 @@ import (
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/constant"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -135,7 +134,7 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
-	version := model_setting.GetGeminiVersionSetting(info.UpstreamModelName)
+	version := info.GeminiVersionSetting(info.UpstreamModelName)
 
 	if strings.HasPrefix(info.UpstreamModelName, "imagen") {
 		return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, info.UpstreamModelName), nil

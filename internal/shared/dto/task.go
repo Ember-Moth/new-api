@@ -39,6 +39,7 @@ type TaskDto struct {
 	Group                string          `json:"group"`
 	ChannelId            int             `json:"channel_id"`
 	Quota                int             `json:"quota"`
+	BillingStatus        string          `json:"billing_status"`
 	Action               string          `json:"action"`
 	Status               string          `json:"status"`
 	FailReason           string          `json:"fail_reason"`

@@ -6,15 +6,15 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/legacy/relay/channel"
 	openaichannel "github.com/QuantumNous/new-api/internal/legacy/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/internal/legacy/relay/constant"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -78,7 +78,7 @@ func textRequestViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adapto
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		chatJSON, err = relaycommon.RemoveDisabledFields(chatJSON, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+		chatJSON, err = relaycommon.RemoveDisabledFields(chatJSON, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled, info)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
@@ -131,7 +131,7 @@ func relayResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 
-	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled, info)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}

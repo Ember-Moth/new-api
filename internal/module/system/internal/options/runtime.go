@@ -6,17 +6,135 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/billing_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/config"
+	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/performance_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/system_setting"
+	"github.com/QuantumNous/new-api/internal/module/system/entity"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 )
 
 const retiredThemeOptionKey = "theme.frontend"
+
+// publishRequestConfigSnapshot copies every setting consulted by request
+// pricing and protocol conversion. The caller must hold OptionMap's write
+// lock while this function runs; the options reload path invokes it only after
+// the complete generation has been applied successfully.
+func publishRequestConfigSnapshot(optionVersion string) {
+	globalSettings := model_setting.GetGlobalSettings()
+	claudeSettings := model_setting.GetClaudeSettings()
+	geminiSettings := model_setting.GetGeminiSettings()
+
+	snapshot := &config.RequestConfigSnapshot{
+		OptionVersion: optionVersion,
+		Pricing: config.RequestPricingSnapshot{
+			ModelRatio:                    ratio_setting.GetModelRatioCopy(),
+			ModelPrice:                    ratio_setting.GetModelPriceCopy(),
+			DefaultModelRatio:             cloneFloatSettings(ratio_setting.GetDefaultModelRatioMap()),
+			DefaultModelPrice:             cloneFloatSettings(ratio_setting.GetDefaultModelPriceMap()),
+			CompletionRatio:               ratio_setting.GetCompletionRatioCopy(),
+			CacheRatio:                    ratio_setting.GetCacheRatioCopy(),
+			CreateCacheRatio:              ratio_setting.GetCreateCacheRatioCopy(),
+			ImageRatio:                    ratio_setting.GetImageRatioCopy(),
+			AudioRatio:                    ratio_setting.GetAudioRatioCopy(),
+			AudioCompletionRatio:          ratio_setting.GetAudioCompletionRatioCopy(),
+			ToolPrices:                    operation_setting.GetToolPriceSnapshot(),
+			GroupRatio:                    ratio_setting.GetGroupRatioCopy(),
+			GroupGroupRatio:               ratio_setting.GetGroupGroupRatioCopy(),
+			QuotaPerUnit:                  common.QuotaPerUnit,
+			PreConsumedQuota:              common.PreConsumedQuota,
+			SelfUseModeEnabled:            operation_setting.SelfUseModeEnabled,
+			EnableFreeModelPreConsume:     operation_setting.GetQuotaSetting().EnableFreeModelPreConsume,
+			GrokViolationDeductionEnabled: model_setting.GetGrokSettings().ViolationDeductionEnabled,
+			GrokViolationDeductionAmount:  model_setting.GetGrokSettings().ViolationDeductionAmount,
+		},
+		Billing: config.RequestBillingSnapshot{
+			BillingMode: billing_setting.GetBillingModeCopy(),
+			BillingExpr: billing_setting.GetBillingExprCopy(),
+		},
+		Conversion: &config.RequestConversionSnapshot{
+			GlobalPassThroughRequestEnabled: globalSettings.PassThroughRequestEnabled,
+			ThinkingModelBlacklist:          append([]string(nil), globalSettings.ThinkingModelBlacklist...),
+			EffortTailModelIDs:              append([]string(nil), globalSettings.EffortTailModelIDs...),
+			ChatCompletionsToResponsesPolicy: config.ChatCompletionsToResponsesPolicySnapshot{
+				Enabled:       globalSettings.ChatCompletionsToResponsesPolicy.Enabled,
+				AllChannels:   globalSettings.ChatCompletionsToResponsesPolicy.AllChannels,
+				ChannelIDs:    append([]int(nil), globalSettings.ChatCompletionsToResponsesPolicy.ChannelIDs...),
+				ChannelTypes:  append([]int(nil), globalSettings.ChatCompletionsToResponsesPolicy.ChannelTypes...),
+				ModelPatterns: append([]string(nil), globalSettings.ChatCompletionsToResponsesPolicy.ModelPatterns...),
+			},
+			Claude: &config.ClaudeConversionSnapshot{
+				HeadersSettings:                       cloneClaudeHeadersSettings(claudeSettings.HeadersSettings),
+				DefaultMaxTokens:                      cloneIntSettings(claudeSettings.DefaultMaxTokens),
+				ThinkingAdapterEnabled:                claudeSettings.ThinkingAdapterEnabled,
+				ThinkingAdapterBudgetTokensPercentage: claudeSettings.ThinkingAdapterBudgetTokensPercentage,
+			},
+			Gemini: &config.GeminiConversionSnapshot{
+				SafetySettings:                        cloneStringSettings(geminiSettings.SafetySettings),
+				VersionSettings:                       cloneStringSettings(geminiSettings.VersionSettings),
+				SupportedImagineModels:                append([]string(nil), geminiSettings.SupportedImagineModels...),
+				ThinkingAdapterEnabled:                geminiSettings.ThinkingAdapterEnabled,
+				ThinkingAdapterBudgetTokensPercentage: geminiSettings.ThinkingAdapterBudgetTokensPercentage,
+				FunctionCallThoughtSignatureEnabled:   geminiSettings.FunctionCallThoughtSignatureEnabled,
+				RemoveFunctionResponseIdEnabled:       geminiSettings.RemoveFunctionResponseIdEnabled,
+			},
+		},
+	}
+	config.PublishRequestConfigSnapshot(snapshot)
+}
+
+func cloneClaudeHeadersSettings(src map[string]map[string][]string) map[string]map[string][]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]map[string][]string, len(src))
+	for model, headers := range src {
+		copied := make(map[string][]string, len(headers))
+		for key, values := range headers {
+			copied[key] = append([]string(nil), values...)
+		}
+		dst[model] = copied
+	}
+	return dst
+}
+
+func cloneStringSettings(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneIntSettings(src map[string]int) map[string]int {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]int, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneFloatSettings(src map[string]float64) map[string]float64 {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]float64, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
 
 func (r *Manager) Initialize(ctx context.Context) error {
 	r.version = "" // Initialization precedes watchers and rebuilds all defaults.
@@ -187,15 +305,51 @@ func (r *Manager) Initialize(ctx context.Context) error {
 	return r.Reload(ctx)
 }
 
-func (r *Manager) ApplyRuntime(key string, value string) (err error) {
-	if key == retiredThemeOptionKey {
-		common.OptionMapRWMutex.Lock()
-		delete(common.OptionMap, key)
-		common.OptionMapRWMutex.Unlock()
-		return nil
-	}
+func (r *Manager) ApplyRuntime(key string, value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.applyRuntimeBatch([]entity.Option{{Key: key, Value: value}}, r.version, false)
+}
+
+// applyRuntimeBatch applies one complete options generation while holding the
+// source locks, then publishes one immutable request snapshot. Keeping the
+// OptionMap lock outside the request-config lock preserves the existing lock
+// order used by runtime updates and configuration exports.
+func (r *Manager) applyRuntimeBatch(rows []entity.Option, optionVersion string, forcePublish bool) error {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	applyErr := config.WithRequestConfigWrite(func() error {
+		for _, row := range rows {
+			if err := r.applyRuntimeUnlocked(row.Key, row.Value); err != nil {
+				r.runtimeSnapshotDirty = true
+				return err
+			}
+		}
+		return nil
+	})
+	if applyErr != nil {
+		return applyErr
+	}
+	if forcePublish || !r.runtimeSnapshotDirty {
+		if err := config.WithRequestConfigRead(func() error {
+			publishRequestConfigSnapshot(optionVersion)
+			return nil
+		}); err != nil {
+			return err
+		}
+		r.runtimeSnapshotDirty = false
+	}
+	return nil
+}
+
+func (r *Manager) applyRuntimeUnlocked(key string, value string) (err error) {
+	if key == retiredThemeOptionKey {
+		delete(common.OptionMap, key)
+		return nil
+	}
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
@@ -256,7 +410,7 @@ func (r *Manager) ApplyRuntime(key string, value string) (err error) {
 				newVal = "TOKENS"
 			}
 			if cfg := config.GlobalConfig.Get("general_setting"); cfg != nil {
-				_ = config.UpdateConfigFromMap(cfg, map[string]string{"quota_display_type": newVal})
+				_ = config.UpdateConfigFromMapUnlocked(cfg, map[string]string{"quota_display_type": newVal})
 			}
 		case "DisplayTokenStatEnabled":
 			common.DisplayTokenStatEnabled = boolValue
@@ -554,7 +708,7 @@ func (r *Manager) handleConfigUpdate(key, value string) bool {
 	configMap := map[string]string{
 		configKey: value,
 	}
-	config.UpdateConfigFromMap(cfg, configMap)
+	config.UpdateConfigFromMapUnlocked(cfg, configMap)
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {

@@ -47,6 +47,20 @@ func (s *Store) enqueueBatchDeltas(ctx context.Context, deltas []quotaBatchDelta
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return s.enqueueBatchDeltasTx(ctx, tx, deltas)
+	})
+}
+
+// enqueueBatchDeltasTx appends durable accounting intents without opening a
+// nested transaction. The caller owns tx's commit/rollback.
+func (s *Store) enqueueBatchDeltasTx(ctx context.Context, tx *gorm.DB, deltas []quotaBatchDelta) error {
+	if tx == nil {
+		return fmt.Errorf("accounting transaction is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rows := make([]quotaBatchDelivery, 0, len(deltas))
 	for _, delta := range deltas {
 		if delta.Delta == 0 {
@@ -59,19 +73,12 @@ func (s *Store) enqueueBatchDeltas(ctx context.Context, deltas []quotaBatchDelta
 		if err != nil {
 			return fmt.Errorf("identify quota batch delivery: %w", err)
 		}
-		rows = append(rows, quotaBatchDelivery{
-			ID:         id,
-			UpdateType: delta.UpdateType,
-			EntityID:   int64(delta.EntityID),
-			Delta:      int64(delta.Delta),
-		})
+		rows = append(rows, quotaBatchDelivery{ID: id, UpdateType: delta.UpdateType, EntityID: int64(delta.EntityID), Delta: int64(delta.Delta)})
 	}
 	if len(rows) == 0 {
 		return nil
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return tx.Create(&rows).Error
-	})
+	return tx.WithContext(ctx).Create(&rows).Error
 }
 
 // flushOne atomically claims, applies, and removes one durable batch. Row

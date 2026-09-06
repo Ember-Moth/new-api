@@ -10,6 +10,7 @@ import (
 
 const (
 	SystemTaskTypeAuthArtifactCleanup     = "auth_artifact_cleanup"
+	SystemTaskTypeBillingRecovery         = "billing_recovery"
 	SystemTaskTypeCodexCredentialRefresh  = "codex_credential_refresh"
 	SystemTaskTypeSubscriptionMaintenance = "subscription_maintenance"
 	authArtifactCleanupTaskInterval       = time.Hour
@@ -22,6 +23,7 @@ const (
 // leasing, and durable success/failure history.
 type MaintenanceWorkloads struct {
 	AuthArtifactCleanup     func(context.Context) error
+	BillingRecovery         func(context.Context) error
 	CodexCredentialRefresh  func(context.Context) error
 	SubscriptionMaintenance func(context.Context) error
 }
@@ -56,10 +58,16 @@ func (h maintenanceHandler) Run(ctx context.Context, task *system.SystemTask, ru
 	finishSystemTaskHandler(h.tasks, task, runnerID, system.SystemTaskStatusSucceeded, nil, nil)
 }
 
-// RegisterMaintenanceTasks registers the three periodic maintenance actions
+// RegisterMaintenanceTasks registers periodic maintenance actions
 // with the existing system task scheduler. The scheduler's control-plane
 // runtime gate prevents data-plane processes from creating or claiming them.
 func RegisterMaintenanceTasks(tasks *system.Service, workloads MaintenanceWorkloads) {
+	tasks.RegisterSystemTaskHandler(maintenanceHandler{
+		tasks:    tasks,
+		taskType: SystemTaskTypeBillingRecovery,
+		interval: time.Minute,
+		run:      workloads.BillingRecovery,
+	})
 	tasks.RegisterSystemTaskHandler(maintenanceHandler{
 		tasks:    tasks,
 		taskType: SystemTaskTypeAuthArtifactCleanup,

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/tokencache"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"gorm.io/gorm"
 )
 
@@ -68,6 +68,26 @@ func GetTokenById(id int) (*Token, error) {
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
 	return &token, err
+}
+
+// GetHistoricalTokenForBilling loads the immutable token identity needed by a
+// task's terminal accounting event. It includes soft-deleted tokens because a
+// task may finish after the credential is revoked; the persisted task still
+// owns the already-authorized token ledger mutation. The lookup intentionally
+// does not lock the row: ApplyAdjustmentTx acquires the token lock after the
+// funding-source lock, matching the reservation lock order.
+func GetHistoricalTokenForBilling(tx *gorm.DB, userID, tokenID int) (*Token, error) {
+	if tx == nil {
+		return nil, errors.New("token billing transaction is nil")
+	}
+	if userID <= 0 || tokenID <= 0 {
+		return nil, errors.New("token billing identity is invalid")
+	}
+	var token Token
+	if err := tx.Unscoped().Where("id = ? AND user_id = ?", tokenID, userID).First(&token).Error; err != nil {
+		return nil, err
+	}
+	return &token, nil
 }
 
 func GetTokenByKey(key string, fromDB bool) (*Token, error) {

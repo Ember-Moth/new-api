@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/config/setting/config"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
 // ---------------------------------------------------------------------------
@@ -209,6 +209,66 @@ func GetToolPriceForModel(toolName, modelName string) float64 {
 
 	if p, ok := idx.defaults[toolName]; ok {
 		return p
+	}
+	return 0
+}
+
+// GetToolPriceSnapshot returns the effective tool price index in a portable
+// map form. The map includes hardcoded defaults and operator overrides, so a
+// request can evaluate a tool surcharge without reading the live index.
+func GetToolPriceSnapshot() map[string]float64 {
+	idx := currentIndex.Load()
+	if idx == nil {
+		RebuildToolPriceIndex()
+		idx = currentIndex.Load()
+	}
+	if idx == nil {
+		return nil
+	}
+	prices := make(map[string]float64, len(idx.defaults))
+	for tool, price := range idx.defaults {
+		prices[tool] = price
+	}
+	for tool, entries := range idx.prefixes {
+		for _, entry := range entries {
+			prices[tool+":"+entry.prefix+"*"] = entry.price
+		}
+	}
+	return prices
+}
+
+// GetToolPriceForModelFromSnapshot performs the same longest-prefix lookup as
+// GetToolPriceForModel against a frozen effective map.
+func GetToolPriceForModelFromSnapshot(toolName, modelName string, prices map[string]float64) float64 {
+	bestPrefix := ""
+	bestPrice := 0.0
+	matched := false
+	for key, price := range prices {
+		if key == toolName {
+			if !matched {
+				bestPrice = price
+			}
+			continue
+		}
+		prefixStart := len(toolName) + 1
+		if len(key) <= prefixStart || !strings.HasPrefix(key, toolName+":") {
+			continue
+		}
+		prefix := strings.TrimSuffix(key[prefixStart:], "*")
+		if modelName == "" || !strings.HasPrefix(modelName, prefix) {
+			continue
+		}
+		if !matched || len(prefix) > len(bestPrefix) || len(prefix) == len(bestPrefix) && prefix < bestPrefix {
+			bestPrefix = prefix
+			bestPrice = price
+			matched = true
+		}
+	}
+	if matched {
+		return bestPrice
+	}
+	if price, ok := prices[toolName]; ok {
+		return price
 	}
 	return 0
 }

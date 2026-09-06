@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -598,7 +599,7 @@ func executeTaskSubmissionWith(
 	durable := false
 	stage := "start"
 	defer func() {
-		if !durable && relayInfo.Billing != nil {
+		if !durable && !relayInfo.TaskSubmissionUncertain && relayInfo.Billing != nil {
 			diagnostics.refund(stage)
 			relayInfo.Billing.Refund(c)
 		}
@@ -660,13 +661,20 @@ func executeTaskSubmissionWith(
 
 		stage = "submit"
 		result, taskErr = submit(c, relayInfo)
+		if taskErr == nil && result != nil {
+			relayInfo.TaskSubmissionUncertain = true
+			// A confirmed remote result must be persisted even if the client has
+			// disconnected. Cancelling here would lose the task and its charge.
+			diagnostics.attemptSucceeded(retryParam.GetRetry()+1, result)
+			break
+		}
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("after_submit", retryParam.GetRetry()+1)
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
 			break
 		}
 		if taskErr == nil {
-			diagnostics.attemptSucceeded(retryParam.GetRetry()+1, result)
+			taskErr = service.TaskErrorWrapperLocal(errors.New("task submission returned no result"), "task_submit_failed", http.StatusBadGateway)
 			break
 		}
 
@@ -677,7 +685,7 @@ func executeTaskSubmissionWith(
 				relayInfo)
 		}
 
-		willRetry := shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry())
+		willRetry := !relayInfo.TaskSubmissionUncertain && shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry())
 		diagnostics.attemptFailed(retryParam.GetRetry()+1, channel, taskErr, willRetry)
 		if !willRetry {
 			break
@@ -699,35 +707,20 @@ func executeTaskSubmissionWith(
 		diagnostics.failed("submit", "missing_result", taskErr, false)
 		return nil, taskErr
 	}
-	if requestErr := c.Request.Context().Err(); requestErr != nil {
-		diagnostics.cancelled("before_reserve", retryParam.GetRetry()+1)
-		return nil, service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
-	}
-
-	// Reserve any submit-time upward billing adjustment before persistence.
-	// This keeps insertion failures fully refundable while ensuring settlement
-	// after the barrier normally has a zero positive delta.
-	if relayInfo.Billing != nil {
-		stage = "reserve"
-		diagnostics.reserve("reserve_start", result.Quota)
-		if reserveErr := relayInfo.Billing.Reserve(result.Quota); reserveErr != nil {
-			common.SysError("reserve adjusted task billing error: " + reserveErr.Error())
-			taskErr = service.TaskErrorWrapperLocal(errors.New("insufficient quota for adjusted task cost"), string(types.ErrorCodeInsufficientUserQuota), http.StatusForbidden)
-			diagnostics.failed("reserve", "insufficient_quota", taskErr, false)
-			return nil, taskErr
-		}
-		diagnostics.reserve("reserve_complete", result.Quota)
-	}
-	if requestErr := c.Request.Context().Err(); requestErr != nil {
-		diagnostics.cancelled("before_insert", retryParam.GetRetry()+1)
-		return nil, service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
-	}
+	// Upstream acceptance is already known. Reserve was performed before
+	// dispatch; persist the result now and let the durable settlement intent
+	// handle any actual-cost difference instead of refunding an accepted job.
+	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 30*time.Second)
+	defer cancelPersist()
 
 	stage = "insert"
 	task := model.InitTask(result.Platform, relayInfo)
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	task.PrivateData.BillingSource = relayInfo.BillingSource
+	task.PrivateData.BillingRequestID = relayInfo.RequestId
+	task.PrivateData.BillingTokenUnlimited = relayInfo.TokenUnlimited
+	task.PrivateData.BillingPlayground = relayInfo.IsPlayground
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
@@ -761,19 +754,29 @@ func executeTaskSubmissionWith(
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		}
 	}
+	if prepareErr := service.PrepareTaskSubmissionBilling(relayInfo, task); prepareErr != nil {
+		taskErr = service.TaskErrorWrapperLocal(prepareErr, "task_billing_identity_invalid", http.StatusInternalServerError)
+		diagnostics.failed("insert", "billing_error", taskErr, false)
+		return nil, taskErr
+	}
 	diagnostics.insertStart(task)
-	if insertErr := task.InsertWithContext(c.Request.Context()); insertErr != nil {
+	if insertErr := task.InsertWithContext(persistCtx); insertErr != nil {
 		common.SysError("insert task error: " + insertErr.Error())
 		taskErr = service.TaskErrorWrapperLocal(errors.New("failed to persist task"), "task_insert_failed", http.StatusInternalServerError)
 		diagnostics.failed("insert", "database_error", taskErr, false)
 		return nil, taskErr
 	}
 	durable = true
+	if task.PrivateData.UpstreamTaskID == "" && task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
+		taskErr = service.TaskErrorWrapperLocal(errors.New("upstream task identity is unresolved"), "task_submission_outcome_unknown", http.StatusBadGateway)
+		diagnostics.failed("insert", "upstream_identity", taskErr, true)
+		return nil, taskErr
+	}
 	stage = "settle"
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)
 
-	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+	if settleErr := service.SettleTaskSubmissionBilling(c, relayInfo, task); settleErr != nil {
 		common.SysError("settle task billing error: " + settleErr.Error())
 		taskErr = service.TaskErrorWrapperLocal(errors.New("failed to settle task billing"), "task_billing_settlement_failed", http.StatusInternalServerError)
 		diagnostics.failed("settle", "billing_error", taskErr, true)

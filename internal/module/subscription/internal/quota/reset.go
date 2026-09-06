@@ -99,12 +99,15 @@ func (s *Store) ResetDueSubscriptions(ctx context.Context, limit int) (int, erro
 	return resetCount, nil
 }
 
-// CleanupSubscriptionPreConsumeRecords removes old idempotency records to keep table small.
+// CleanupSubscriptionPreConsumeRecords removes only refunded idempotency
+// records. Consumed rows remain durable because billing sessions may still
+// need their request identity while an upstream result is being reconciled or
+// a terminal settlement is retried after a process restart.
 func (s *Store) CleanupSubscriptionPreConsumeRecords(ctx context.Context, olderThanSeconds int64) (int64, error) {
 	if olderThanSeconds <= 0 {
 		olderThanSeconds = 7 * 24 * 3600
 	}
 	cutoff := dbtime.Timestamp(s.db.WithContext(ctx)) - olderThanSeconds
-	res := s.db.WithContext(ctx).Where("updated_at < ?", cutoff).Delete(&SubscriptionPreConsumeRecord{})
+	res := s.db.WithContext(ctx).Where("updated_at < ? AND status = ?", cutoff, "refunded").Delete(&SubscriptionPreConsumeRecord{})
 	return res.RowsAffected, res.Error
 }

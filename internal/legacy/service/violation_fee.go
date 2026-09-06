@@ -2,15 +2,15 @@ package service
 
 import (
 	"fmt"
+	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/internal/config/setting/model_setting"
 
 	"github.com/shopspring/decimal"
 
@@ -81,15 +81,19 @@ func shouldChargeViolationFee(err *types.NewAPIError) bool {
 	return HasCSAMViolationMarker(err)
 }
 
-func calcViolationFeeQuota(amount, groupRatio float64) int {
+func calcViolationFeeQuota(amount, groupRatio float64, quotaPerUnits ...float64) int {
 	if amount <= 0 {
 		return 0
 	}
 	if groupRatio <= 0 {
 		return 0
 	}
+	quotaPerUnit := common.QuotaPerUnit
+	if len(quotaPerUnits) > 0 {
+		quotaPerUnit = quotaPerUnits[0]
+	}
 	quota := common.QuotaFromDecimal(decimal.NewFromFloat(amount).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Mul(decimal.NewFromFloat(quotaPerUnit)).
 		Mul(decimal.NewFromFloat(groupRatio)).
 		Round(0))
 	if quota <= 0 {
@@ -111,24 +115,33 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	settings := model_setting.GetGrokSettings()
-	if settings == nil || !settings.ViolationDeductionEnabled {
+	feeEnabled, feeAmount := relayInfo.GrokViolationDeduction()
+	if !feeEnabled {
 		return false
 	}
 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
+	feeQuota := calcViolationFeeQuota(feeAmount, groupRatio, relayInfo.QuotaPerUnit())
 	if feeQuota <= 0 {
 		return false
 	}
 
-	if err := PostConsumeQuota(relayInfo, feeQuota, 0, true); err != nil {
+	result, err := applyQuotaAdjustment(relayInfo, billingcontract.BillingAdjustment{
+		OperationID:    "request:" + relayInfo.RequestId + ":violation_fee",
+		Source:         relayInfo.BillingSource,
+		SubscriptionID: relayInfo.SubscriptionId,
+		Delta:          feeQuota,
+		UsageDelta:     feeQuota,
+		RequestDelta:   1,
+		ChannelID:      relayInfo.ChannelId,
+	}, true)
+	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("failed to charge violation fee: %s", err.Error()))
 		return false
 	}
-
-	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
-	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
+	if result.Replayed {
+		return true
+	}
 
 	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
 	tokenName := ctx.GetString("token_name")
@@ -139,7 +152,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"violation_fee":        true,
 		"violation_fee_code":   string(types.ErrorCodeViolationFeeGrokCSAM),
 		"fee_quota":            feeQuota,
-		"base_amount":          settings.ViolationDeductionAmount,
+		"base_amount":          feeAmount,
 		"group_ratio":          groupRatio,
 		"status_code":          apiErr.StatusCode,
 		"upstream_error_type":  oai.Type,

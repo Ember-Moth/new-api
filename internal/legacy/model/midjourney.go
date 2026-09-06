@@ -1,5 +1,11 @@
 package model
 
+import (
+	"errors"
+
+	"gorm.io/gorm"
+)
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -21,11 +27,27 @@ type Midjourney struct {
 	FailReason  string `json:"fail_reason"`
 	ChannelId   int    `json:"channel_id"`
 	Quota       int    `json:"quota"`
-	Buttons     string `json:"buttons"`
-	Properties  string `json:"properties"`
+	// Billing fields form the durable hand-off between a persisted Midjourney
+	// row and its wallet/token accounting receipt. They are intentionally
+	// excluded from public JSON responses.
+	BillingPending     bool   `json:"-" gorm:"column:billing_pending;not null"`
+	BillingAction      string `json:"-" gorm:"column:billing_action;type:varchar(32);not null;default:''"`
+	BillingOperationID string `json:"-" gorm:"column:billing_operation_id;type:varchar(128);not null;default:''"`
+	BillingTargetQuota int    `json:"-" gorm:"column:billing_target_quota;not null;default:0"`
+	BillingDelta       int    `json:"-" gorm:"column:billing_delta;not null;default:0"`
+	Buttons            string `json:"buttons"`
+	Properties         string `json:"properties"`
 
 	TokenId          int `json:"-" gorm:"default:0"`
 	BillingChannelId int `json:"-" gorm:"default:0"`
+	// Billing provenance is persisted with the task so delayed settlement and
+	// refund never infer authorization from current token metadata.
+	BillingRequestID      string `json:"-" gorm:"column:billing_request_id;type:varchar(64);not null;default:''"`
+	BillingTokenUnlimited bool   `json:"-" gorm:"column:billing_token_unlimited;not null;default:false"`
+	BillingPlayground     bool   `json:"-" gorm:"column:billing_playground;not null;default:false"`
+	BillingFreeModel      bool   `json:"-" gorm:"column:billing_free_model;not null;default:false"`
+	BillingSource         string `json:"-" gorm:"column:billing_source;type:varchar(32);not null;default:'wallet'"`
+	BillingSubscriptionID int    `json:"-" gorm:"column:billing_subscription_id;not null;default:0"`
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
@@ -162,9 +184,87 @@ func UpdateProgress(id int, progress string) error {
 }
 
 func (midjourney *Midjourney) Insert() error {
-	var err error
-	err = DB.Create(midjourney).Error
-	return err
+	return midjourney.InsertTx(DB)
+}
+
+// InsertTx inserts a Midjourney task in the caller's transaction. Billing
+// marker installation can then be committed with this row before the session
+// terminal transaction runs.
+func (midjourney *Midjourney) InsertTx(tx *gorm.DB) error {
+	if tx == nil {
+		return errors.New("Midjourney transaction is nil")
+	}
+	if midjourney == nil {
+		return errors.New("Midjourney task is nil")
+	}
+	return tx.Create(midjourney).Error
+}
+
+// LockMidjourneyForBilling loads one row under the shared billing lock. The
+// caller must keep the surrounding transaction open through the ledger
+// receipt and the marker update.
+func LockMidjourneyForBilling(tx *gorm.DB, id int) (*Midjourney, error) {
+	if tx == nil {
+		return nil, errors.New("Midjourney billing transaction is nil")
+	}
+	if id <= 0 {
+		return nil, errors.New("Midjourney billing id is invalid")
+	}
+	var task Midjourney
+	if err := lockForUpdate(tx).Where("id = ?", id).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// UpdateBillingStateTx updates only billing fields while retaining the
+// current task result. Notify/poll updates use separate selected columns, so
+// neither path can resurrect a cleared quota from a stale full-row snapshot.
+func (midjourney *Midjourney) UpdateBillingStateTx(tx *gorm.DB) error {
+	if tx == nil {
+		return errors.New("Midjourney billing transaction is nil")
+	}
+	if midjourney == nil || midjourney.Id <= 0 {
+		return errors.New("Midjourney billing id is invalid")
+	}
+	return tx.Model(&Midjourney{}).Where("id = ?", midjourney.Id).Updates(map[string]any{
+		"quota":                   midjourney.Quota,
+		"token_id":                midjourney.TokenId,
+		"billing_channel_id":      midjourney.BillingChannelId,
+		"billing_pending":         midjourney.BillingPending,
+		"billing_action":          midjourney.BillingAction,
+		"billing_operation_id":    midjourney.BillingOperationID,
+		"billing_target_quota":    midjourney.BillingTargetQuota,
+		"billing_delta":           midjourney.BillingDelta,
+		"billing_request_id":      midjourney.BillingRequestID,
+		"billing_token_unlimited": midjourney.BillingTokenUnlimited,
+		"billing_playground":      midjourney.BillingPlayground,
+		"billing_free_model":      midjourney.BillingFreeModel,
+		"billing_source":          midjourney.BillingSource,
+		"billing_subscription_id": midjourney.BillingSubscriptionID,
+	}).Error
+}
+
+// UpdateNotifyState writes only upstream status/result columns. Billing state
+// is owned by settlement/refund transactions and must not be part of a notify
+// callback's stale full-row write.
+func (midjourney *Midjourney) UpdateNotifyState() error {
+	if midjourney == nil || midjourney.Id <= 0 {
+		return errors.New("Midjourney id is invalid")
+	}
+	return DB.Model(&Midjourney{}).Where("id = ?", midjourney.Id).Updates(map[string]any{
+		"progress":    midjourney.Progress,
+		"prompt_en":   midjourney.PromptEn,
+		"state":       midjourney.State,
+		"submit_time": midjourney.SubmitTime,
+		"start_time":  midjourney.StartTime,
+		"finish_time": midjourney.FinishTime,
+		"image_url":   midjourney.ImageUrl,
+		"video_url":   midjourney.VideoUrl,
+		"video_urls":  midjourney.VideoUrls,
+		"status":      midjourney.Status,
+		"fail_reason": midjourney.FailReason,
+	}).Error
 }
 
 func (midjourney *Midjourney) Update() error {
