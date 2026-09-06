@@ -19,3 +19,6 @@ func ValidateCredit(value decimal.Decimal) (int, error) { return implementation.
 func Information(cfg contract.WalletConfig) contract.TopUpInfo {
 	return implementation.Information(cfg)
 }
+
+type InputError = implementation.InputError
+type RedirectError = implementation.RedirectError

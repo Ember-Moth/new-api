@@ -3,6 +3,8 @@ package contract
 import "github.com/QuantumNous/new-api/constant"
 
 type WalletConfig struct {
+	StripeUnitPrice                                      float64
+	StripePromotionCodes                                 bool
 	PaymentAllowed                                       bool
 	TermsVersion                                         string
 	Gateway                                              GatewayConfig
@@ -47,4 +49,27 @@ type WalletQuote struct {
 	InputAmount, StoredAmount int64
 	CreditedQuota             int
 	Money                     float64
+}
+
+type StripeWalletRequest struct {
+	Amount        int64  `json:"amount"`
+	PaymentMethod string `json:"payment_method"`
+	SuccessURL    string `json:"success_url,omitempty"`
+	CancelURL     string `json:"cancel_url,omitempty"`
+}
+type StripeWalletQuote struct {
+	Money, CreditBase float64
+	CreditedQuota     int
+	Quantity          int64
+}
+type CreemWalletRequest struct {
+	ProductId     string `json:"product_id"`
+	PaymentMethod string `json:"payment_method"`
+}
+type CreemProduct struct {
+	ProductId string  `json:"productId"`
+	Name      string  `json:"name"`
+	Price     float64 `json:"price"`
+	Currency  string  `json:"currency"`
+	Quota     int64   `json:"quota"`
 }

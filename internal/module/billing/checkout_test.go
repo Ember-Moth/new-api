@@ -173,3 +173,35 @@ func TestEpayCheckoutSignsParametersAndVerifiesCallbacks(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "https://console.example/wallet?pay=success", client.ReturnURL("/wallet?pay=success"))
 }
+
+func TestStripeWalletCheckoutPreservesPaymentModeAndRedirects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		assert.Equal(t, "Bearer sk_wallet", r.Header.Get("Authorization"))
+		assert.Equal(t, "payment", r.PostForm.Get("mode"))
+		assert.Equal(t, "always", r.PostForm.Get("customer_creation"))
+		assert.Equal(t, "price_wallet", r.PostForm.Get("line_items[0][price]"))
+		assert.Equal(t, "3", r.PostForm.Get("line_items[0][quantity]"))
+		assert.Equal(t, "https://trusted.example/done", r.PostForm.Get("success_url"))
+		assert.Equal(t, "https://console.example/wallet", r.PostForm.Get("cancel_url"))
+		assert.Equal(t, "true", r.PostForm.Get("allow_promotion_codes"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cs_wallet","object":"checkout.session","url":"https://stripe.example/wallet"}`))
+	}))
+	defer server.Close()
+	backend := stripe.GetBackendWithConfig(stripe.APIBackend, &stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0)})
+	client := checkout.New(checkout.Options{StripeBackend: backend, Config: func() contract.GatewayConfig {
+		return contract.GatewayConfig{StripeKey: "sk_wallet", ServerAddress: "https://console.example"}
+	}})
+	request := contract.CheckoutRequest{InputAmount: 3, ProductID: "price_wallet", Email: "buyer@example.test", SuccessURL: "https://trusted.example/done", AllowPromotionCodes: true}
+	result, err := client.StripeWallet(t.Context(), request)
+	require.NoError(t, err)
+	assert.Equal(t, "https://stripe.example/wallet", result.PayLink)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = client.StripeWallet(ctx, request)
+	require.ErrorIs(t, err, context.Canceled)
+}

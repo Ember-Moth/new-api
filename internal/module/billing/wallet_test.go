@@ -1,6 +1,8 @@
 package billing_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -8,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
@@ -162,4 +166,155 @@ func TestWalletQuoteRejectsInvalidFactorsAndUnsettleableAmounts(t *testing.T) {
 	cfg.Discounts = map[int]float64{1: math.Inf(1)}
 	_, err = quotes.Quote(t.Context(), f.user.Id, 1)
 	require.Error(t, err)
+}
+
+type walletGatewayFixture struct {
+	create func(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
+}
+
+func (g walletGatewayFixture) ValidateSubscription(string, string) error { return nil }
+func (g walletGatewayFixture) EpayWallet(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+	return g.create(ctx, r)
+}
+func (g walletGatewayFixture) StripeWallet(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+	return g.create(ctx, r)
+}
+func (g walletGatewayFixture) Creem(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+	return g.create(ctx, r)
+}
+
+func TestStripeWalletQuoteAndCheckoutPreserveCreditBasis(t *testing.T) {
+	f := newTopupFixture(t, 10)
+	cfg := contract.WalletConfig{PaymentAllowed: true, QuotaPerUnit: 10, StripeMinimum: 1, StripeUnitPrice: 3, StripePriceID: "price_wallet", StripePromotionCodes: true, Discounts: map[int]float64{2: 0.5}}
+	accounts := identity.New(identity.Dependencies{DB: f.db})
+	var submitted contract.CheckoutRequest
+	gateway := walletGatewayFixture{create: func(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+		submitted = r
+		row, err := f.store.Get(ctx, r.TradeNo)
+		require.NoError(t, err)
+		assert.Equal(t, common.TopUpStatusPending, row.Status)
+		assert.Equal(t, 4.0, row.Money)
+		assert.EqualValues(t, 2, row.Amount)
+		return contract.CheckoutSession{PayLink: "https://stripe.example/pay"}, nil
+	}}
+	ratio := 2.0
+	service := purchases.New(purchases.Dependencies{Config: func() contract.WalletConfig { return cfg }, Buyer: accounts.CheckoutBuyer, GroupRatio: func(string) float64 { return ratio }, TopUps: f.store, Gateway: gateway, ValidateRedirect: func(target string) error {
+		if strings.HasPrefix(target, "https://trusted.example/") {
+			return nil
+		}
+		return errors.New("untrusted")
+	}})
+	quote, err := service.StripeQuote(t.Context(), f.user.Id, 2)
+	require.NoError(t, err)
+	assert.Equal(t, 6.0, quote.Money)
+	assert.Equal(t, 4.0, quote.CreditBase)
+	assert.Equal(t, 40, quote.CreditedQuota)
+	result, err := service.StartStripe(t.Context(), f.user.Id, contract.StripeWalletRequest{Amount: 2, PaymentMethod: "stripe", SuccessURL: "https://trusted.example/done"})
+	require.NoError(t, err)
+	assert.Equal(t, "https://stripe.example/pay", result.PayLink)
+	assert.True(t, strings.HasPrefix(result.OrderID, "ref_"))
+	assert.Equal(t, "price_wallet", submitted.ProductID)
+	assert.EqualValues(t, 2, submitted.InputAmount)
+	assert.True(t, submitted.AllowPromotionCodes)
+	_, err = f.store.Complete(t.Context(), contract.TopUpCompletion{TradeNo: result.OrderID, Provider: "stripe"})
+	require.NoError(t, err)
+	require.NoError(t, f.db.First(&f.user, f.user.Id).Error)
+	assert.Equal(t, 50, f.user.Quota)
+	ratio = 0
+	quote, err = service.StripeQuote(t.Context(), f.user.Id, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 10, quote.CreditedQuota)
+	ratio = math.Inf(1)
+	_, err = service.StripeQuote(t.Context(), f.user.Id, 1)
+	require.Error(t, err)
+	ratio = 1
+	_, err = service.StripeQuote(t.Context(), f.user.Id, 10001)
+	require.Error(t, err)
+	handler := billinghttp.New(billing.New(billing.Dependencies{Purchases: service}), billinghttp.ManagementHooks{})
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("id", f.user.Id) })
+	router.POST("/stripe", handler.RequestStripePay)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/stripe", strings.NewReader(`{"amount":2,"payment_method":"stripe","success_url":"https://evil.example/"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	var count int64
+	require.NoError(t, f.db.Model(&entity.TopUp{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+	cfg.QuotaPerUnit = math.NaN()
+	_, err = service.StripeQuote(t.Context(), f.user.Id, 1)
+	require.Error(t, err)
+}
+
+func TestWalletCheckoutFailureRetainsStripeAndCreemOrders(t *testing.T) {
+	for _, provider := range []string{"stripe", "creem"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newTopupFixture(t, 10)
+			cfg := contract.WalletConfig{PaymentAllowed: true, QuotaPerUnit: 10, StripeMinimum: 1, StripeUnitPrice: 1, StripePriceID: "price_wallet", CreemProducts: `[{"productId":"prod_credit","name":"Credit","price":2.5,"quota":123}]`}
+			accounts := identity.New(identity.Dependencies{DB: f.db})
+			reference := ""
+			gateway := walletGatewayFixture{create: func(ctx context.Context, r contract.CheckoutRequest) (contract.CheckoutSession, error) {
+				reference = r.TradeNo
+				row, err := f.store.Get(ctx, r.TradeNo)
+				require.NoError(t, err)
+				assert.Equal(t, provider, row.PaymentProvider)
+				if provider == "creem" {
+					assert.EqualValues(t, 123, r.Quota)
+					assert.Equal(t, "prod_credit", r.ProductID)
+					assert.EqualValues(t, 123, row.Amount)
+				}
+				return contract.CheckoutSession{}, errors.New("provider timeout")
+			}}
+			service := purchases.New(purchases.Dependencies{Config: func() contract.WalletConfig { return cfg }, Buyer: accounts.CheckoutBuyer, GroupRatio: func(string) float64 { return 1 }, TopUps: f.store, Gateway: gateway})
+			if provider == "stripe" {
+				_, err := service.StartStripe(t.Context(), f.user.Id, contract.StripeWalletRequest{Amount: 2, PaymentMethod: provider})
+				require.EqualError(t, err, "拉起支付失败")
+			} else {
+				_, err := service.StartCreem(t.Context(), f.user.Id, contract.CreemWalletRequest{ProductId: "prod_credit", PaymentMethod: provider})
+				require.EqualError(t, err, "拉起支付失败")
+			}
+			row, err := f.store.Get(t.Context(), reference)
+			require.NoError(t, err)
+			assert.Equal(t, common.TopUpStatusPending, row.Status)
+			_, err = f.store.Complete(t.Context(), contract.TopUpCompletion{TradeNo: reference, Provider: provider})
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, f.events.Load())
+		})
+	}
+}
+
+func TestCreemWalletSelectionAndCreditValidation(t *testing.T) {
+	f := newTopupFixture(t, 10)
+	accounts := identity.New(identity.Dependencies{DB: f.db})
+	cfg := contract.WalletConfig{PaymentAllowed: true, CreemProducts: `[{"productId":"product","price":1,"quota":50}]`}
+	called := false
+	service := purchases.New(purchases.Dependencies{Config: func() contract.WalletConfig { return cfg }, Buyer: accounts.CheckoutBuyer, TopUps: f.store, Gateway: walletGatewayFixture{create: func(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error) {
+		called = true
+		return contract.CheckoutSession{CheckoutURL: "https://creem.example/pay"}, nil
+	}}})
+	_, err := service.StartCreem(t.Context(), f.user.Id, contract.CreemWalletRequest{ProductId: "missing", PaymentMethod: "creem"})
+	require.Error(t, err)
+	assert.False(t, called)
+	cfg.CreemProducts = `[{"productId":"product","price":1,"quota":0}]`
+	_, err = service.StartCreem(t.Context(), f.user.Id, contract.CreemWalletRequest{ProductId: "product", PaymentMethod: "creem"})
+	require.Error(t, err)
+	assert.False(t, called)
+	cfg.CreemProducts = `[{"productId":"product","price":1,"quota":50}]`
+	handler := billinghttp.New(billing.New(billing.Dependencies{Purchases: service}), billinghttp.ManagementHooks{})
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("id", f.user.Id) })
+	router.POST("/creem", handler.RequestCreemPay)
+	response := redemptionRequest(t, router, http.MethodPost, "/creem", map[string]any{"product_id": "product", "payment_method": "creem", "quota": 999999, "price": 0, "user_id": 999})
+	assert.Equal(t, "success", response.Message)
+	assert.True(t, called)
+	var row entity.TopUp
+	require.NoError(t, f.db.First(&row).Error)
+	assert.EqualValues(t, 50, row.Amount)
+	assert.Equal(t, 1.0, row.Money)
+	assert.Equal(t, f.user.Id, row.UserId)
+	_, err = purchases.ValidateCredit(decimal.Zero)
+	assert.EqualError(t, err, "充值额度必须大于 0")
+	_, err = purchases.ValidateCredit(decimal.NewFromInt(common.MaxWalletQuota + 1))
+	assert.EqualError(t, err, "充值额度超出系统可表示范围")
 }

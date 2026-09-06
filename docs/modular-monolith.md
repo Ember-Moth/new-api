@@ -273,6 +273,12 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 
 其余钱包提供商的结账/报价、配置适配、普通转发额度与批量缓存落库仍待继续迁移。
 
+第三十六批将 Stripe 钱包报价/结账与 Creem 商品结账迁入 billing 的 purchases 实现，旧 Stripe/Creem 钱包控制器和相应计算 helper 已移除。Stripe 钱包使用 checkout 模块的独立 SDK 客户端，请求显式携带 context、商品数量、促销码开关和重定向地址，不再修改 stripe.Key。
+
+两个渠道均先持久化 pending 订单再访问支付方，网络失败不会删除或错误终止可能已受理的订单。Stripe 保留既有数量上限、展示报价与分组额度基数；Creem 从服务端商品配置选择价格和原生额度，客户端不能覆盖。金额/倍率/单位的非有限值被拒绝，额度继续经过钱包上限验证。自定义重定向沿用可信 URL 校验。
+
+统一的结账错误保留服务端原因和订单关联日志，HTTP 只返回既有用户提示。入口、配置、DTO 和通用校验归属随迁移更新；Waffo 两套钱包结账、通用配置与转发额度运行时仍待继续整理。
+
 认证运行时暂时通过只读适配访问模块配置，用户绑定和登录流程留待后续迁移。渠道健康测试、亲和性和转发执行暂后移；identity、gateway、billing、subscription、usage、system、配置及全局状态仍在完整目标内。工作继续在 `main` 上进行，每批验证后提交。
 
 ## 第一批验证（2026-09-05）
@@ -991,3 +997,32 @@ python3 /tmp/verify-new-api-modular-startup.py
 完整回归继续覆盖真实 DragonflyDB 入账缓存和 PostgreSQL/ClickHouse 日志，竞态检查通过。
 
 输出：`/tmp/new-api-wallet-epay-build.log`、`/tmp/new-api-wallet-epay-tests.log`、`/tmp/new-api-wallet-epay-race.log`、`/tmp/new-api-wallet-epay-full-tests.log`、`/tmp/new-api-wallet-epay-vet.log`、`/tmp/new-api-wallet-epay-startup.log`。
+
+## 第三十六批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归及三种日志配置的新库/两次重启均通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/arch ./internal/module/billing/... ./internal/module/subscription/... ./controller ./model ./service \
+  -run 'TestModular|TestWallet|TestStripeWallet|TestCreemWallet|TestStripeSubscription|TestCreemCheckout|TestSubscription|TestTopup|TestRecharge' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing \
+  -run 'TestStripeWallet|TestCreemWallet|TestWalletCheckout' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-modular-startup.py
+```
+
+本地 HTTP 服务验证 Stripe payment 模式、数量、商品、促销码、新客户创建、默认/自定义跳转和请求取消。真实 PostgreSQL 测试验证分组额度基数、报价与入账字段的既有语义、数量/倍率/单位拒绝、重定向白名单、先保存订单再调用网关、超时后的有效回调继续完成，以及 Creem 服务端商品选择和价格/额度不可伪造。
+
+完整回归继续验证真实 DragonflyDB 入账缓存与 PostgreSQL/ClickHouse 日志；竞态检查通过。
+
+输出：`/tmp/new-api-wallet-stripe-creem-build.log`、`/tmp/new-api-wallet-stripe-creem-tests.log`、`/tmp/new-api-wallet-stripe-creem-race.log`、`/tmp/new-api-wallet-stripe-creem-full-tests.log`、`/tmp/new-api-wallet-stripe-creem-vet.log`、`/tmp/new-api-wallet-stripe-creem-startup.log`。

@@ -157,7 +157,7 @@ func Run(assets router.WebAssets) {
 	identityService := identity.New(identity.Dependencies{Authentication: service.AuthenticationRuntime(), TwoFAEvent: func(id int, message string) { model.RecordLog(id, model.LogTypeSystem, message) }, VerifyEmail: func(email, code string) bool {
 		return common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose)
 	}, DB: model.DB, Providers: providerRegistry{}, TokenPolicy: tokenPolicy(), InvalidateTokenCache: model.InvalidateTokenCacheForMutation, UserSecurity: userSecurity(), UserAuthorization: authorization, UserWallet: billingService, WelcomeQuota: func() int { return common.QuotaForNewUser }, WelcomeGrant: recordWelcomeGrant})
-	billingService.Purchases = billingpurchases.New(billingpurchases.Dependencies{Config: service.WalletConfiguration, Buyer: identityService.CheckoutBuyer, GroupRatio: common.GetTopupGroupRatio, TopUps: model.TopUpStore(), Gateway: service.PaymentCheckoutClient()})
+	billingService.Purchases = billingpurchases.New(billingpurchases.Dependencies{ValidateRedirect: common.ValidateRedirectURL, Config: service.WalletConfiguration, Buyer: identityService.CheckoutBuyer, GroupRatio: common.GetTopupGroupRatio, TopUps: model.TopUpStore(), Gateway: service.PaymentCheckoutClient()})
 	subscriptionService := subscription.New(subscription.Dependencies{
 		Gateways: service.PaymentCheckoutClient(), CheckoutBuyer: identityService.CheckoutBuyer,
 		BillingPreference: identityService.BillingPreference,

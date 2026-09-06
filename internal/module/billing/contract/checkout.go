@@ -13,6 +13,8 @@ type GatewayConfig struct {
 }
 
 type CheckoutRequest struct {
+	SuccessURL, CancelURL                              string
+	AllowPromotionCodes                                bool
 	InputAmount                                        int64
 	Provider, ProductID, TradeNo, PaymentMethod, Title string
 	Price                                              float64

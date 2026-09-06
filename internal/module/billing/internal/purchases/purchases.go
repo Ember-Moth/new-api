@@ -7,6 +7,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/QuantumNous/new-api/logger"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/entity"
@@ -16,15 +18,18 @@ import (
 )
 
 type Gateway interface {
+	StripeWallet(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
+	Creem(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
 	ValidateSubscription(string, string) error
 	EpayWallet(context.Context, contract.CheckoutRequest) (contract.CheckoutSession, error)
 }
 type Dependencies struct {
-	Config     func() contract.WalletConfig
-	Buyer      func(context.Context, int) (*identitycontract.CheckoutBuyer, error)
-	GroupRatio func(string) float64
-	TopUps     *topups.Store
-	Gateway    Gateway
+	ValidateRedirect func(string) error
+	Config           func() contract.WalletConfig
+	Buyer            func(context.Context, int) (*identitycontract.CheckoutBuyer, error)
+	GroupRatio       func(string) float64
+	TopUps           *topups.Store
+	Gateway          Gateway
 }
 type Service struct{ deps Dependencies }
 
@@ -105,12 +110,30 @@ func (s *Service) StartEpay(ctx context.Context, userID int, input contract.Wall
 	reference := fmt.Sprintf("USR%dNO%s%d", userID, common.GetRandomString(6), time.Now().Unix())
 	row := entity.TopUp{UserId: userID, Amount: quote.StoredAmount, Money: quote.Money, TradeNo: reference, PaymentMethod: input.PaymentMethod, PaymentProvider: contract.PaymentProviderEpay, Status: common.TopUpStatusPending}
 	if err := s.deps.TopUps.Create(ctx, &row); err != nil {
-		return contract.CheckoutSession{}, fmt.Errorf("创建订单失败: %w", err)
+		return contract.CheckoutSession{}, checkoutFailure(ctx, "epay", reference, "order", err)
 	}
 	result, err := s.deps.Gateway.EpayWallet(ctx, contract.CheckoutRequest{Provider: contract.PaymentProviderEpay, TradeNo: reference, PaymentMethod: input.PaymentMethod, Price: quote.Money, InputAmount: input.Amount})
 	if err != nil {
-		return contract.CheckoutSession{}, fmt.Errorf("拉起支付失败: %w", err)
+		return contract.CheckoutSession{}, checkoutFailure(ctx, "epay", reference, "gateway", err)
 	}
 	result.OrderID = reference
 	return result, nil
+}
+
+type CheckoutFailure struct {
+	Stage string
+	Cause error
+}
+
+func (e *CheckoutFailure) Error() string {
+	if e.Stage == "order" {
+		return "创建订单失败"
+	}
+	return "拉起支付失败"
+}
+func (e *CheckoutFailure) Unwrap() error { return e.Cause }
+
+func checkoutFailure(ctx context.Context, provider, reference, stage string, cause error) error {
+	logger.LogError(ctx, fmt.Sprintf("wallet checkout failed provider=%s stage=%s trade_no=%s error=%q", provider, stage, reference, cause.Error()))
+	return &CheckoutFailure{Stage: stage, Cause: cause}
 }
