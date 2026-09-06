@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -95,15 +95,14 @@ func setupRelayRouterTestDB(t *testing.T) {
 	originalIsMasterNode := common.IsMasterNode
 	originalRedisEnabled := common.RedisEnabled
 	originalMainDatabaseType := common.MainDatabaseType()
-	originalLogDatabaseType := common.LogDatabaseType()
 	originalSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
 
 	common.IsMasterNode = false
 	common.RedisEnabled = false
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	require.NoError(t, os.Setenv("SQL_DSN", testdb.DSN(t)))
 	require.NoError(t, model.InitDB())
-	model.LOG_DB = model.DB
+	model.LOG_DB = testdb.Logs(t, model.DB)
 	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}))
 
 	t.Cleanup(func() {
@@ -112,7 +111,7 @@ func setupRelayRouterTestDB(t *testing.T) {
 		}
 		common.IsMasterNode = originalIsMasterNode
 		common.RedisEnabled = originalRedisEnabled
-		common.SetDatabaseTypes(originalMainDatabaseType, originalLogDatabaseType)
+		common.SetMainDatabaseType(originalMainDatabaseType)
 		if hadSQLDSN {
 			require.NoError(t, os.Setenv("SQL_DSN", originalSQLDSN))
 		} else {

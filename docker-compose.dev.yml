@@ -28,6 +28,7 @@ services:
       - dev_data:/data
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
+      - LOG_SQL_DSN=clickhouse://default:123456@clickhouse:9000/new_api_logs
       - REDIS_CONN_STRING=redis://dragonfly
       - TZ=Asia/Shanghai
       - BATCH_UPDATE_ENABLED=true
@@ -40,6 +41,8 @@ services:
       dragonfly:
         condition: service_started
       postgres:
+        condition: service_healthy
+      clickhouse:
         condition: service_healthy
     networks:
       - dev-network
@@ -74,9 +77,29 @@ services:
       timeout: 3s
       retries: 5
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: new-api-dev-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: new_api_logs
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: 123456
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - dev_clickhouse_data:/var/lib/clickhouse
+    networks:
+      - dev-network
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password", "123456", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   dev_data:
   dev_pg_data:
+  dev_clickhouse_data:
 
 networks:
   dev-network:

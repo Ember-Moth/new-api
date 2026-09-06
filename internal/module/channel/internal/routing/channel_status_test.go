@@ -19,7 +19,7 @@ func setupChannelStatusTest(t *testing.T) (*gorm.DB, *Runtime) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 
 	memoryCacheEnabled := common.MemoryCacheEnabled
 	common.MemoryCacheEnabled = false

@@ -10,15 +10,15 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/internal/config/setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/config"
 	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
 	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/testdb"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,12 +42,12 @@ func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	initModelListColumnNames(t)
 
 	gin.SetMode(gin.TestMode)
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db
-	model.LOG_DB = db
+	model.LOG_DB = testdb.Logs(t, db)
 
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Ability{}, &entity.Model{}, &entity.Vendor{}))
 
@@ -66,11 +66,10 @@ func initModelListColumnNames(t *testing.T) {
 
 	originalIsMasterNode := common.IsMasterNode
 	originalMainDatabaseType := common.MainDatabaseType()
-	originalLogDatabaseType := common.LogDatabaseType()
 	originalSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
 	defer func() {
 		common.IsMasterNode = originalIsMasterNode
-		common.SetDatabaseTypes(originalMainDatabaseType, originalLogDatabaseType)
+		common.SetMainDatabaseType(originalMainDatabaseType)
 		if hadSQLDSN {
 			require.NoError(t, os.Setenv("SQL_DSN", originalSQLDSN))
 		} else {
@@ -79,7 +78,7 @@ func initModelListColumnNames(t *testing.T) {
 	}()
 
 	common.IsMasterNode = false
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	require.NoError(t, os.Setenv("SQL_DSN", testdb.DSN(t)))
 
 	require.NoError(t, model.InitDB())
@@ -492,7 +491,7 @@ func TestListModelsTokenLimitUsesResolvedCustomAutoGroups(t *testing.T) {
 
 func TestSetupLoginDoesNotTouchPasswordWhenPasswordFieldOmitted(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.UserSession{}))
 
 	hashedPassword, err := common.Password2Hash("CurrentPassword123")
 	require.NoError(t, err)

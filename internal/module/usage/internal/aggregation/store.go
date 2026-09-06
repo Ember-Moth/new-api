@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
 	"github.com/QuantumNous/new-api/internal/module/usage/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

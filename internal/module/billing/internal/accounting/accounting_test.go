@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 	channelentity "github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,8 +23,8 @@ func newAccountingFixture(t *testing.T) (*Store, *gorm.DB) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	return New(Dependencies{DB: db}), db
 }
 func createAccountingUser(t *testing.T, db *gorm.DB, quota int) entity.User {

@@ -3,9 +3,9 @@ package authz
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,8 +19,8 @@ func newAuthzTestDB(t *testing.T) *gorm.DB {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, schema.UpPostgres(sqlDB, schema.Main))
-	require.NoError(t, schema.UpPostgres(sqlDB, schema.Main))
+	require.NoError(t, schema.UpPostgres(sqlDB))
+	require.NoError(t, schema.UpPostgres(sqlDB))
 	return db
 }
 
@@ -58,8 +58,8 @@ func TestInitOnSlaveOnlyLoadsPolicies(t *testing.T) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, schema.UpPostgres(sqlDB, schema.Main))
-	require.NoError(t, schema.UpPostgres(sqlDB, schema.Main))
+	require.NoError(t, schema.UpPostgres(sqlDB))
+	require.NoError(t, schema.UpPostgres(sqlDB))
 
 	engine, err := New(db, false)
 	require.NoError(t, err)

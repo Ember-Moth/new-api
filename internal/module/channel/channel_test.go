@@ -10,13 +10,13 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/app/channelprovider"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
@@ -99,7 +99,7 @@ func newChannelTestRouter(t *testing.T, pricing channel.CatalogPricing) (*gin.En
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 	service := channel.New(channel.Dependencies{DB: db, Pricing: pricing, Providers: channelprovider.Adapter{}})
 	handler := channelhttp.New(service, channelhttp.ManagementHooks{})
 	router := gin.New()

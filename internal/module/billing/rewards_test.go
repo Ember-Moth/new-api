@@ -2,18 +2,13 @@ package billing_test
 
 import (
 	"context"
-	"database/sql"
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
@@ -22,11 +17,11 @@ import (
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/usage"
 	usageentity "github.com/QuantumNous/new-api/internal/module/usage/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/clickhouse"
 	"gorm.io/gorm"
 )
 
@@ -34,7 +29,7 @@ func TestCheckinConcurrencyMonthStatisticsAndRewardBounds(t *testing.T) {
 	f := newTopupFixture(t, 10)
 	pool, err := f.db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 	today := time.Date(2028, 2, 29, 8, 0, 0, 0, time.FixedZone("SG", 8*3600))
 	cfg := contract.RewardConfig{CheckinEnabled: true, MinQuota: 3, MaxQuota: 3, QuotaPerUnit: 10}
 	var logs atomic.Int32
@@ -175,49 +170,21 @@ func TestBillingStatementsPreserveUnitsOwnershipAndLargeTotals(t *testing.T) {
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }
 
-func TestCheckinAuditUsesConfiguredPostgresOrClickHouseLogs(t *testing.T) {
-	for _, kind := range []common.DatabaseType{common.DatabaseTypePostgreSQL, common.DatabaseTypeClickHouse} {
-		t.Run(string(kind), func(t *testing.T) {
-			f := newTopupFixture(t, 10)
-			pool, err := f.db.DB()
-			require.NoError(t, err)
-			logsDB := f.db
-			if kind == common.DatabaseTypePostgreSQL {
-				require.NoError(t, schema.UpPostgres(pool, schema.Logs))
-			} else {
-				dsn := os.Getenv("TEST_CLICKHOUSE_DSN")
-				if dsn == "" {
-					t.Skip("TEST_CLICKHOUSE_DSN is required")
-				}
-				admin, err := sql.Open("clickhouse", dsn)
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, admin.Close()) })
-				name := "checkin_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-				_, err = admin.Exec("CREATE DATABASE " + name)
-				require.NoError(t, err)
-				t.Cleanup(func() { _, err := admin.Exec("DROP DATABASE " + name); require.NoError(t, err) })
-				parsed, err := url.Parse(dsn)
-				require.NoError(t, err)
-				parsed.Path = "/" + name
-				require.NoError(t, schema.UpClickHouse(parsed.String(), pool))
-				logsDB, err = gorm.Open(clickhouse.Open(parsed.String()), &gorm.Config{})
-				require.NoError(t, err)
-				t.Cleanup(func() { pool, err := logsDB.DB(); require.NoError(t, err); require.NoError(t, pool.Close()) })
-			}
-			writer := usage.New(usage.Dependencies{DB: logsDB, Kind: kind})
-			svc := billing.New(billing.Dependencies{DB: f.db, RewardConfig: func() contract.RewardConfig {
-				return contract.RewardConfig{CheckinEnabled: true, MinQuota: 5, MaxQuota: 5}
-			}, RewardLog: func(ctx context.Context, id int, message string) {
-				writer.RecordLog(ctx, id, usageentity.LogTypeSystem, message)
-			}})
-			_, err = svc.Checkin(t.Context(), f.user.Id)
-			require.NoError(t, err)
-			_, err = svc.Checkin(t.Context(), f.user.Id)
-			require.Error(t, err)
-			var logs []usage.Log
-			require.NoError(t, logsDB.Where("user_id = ? AND type = ?", f.user.Id, usageentity.LogTypeSystem).Find(&logs).Error)
-			require.Len(t, logs, 1)
-			assert.Contains(t, logs[0].Content, "用户签到，获得额度")
-		})
-	}
+func TestCheckinAuditUsesClickHouseLogs(t *testing.T) {
+	f := newTopupFixture(t, 10)
+	logsDB := testdb.Logs(t, f.db)
+	writer := usage.New(usage.Dependencies{DB: logsDB})
+	svc := billing.New(billing.Dependencies{DB: f.db, RewardConfig: func() contract.RewardConfig {
+		return contract.RewardConfig{CheckinEnabled: true, MinQuota: 5, MaxQuota: 5}
+	}, RewardLog: func(ctx context.Context, id int, message string) {
+		writer.RecordLog(ctx, id, usageentity.LogTypeSystem, message)
+	}})
+	_, err := svc.Checkin(t.Context(), f.user.Id)
+	require.NoError(t, err)
+	_, err = svc.Checkin(t.Context(), f.user.Id)
+	require.Error(t, err)
+	var logs []usage.Log
+	require.NoError(t, logsDB.Where("user_id = ? AND type = ?", f.user.Id, usageentity.LogTypeSystem).Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Contains(t, logs[0].Content, "用户签到，获得额度")
 }

@@ -15,13 +15,11 @@ import (
 var ErrInvalidLogCursor = errors.New("invalid log cursor")
 
 type logPosition struct {
-	Version   int                 `json:"v"`
-	Scope     string              `json:"s"`
-	Database  common.DatabaseType `json:"d"`
-	CreatedAt int64               `json:"t"`
-	ID        int                 `json:"i"`
-	RequestID string              `json:"r,omitempty"`
-	EventID   string              `json:"e,omitempty"`
+	Version   int    `json:"v"`
+	Scope     string `json:"s"`
+	CreatedAt int64  `json:"t"`
+	RequestID string `json:"r,omitempty"`
+	EventID   string `json:"e,omitempty"`
 }
 
 // LogCursorPage carries opaque pagination state before display IDs and private
@@ -66,7 +64,7 @@ func (r *Store) NewLogCursorPage(encoded, scope string) (*LogCursorPage, error) 
 		return nil, ErrInvalidLogCursor
 	}
 	var position logPosition
-	if common.Unmarshal(plain, &position) != nil || position.Version != 1 || position.Scope != scope || position.Database != r.kind || position.CreatedAt < 0 || position.ID < 0 {
+	if common.Unmarshal(plain, &position) != nil || position.Version != 1 || position.Scope != scope || position.CreatedAt < 0 || position.EventID == "" {
 		return nil, ErrInvalidLogCursor
 	}
 	page.after = &position
@@ -79,16 +77,9 @@ func (r *Store) selectLogCursorPage(query *gorm.DB, limit int, page *LogCursorPa
 	}
 	if page.after != nil {
 		position := page.after
-		if r.kind == common.DatabaseTypeClickHouse {
-			query = query.Where("(logs.created_at, logs.request_id, logs.event_id) < (?, ?, ?)", position.CreatedAt, position.RequestID, position.EventID)
-		} else {
-			query = query.Where("(logs.created_at, logs.id) < (?, ?)", position.CreatedAt, position.ID)
-		}
+		query = query.Where("(logs.created_at, logs.request_id, logs.event_id) < (?, ?, ?)", position.CreatedAt, position.RequestID, position.EventID)
 	}
-	order := "logs.created_at DESC, logs.id DESC"
-	if r.kind == common.DatabaseTypeClickHouse {
-		order = "logs.created_at DESC, logs.request_id DESC, logs.event_id DESC"
-	}
+	order := "logs.created_at DESC, logs.request_id DESC, logs.event_id DESC"
 	var logs []*Log
 	if err := query.Order(order).Limit(limit + 1).Find(&logs).Error; err != nil {
 		return nil, err
@@ -99,7 +90,7 @@ func (r *Store) selectLogCursorPage(query *gorm.DB, limit int, page *LogCursorPa
 	}
 	logs = logs[:limit]
 	last := logs[len(logs)-1]
-	position := logPosition{Version: 1, Scope: page.scope, Database: r.kind, CreatedAt: last.CreatedAt, ID: last.Id, RequestID: last.RequestId, EventID: last.EventID}
+	position := logPosition{Version: 1, Scope: page.scope, CreatedAt: last.CreatedAt, RequestID: last.RequestId, EventID: last.EventID}
 	plain, err := common.Marshal(position)
 	if err != nil {
 		return nil, err

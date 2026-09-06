@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
@@ -16,6 +15,7 @@ import (
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -37,7 +37,7 @@ func newTopupFixture(t *testing.T, unit float64) *topupFixture {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 	f := &topupFixture{db: db, user: identityentity.User{Username: "wallet-user", Password: "fixture", Quota: 10, AuthVersion: 1}}
 	require.NoError(t, db.Create(&f.user).Error)
 	accounts := identity.New(identity.Dependencies{DB: db})

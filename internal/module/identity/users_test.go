@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/identity"
@@ -19,11 +20,10 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,22 +75,23 @@ func newUserFixture(t *testing.T) *userFixture {
 	previousSecret := common.SessionSecret
 	common.SessionSecret = "identity-self-test-secret"
 	previousRedis, previousMaster, previousBatch := common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled
-	previousMain, previousLogs := common.MainDatabaseType(), common.LogDatabaseType()
+	previousMain := common.MainDatabaseType()
 	common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = false, false, false
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLog
 		common.SessionSecret = previousSecret
 		common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = previousRedis, previousMaster, previousBatch
-		common.SetDatabaseTypes(previousMain, previousLogs)
+		common.SetMainDatabaseType(previousMain)
 	})
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	model.DB, model.LOG_DB = db, db
+	model.DB = db
+	model.LOG_DB = testdb.Logs(t, db)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	authorization, err := authz.New(db, false)
 	require.NoError(t, err)
 	f := &userFixture{db: db, router: gin.New(), authorization: &userAuthorizationFixture{engine: authorization}}

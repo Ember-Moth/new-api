@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
@@ -18,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	"github.com/QuantumNous/new-api/internal/module/subscription/memberships"
 	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +31,7 @@ func newMembershipStore(t *testing.T) (*gorm.DB, *memberships.Store) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 	accounts := identity.New(identity.Dependencies{DB: db})
 	store := memberships.New(memberships.Dependencies{DB: db, Plan: func(tx *gorm.DB, id int) (*entity.SubscriptionPlan, error) {
 		if tx == nil {

@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,6 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 
 	previousDB := model.DB
 	previousDatabaseType := common.MainDatabaseType()
-	previousLogDatabaseType := common.LogDatabaseType()
 
 	previousMasterNode := common.IsMasterNode
 	previousRedisEnabled := common.RedisEnabled
@@ -34,7 +33,7 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 		require.NoError(t, closeErr)
 		require.NoError(t, sqlDB.Close())
 		model.DB = previousDB
-		common.SetDatabaseTypes(previousDatabaseType, previousLogDatabaseType)
+		common.SetMainDatabaseType(previousDatabaseType)
 
 		common.IsMasterNode = previousMasterNode
 		common.RedisEnabled = previousRedisEnabled

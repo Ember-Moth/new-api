@@ -13,14 +13,14 @@ import (
 
 	"gorm.io/driver/postgres"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/migration/schema"
-	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/pkg/billingexpr"
-	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/types"
+	"github.com/QuantumNous/new-api/internal/testdb"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -44,21 +44,25 @@ func TestMain(m *testing.M) {
 	sqlDB.SetMaxOpenConns(1)
 
 	model.DB = db
-	model.LOG_DB = db
 
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
 
-	if err := schema.UpPostgres(sqlDB, schema.Main); err != nil {
+	if err := schema.UpPostgres(sqlDB); err != nil {
 		panic(err)
 	}
-	if err := schema.UpPostgres(sqlDB, schema.Logs); err != nil {
+	logs, _, cleanupLogs, err := testdb.NewLogDatabase(db)
+	if err != nil {
 		panic(err)
 	}
+	model.LOG_DB = logs
 
 	code := m.Run()
+	if err := cleanupLogs(); err != nil {
+		panic(err)
+	}
 	_ = sqlDB.Close()
 	if err := cleanup(); err != nil {
 		panic(err)
@@ -76,7 +80,7 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
 		model.DB.Exec("DELETE FROM tokens")
-		model.DB.Exec("DELETE FROM logs")
+		testdb.ClearLogs(t, model.LOG_DB)
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM midjourneys")
 		model.DB.Exec("DELETE FROM top_ups")
@@ -514,7 +518,7 @@ func getMidjourneyTask(t *testing.T, id int) model.Midjourney {
 func getLastLog(t *testing.T) *model.Log {
 	t.Helper()
 	var log model.Log
-	err := model.LOG_DB.Order("id desc").First(&log).Error
+	err := model.LOG_DB.Order("created_at desc, event_id desc").Take(&log).Error
 	if err != nil {
 		return nil
 	}

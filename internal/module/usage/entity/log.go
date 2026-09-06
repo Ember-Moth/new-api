@@ -31,7 +31,7 @@ type Log struct {
 }
 
 func (entry *Log) BeforeCreate(tx *gorm.DB) error {
-	if tx.Dialector.Name() == "clickhouse" && entry.EventID == "" {
+	if entry.EventID == "" {
 		id, err := uuid.NewV7()
 		if err != nil {
 			return err

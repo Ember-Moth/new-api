@@ -2,6 +2,8 @@
 
 目标：按业务归属组织代码，显式组装运行时依赖，以模块公开契约协作。完成标准涵盖整个应用，不以目录移动或某个模块完成替代整体完成。
 
+当前数据库约束：PostgreSQL 18+ 主库和必填的 ClickHouse 日志库。历史批次中的 PostgreSQL 日志验证记录不代表当前仍支持该配置。
+
 ## 目标布局与依赖
 
 ```text
@@ -40,7 +42,7 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 - [ ] channel 模块聚合渠道配置、模型能力和路由配置。
 - [ ] gateway 模块聚合转发与供应商适配，RelayKit 保持独立。
 - [ ] billing/subscription 按业务职责拆分，并验证账务一致性。
-- [ ] usage 模块聚合日志与统计，覆盖 PostgreSQL/ClickHouse。
+- [ ] usage 模块聚合 PostgreSQL 主库统计与 ClickHouse 日志。
 - [ ] system 模块聚合系统配置、节点和调度；后台入口不再依赖 HTTP controller。
 - [x] 根目录 `controller`、`service`、`model` 已清空，完成整包目录迁移。
 - [x] `common`、`constant`、`dto`、`types`、`logger`、`setting`、`oauth`、`relay` 已整包移入 internal；RelayKit 保持独立。
@@ -367,6 +369,14 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 400 个文件连同嵌入的 Lua 资源整体移动，656 个 Go 文件更新包路径。逐一比对 829 个受影响文件，确认除 Go 路径替换外内容不变；保留 package 名称和函数实现。
 - 根目录上述八个目录均不存在；架构检查禁止重新导入旧路径，继续限制已拆模块对过渡包的依赖。
 - relaykit 目录、独立 go.mod、模块路径和主模块 replace 配置均保持原样，独立构建检查继续执行。
+
+第四十五批按要求将日志存储收敛到 ClickHouse：
+
+- LOG_SQL_DSN 必填，仅接受 ClickHouse 连接；缺失配置或 PostgreSQL 日志 URL 在初始化日志连接时被拒绝，不再复用主库。
+- PostgreSQL 日志 SQL 序列及迁移 scope 删除，PostgreSQL 仅执行主业务 schema；ClickHouse 继续使用主库 advisory lock 协调多节点迁移，并管理独立日志版本表和 TTL。
+- 日志仓储移除数据库类型选择及 PostgreSQL 排序/转义/删除分支；分页固定使用 created_at、request_id、event_id，保留角色脱敏、筛选、统计和同步清理。
+- 测试统一使用隔离 ClickHouse 日志数据库，移除日志与 PostgreSQL 测试主库的共用；抽出 internal/testdb 的 ClickHouse 夹具以保留原有日志回归覆盖。
+- 生产和开发 Compose 默认启用 ClickHouse 服务、数据卷和健康依赖；README、环境示例与当前数据库约定同步更新。
 
 ## 第一批验证（2026-09-05）
 
@@ -1342,3 +1352,25 @@ python3 /tmp/verify-new-api-pricing-startup.py
 三种日志配置均通过新库初始化及两次重启，schema 版本、保留数据和供应商唯一性检查通过。主模块 go.mod/go.sum、RelayKit 目录及其独立模块配置没有改动。
 
 输出：`/tmp/new-api-shared-move-build.log`、`/tmp/new-api-shared-move-tests.log`、`/tmp/new-api-shared-move-vet.log`、`/tmp/new-api-shared-move-startup.log`。
+
+## 第四十五批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。完整后端回归、主模块 build/vet、RelayKit 独立 build/vet 和新部署启动验证全部通过。
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+GOWORK=off go run /tmp/new-api-validate-compose.go docker-compose.yml docker-compose.dev.yml
+python3 /tmp/verify-new-api-clickhouse-only.py
+```
+
+启动验证建立全新 PostgreSQL 主库和 ClickHouse 日志库，写入主库数据和日志后重启两次；主库及日志迁移版本、数据保留均正确。PostgreSQL 主库确认不存在 logs 和 schema_migrations_logs。缺失 LOG_SQL_DSN 和传入 PostgreSQL 日志 URL 均被拒绝。
+
+真实 ClickHouse 回归覆盖日志写入、同秒同请求游标分页、用户隔离与脱敏、筛选统计、清理任务、迁移并发和 TTL。原账务、认证、任务及 DragonflyDB 回归继续使用真实 ClickHouse 日志库。Compose 的 YAML、日志 DSN 与服务依赖检查通过；本机验证没有启动 Docker 容器。
+
+输出：`/tmp/new-api-clickhouse-only-build.log`、`/tmp/new-api-clickhouse-only-full-tests.log`、`/tmp/new-api-clickhouse-only-vet.log`、`/tmp/new-api-clickhouse-only-regression.log`、`/tmp/new-api-clickhouse-only-startup.log`。

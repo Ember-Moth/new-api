@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/config/setting/config"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/internal/module/system"
 	"github.com/QuantumNous/new-api/internal/module/system/contract"
 	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
-	"github.com/QuantumNous/new-api/internal/config/setting/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,9 +117,9 @@ func setupBillingAliasOptionDB(t *testing.T) {
 	previousRedis := common.RedisEnabled
 	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Option{}, &model.Log{}, &model.User{}))
+	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Option{}, &model.User{}))
 	model.DB = database
-	model.LOG_DB = database
+	model.LOG_DB = testdb.Logs(t, database)
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.MemoryCacheEnabled = false
 	common.RedisEnabled = false

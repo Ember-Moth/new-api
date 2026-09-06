@@ -8,16 +8,15 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/QuantumNous/new-api/internal/config/setting"
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
-	"github.com/QuantumNous/new-api/internal/config/setting"
-	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/shared/constant"
+	"github.com/QuantumNous/new-api/internal/config/setting/config"
 	"github.com/QuantumNous/new-api/internal/infra/database/value"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
@@ -26,10 +25,11 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/channel/contract"
 	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/internal/config/setting/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -50,8 +50,8 @@ func newPricingFixture(t *testing.T) *pricingFixture {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	f := &pricingFixture{db: db}
 	f.channels = channelmodule.New(channelmodule.Dependencies{DB: db, RoutingChanged: func() {
 		if f.service != nil {

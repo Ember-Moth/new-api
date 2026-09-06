@@ -11,7 +11,6 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/usage/aggregation"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/module/usage/entity"
 	implementation "github.com/QuantumNous/new-api/internal/module/usage/internal/logstore"
 	"gorm.io/gorm"
@@ -31,7 +30,6 @@ type Dependencies struct {
 	RankingMetadata func(context.Context) map[string]contract.RankingModelMetadata
 	Aggregates      *aggregation.Store
 	DB              *gorm.DB
-	Kind            common.DatabaseType
 	ChannelNames    func(context.Context, []int) (map[int]string, error)
 	Writer          WriterPolicy
 }
@@ -43,7 +41,7 @@ type Stat = implementation.Stat
 var ErrInvalidLogCursor = implementation.ErrInvalidLogCursor
 
 func New(deps Dependencies) *Service {
-	store := implementation.New(implementation.Dependencies{DB: deps.DB, Kind: deps.Kind, ChannelNames: deps.ChannelNames})
+	store := implementation.New(implementation.Dependencies{DB: deps.DB, ChannelNames: deps.ChannelNames})
 	return &Service{Performance: deps.Performance, Reader: rankings.New(deps.Aggregates, deps.RankingMetadata, time.Now), Aggregates: deps.Aggregates, Store: store, Writer: implementation.NewWriter(store, deps.Writer)}
 }
 

@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"embed"
 	"errors"
-	"fmt"
 	"io"
 	"time"
 
@@ -18,15 +17,8 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
-//go:embed database/postgres/*.sql database/postgres_log/*.sql database/clickhouse_log/*.sql
+//go:embed database/postgres/*.sql database/clickhouse_log/*.sql
 var sqlFiles embed.FS
-
-type Scope string
-
-const (
-	Main Scope = "main"
-	Logs Scope = "logs"
-)
 
 type postgresMigrationDriver struct {
 	*postgres.Postgres
@@ -48,15 +40,9 @@ func (driver *postgresMigrationDriver) Run(sqlFile io.Reader) error {
 
 // NewPostgres leases one connection from the application pool. Callers must
 // Close the returned migrator; closing it releases that connection, not the pool.
-func NewPostgres(db *sql.DB, scope Scope) (*migrate.Migrate, error) {
+func NewPostgres(db *sql.DB) (*migrate.Migrate, error) {
 	path, table := "database/postgres", "schema_migrations"
-	switch scope {
-	case Main:
-	case Logs:
-		path, table = "database/postgres_log", "schema_migrations_logs"
-	default:
-		return nil, fmt.Errorf("unknown PostgreSQL migration scope %q", scope)
-	}
+
 	source, err := iofs.New(sqlFiles, path)
 	if err != nil {
 		return nil, err
@@ -81,8 +67,8 @@ func NewPostgres(db *sql.DB, scope Scope) (*migrate.Migrate, error) {
 	return client, nil
 }
 
-func UpPostgres(db *sql.DB, scope Scope) error {
-	client, err := NewPostgres(db, scope)
+func UpPostgres(db *sql.DB) error {
+	client, err := NewPostgres(db)
 	if err != nil {
 		return err
 	}

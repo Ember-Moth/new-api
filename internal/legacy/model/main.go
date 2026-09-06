@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -9,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/migration/schema"
 
 	"gorm.io/driver/clickhouse"
 	"gorm.io/driver/postgres"
@@ -20,8 +21,6 @@ import (
 
 const commonGroupCol = `"group"`
 const commonKeyCol = `"key"`
-
-var logKeyCol string
 
 // jsonScanBytes 归一化 json 列的驱动返回值:不同驱动/协议模式下同一列可能
 // 以 []byte 或 string 返回,静默丢弃 string 会导致字段被清零而不报错。
@@ -33,15 +32,6 @@ func jsonScanBytes(value interface{}) []byte {
 		return []byte(v)
 	default:
 		return nil
-	}
-}
-
-func initCol() {
-	switch common.LogDatabaseType() {
-	case common.DatabaseTypePostgreSQL:
-		logKeyCol = `"key"`
-	default:
-		logKeyCol = "`key`"
 	}
 }
 
@@ -121,16 +111,22 @@ func normalizeClickHouseDSN(dsn string) string {
 
 func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error) {
 	dsn := strings.TrimSpace(os.Getenv(envName))
-	if dsn == "" {
-		return nil, "", fmt.Errorf("%s is required; configure a PostgreSQL URL (postgres:// or postgresql://)", envName)
-	}
-	if isClickHouseDSN(dsn) {
-		if !isLog {
-			return nil, "", fmt.Errorf("%s requires PostgreSQL; ClickHouse is supported only through LOG_SQL_DSN", envName)
+	if isLog {
+		if dsn == "" {
+			return nil, "", fmt.Errorf("%s is required; configure a ClickHouse URL", envName)
+		}
+		if !isClickHouseDSN(dsn) {
+			return nil, "", fmt.Errorf("%s requires ClickHouse; PostgreSQL log databases are not supported", envName)
 		}
 		common.SysLog("using ClickHouse as log database")
 		db, err := gorm.Open(clickhouse.Open(normalizeClickHouseDSN(dsn)), newGormConfig(false))
 		return db, common.DatabaseTypeClickHouse, err
+	}
+	if dsn == "" {
+		return nil, "", fmt.Errorf("%s is required; configure a PostgreSQL URL (postgres:// or postgresql://)", envName)
+	}
+	if isClickHouseDSN(dsn) {
+		return nil, "", fmt.Errorf("%s requires PostgreSQL; ClickHouse is supported only through LOG_SQL_DSN", envName)
 	}
 	if !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") {
 		return nil, "", fmt.Errorf("%s requires a PostgreSQL URL (postgres:// or postgresql://); unsupported database configuration", envName)
@@ -165,10 +161,7 @@ func InitDB() error {
 		return err
 	}
 	common.SetMainDatabaseType(dbType)
-	if os.Getenv("LOG_SQL_DSN") == "" {
-		common.SetLogDatabaseType(dbType)
-	}
-	initCol()
+
 	if common.DebugEnabled {
 		db = db.Debug()
 	}
@@ -184,47 +177,41 @@ func InitDB() error {
 		return nil
 	}
 	common.SysLog("applying PostgreSQL schema migrations")
-	return schema.UpPostgres(sqlDB, schema.Main)
+	return schema.UpPostgres(sqlDB)
 }
 
 func InitLogDB() error {
-	if os.Getenv("LOG_SQL_DSN") == "" {
-		LOG_DB = DB
-		common.SetLogDatabaseType(common.MainDatabaseType())
-	} else {
-		db, dbType, err := chooseDB("LOG_SQL_DSN", true)
-		if err != nil {
-			return err
-		}
-		common.SetLogDatabaseType(dbType)
-		if common.DebugEnabled {
-			db = db.Debug()
-		}
-		LOG_DB = db
+	db, _, err := chooseDB("LOG_SQL_DSN", true)
+	if err != nil {
+		return err
 	}
-	initCol()
-	sqlDB, err := LOG_DB.DB()
+	if common.DebugEnabled {
+		db = db.Debug()
+	}
+	sqlDB, err := db.DB()
 	if err != nil {
 		return err
 	}
 	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
-	if !common.IsMasterNode {
-		return nil
-	}
-	common.SysLog("applying log schema migrations")
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+	if common.IsMasterNode {
 		coordinator, err := DB.DB()
 		if err != nil {
+			_ = sqlDB.Close()
 			return err
 		}
+		common.SysLog("applying ClickHouse log schema migrations")
 		if err := schema.UpClickHouse(normalizeClickHouseDSN(os.Getenv("LOG_SQL_DSN")), coordinator); err != nil {
+			_ = sqlDB.Close()
 			return err
 		}
+	}
+	LOG_DB = db
+	if common.IsMasterNode {
 		return syncClickHouseLogTTL(clickHouseLogTTLDays())
 	}
-	return schema.UpPostgres(sqlDB, schema.Logs)
+	return nil
 }
 
 func clickHouseLogTTLDays() int {
@@ -272,6 +259,9 @@ func clickHouseCreateTableHasTTL(createTableSQL string) bool {
 }
 
 func closeDB(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		return err
@@ -280,15 +270,7 @@ func closeDB(db *gorm.DB) error {
 	return err
 }
 
-func CloseDB() error {
-	if LOG_DB != DB {
-		err := closeDB(LOG_DB)
-		if err != nil {
-			return err
-		}
-	}
-	return closeDB(DB)
-}
+func CloseDB() error { return errors.Join(closeDB(LOG_DB), closeDB(DB)) }
 
 var (
 	lastPingTime time.Time

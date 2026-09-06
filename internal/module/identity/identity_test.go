@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -38,8 +38,8 @@ func TestProviderManagementPreservesSecretsAndRegistryConsistency(t *testing.T) 
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	registry := &providerRegistryFixture{providers: make(map[string]*entity.CustomOAuthProvider)}
 	service := identity.New(identity.Dependencies{DB: db, Providers: registry})
 	handler := identityhttp.New(service)

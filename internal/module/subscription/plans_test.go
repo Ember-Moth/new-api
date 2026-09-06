@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/subscription"
 	"github.com/QuantumNous/new-api/internal/module/subscription/contract"
 	"github.com/QuantumNous/new-api/internal/module/subscription/entity"
 	subscriptionhttp "github.com/QuantumNous/new-api/internal/module/subscription/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -26,8 +26,8 @@ func TestPlanManagementPreservesUpdateAndVisibilityContracts(t *testing.T) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	allowed := true
 	var invalidated []int
 	service := subscription.New(subscription.Dependencies{

@@ -1,11 +1,12 @@
 # PostgreSQL 18 与 DragonflyDB 基线
 
-主数据库及独立 PostgreSQL 日志库要求 PostgreSQL 18+；启动时读取 `server_version_num`，低版本连接会在迁移前被拒绝。ClickHouse 日志库继续保留。
+主数据库要求 PostgreSQL 18+；启动时读取 `server_version_num`，低版本连接会在迁移前被拒绝。日志库只使用 ClickHouse，`LOG_SQL_DSN` 必填，不能使用 PostgreSQL 或回退到主库。
 
-生产和开发 Compose 使用 PostgreSQL 18、DragonflyDB v1.40.2。缓存使用 go-redis 的 Redis 兼容协议，连接配置使用 `REDIS_CONN_STRING` 和 `REDIS_POOL_SIZE`。优化按全新部署推进，缓存 key 可随实现需要调整。示例：
+生产和开发 Compose 使用 PostgreSQL 18、ClickHouse、DragonflyDB v1.40.2。缓存使用 go-redis 的 Redis 兼容协议，连接配置使用 `REDIS_CONN_STRING` 和 `REDIS_POOL_SIZE`。优化按全新部署推进，缓存 key 可随实现需要调整。示例：
 
 ```dotenv
 SQL_DSN=postgresql://user:password@postgres:5432/new-api
+LOG_SQL_DSN=clickhouse://default:password@clickhouse:9000/new_api_logs
 REDIS_CONN_STRING=redis://:password@dragonfly:6379/0
 REDIS_POOL_SIZE=0
 ```
@@ -42,14 +43,13 @@ skip scan 的收益取决于索引前导列的不同值数量和筛选条件，�
 
 本轮已记录批量更新语句数与查询执行计划。生产部署后继续观察锁等待、缓存操作 P95/P99、连接池等待和错误率；这些指标尚无生产样本。Dragonfly 的 `/metrics` 可接入 Prometheus；吞吐收益需要相同数据、请求分布和并发条件下的对比。[Dragonfly 监控说明](https://www.dragonflydb.io/docs/managing-dragonfly/monitoring)
 
-PostgreSQL 日志暂不分区，先使用联合索引和游标分页；按实际日志规模与保留策略再决定是否分区。ClickHouse 日志保留按月分区。内部主键继续使用 BIGINT identity，UUIDv7 用于批次标识和应用生成的 ClickHouse 日志事件标识。
+日志只存储在 ClickHouse，按月分区；保留策略由 ClickHouse TTL 控制。内部主键继续使用 BIGINT identity，UUIDv7 用于批次标识和应用生成的 ClickHouse 日志事件标识。
 
 ## SQL 迁移组织
 
 `internal/migration/schema/migrate.go` 使用 `golang-migrate/v4` **v4.19.1** 和 `iofs`，SQL 文件通过 `go:embed` 随二进制发布：
 
 - `database/postgres/`：主业务表，版本表为 `schema_migrations`。
-- `database/postgres_log/`：共享或独立 PostgreSQL 日志表，版本表为 `schema_migrations_logs`。
 - `database/clickhouse_log/`：ClickHouse 日志表，使用独立的日志版本表。
 
 每个序列以 `000001_init_schema.up.sql` / `.down.sql` 为初始结构。后续正式部署后的变更增加递增版本文件。启动只执行 Up；没有待执行版本时正常继续，dirty 状态会使启动失败，不会自动 Force 或猜测修复。
@@ -58,7 +58,7 @@ PostgreSQL 日志暂不分区，先使用联合索引和游标分页；按实际
 
 PostgreSQL 迁移使用同一条连接上的 advisory lock，迁移节点应连接直连 PostgreSQL 或保持会话的连接池。ClickHouse 驱动自身的锁仅在进程内有效，因此使用主 PostgreSQL 的事务级 advisory lock 串行化多 master 的日志迁移。迁移结束会释放连接；失败的 SQL 事务会先回滚，避免把未结束的事务放回应用连接池。
 
-初始 SQL 在 `public` 安装 `pg_trgm` 和 `pg_stat_statements` 扩展；迁移账号需要相应建扩展权限，托管数据库可由管理员预装。Compose 已配置 `shared_preload_libraries=pg_stat_statements`；自行部署 PostgreSQL 时也应设置并重启，才能查询统计视图。独立 PostgreSQL 日志库不依赖这两个扩展。
+初始 SQL 在 `public` 安装 `pg_trgm` 和 `pg_stat_statements` 扩展；迁移账号需要相应建扩展权限，托管数据库可由管理员预装。Compose 已配置 `shared_preload_libraries=pg_stat_statements`；自行部署 PostgreSQL 时也应设置并重启，才能查询统计视图。日志库位于 ClickHouse，不使用 PostgreSQL 扩展。
 
 ## 原生数组接口
 
@@ -70,7 +70,7 @@ PostgreSQL 迁移使用同一条连接上的 advisory lock，迁移节点应连�
 
 ## 日志与缓存
 
-普通日志 API 返回 `items`、`page_size`、`next_cursor` 和 `has_more`，使用上一页/下一页导航，不再为每次翻页执行 COUNT 和 OFFSET。PostgreSQL 按 `(created_at, id)` 定位；ClickHouse 按 `(created_at, request_id, event_id)` 定位，独立事件标识解决同秒同请求的多条日志排序。游标经过认证加密并绑定查看者、权限及数据库类型，生成游标后才对用户日志重写展示 ID 和隐藏管理字段。
+普通日志 API 返回 `items`、`page_size`、`next_cursor` 和 `has_more`，使用上一页/下一页导航，不再为每次翻页执行 COUNT 和 OFFSET。ClickHouse 按 `(created_at, request_id, event_id)` 定位，独立事件标识解决同秒同请求的多条日志排序。游标经过认证加密并绑定查看者和权限，生成游标后才对用户日志重写展示 ID 和隐藏管理字段。
 
 额度、鉴权、Session 和限流脚本使用 `Script.Run`，先执行 EVALSHA，脚本缓存缺失时自动回退。计数和 Hash 修改将 TTL 检查与写入合并为原子 Lua 操作，保持绝对过期时间，也不会重新创建已过期的 Hash。
 
@@ -83,6 +83,8 @@ PostgreSQL 迁移使用同一条连接上的 advisory lock，迁移节点应连�
 批量结算将用户、令牌、渠道增量分别打包为 `UPDATE ... FROM (VALUES ...)`，每段最多 500 行，并在同一事务内写入。批次使用 UUIDv7 标识和数据库回执；COMMIT 回应不确定时重用批次标识可避免重复扣款。失败批次保留在进程内重试，新增增量继续累计；这没有把原有内存累计窗口变成持久队列。已确认成功的批次回执会清理，清理失败不会再次应用增量。
 
 ## 验证记录（2026-09-05）
+
+以下是此前双日志引擎阶段的历史验证记录；当前仅支持 ClickHouse 日志，最新验证见模块化重构记录末尾。
 
 真实服务：PostgreSQL **18.6**；用于拒绝旧版本测试的 PostgreSQL **16.15**；DragonflyDB **v1.40.2**（Linux aarch64，2 个 I/O 线程，512 MiB）；ClickHouse **26.9.1.762**。
 

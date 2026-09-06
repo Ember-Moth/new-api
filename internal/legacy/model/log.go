@@ -34,7 +34,7 @@ func FormatRootLogs(logs []*Log) { usage.FormatRootLogs(logs) }
 func formatUserLogs(logs []*Log, offset int) { usage.FormatUserLogs(logs, offset) }
 
 func LogService() *usage.Service {
-	return usage.New(usage.Dependencies{DB: LOG_DB, Kind: common.LogDatabaseType(), ChannelNames: ChannelService().ChannelNames, Writer: LogWriterPolicy()})
+	return usage.New(usage.Dependencies{DB: LOG_DB, ChannelNames: ChannelService().ChannelNames, Writer: LogWriterPolicy()})
 }
 
 func GetLogByTokenId(tokenId int) (logs []*Log, err error) {

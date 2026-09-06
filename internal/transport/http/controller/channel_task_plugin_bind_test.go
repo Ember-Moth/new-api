@@ -9,11 +9,11 @@ import (
 
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
 
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -33,9 +33,9 @@ func setupTaskPluginBindChannelTest(t *testing.T) *authz.Engine {
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Ability{}, &identityentity.CasbinRule{}, &identityentity.AuthzRole{}, &model.Log{}, &model.User{}))
+	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Ability{}, &identityentity.CasbinRule{}, &identityentity.AuthzRole{}, &model.User{}))
 	model.DB = database
-	model.LOG_DB = database
+	model.LOG_DB = testdb.Logs(t, database)
 	authorization, err := authz.New(database, true)
 	require.NoError(t, err)
 	t.Cleanup(func() {

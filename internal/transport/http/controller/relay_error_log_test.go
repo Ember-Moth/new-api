@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/QuantumNous/new-api/internal/testdb"
@@ -24,7 +24,6 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	previousDB, previousLogDB := model.DB, model.LOG_DB
 	previousRedisEnabled := common.RedisEnabled
 	previousMainDatabaseType := common.MainDatabaseType()
-	previousLogDatabaseType := common.LogDatabaseType()
 	previousErrorLogEnabled := constant.ErrorLogEnabled
 
 	database, err := testdb.Open(t, &gorm.Config{})
@@ -32,15 +31,16 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Log{}))
-	model.DB, model.LOG_DB = database, database
+	require.NoError(t, database.AutoMigrate(&model.User{}))
+	model.DB = database
+	model.LOG_DB = testdb.Logs(t, database)
 	common.RedisEnabled = false
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	constant.ErrorLogEnabled = true
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB
 		common.RedisEnabled = previousRedisEnabled
-		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
+		common.SetMainDatabaseType(previousMainDatabaseType)
 		constant.ErrorLogEnabled = previousErrorLogEnabled
 		require.NoError(t, sqlDB.Close())
 	})
@@ -72,7 +72,7 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	processChannelError(ctx, channelSnapshot, apiErr, nil)
 
 	var stored model.Log
-	require.NoError(t, database.First(&stored).Error)
+	require.NoError(t, model.LOG_DB.Take(&stored).Error)
 	assert.Equal(t, channelSnapshot.ChannelId, stored.ChannelId)
 	storedOther, err := common.StrToMap(stored.Other)
 	require.NoError(t, err)

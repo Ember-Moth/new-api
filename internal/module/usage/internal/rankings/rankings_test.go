@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/usage"
 	"github.com/QuantumNous/new-api/internal/module/usage/aggregation"
@@ -18,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/usage/entity"
 	"github.com/QuantumNous/new-api/internal/module/usage/internal/rankings"
 	usagehttp "github.com/QuantumNous/new-api/internal/module/usage/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +31,7 @@ func rankingDatabase(t *testing.T) (*gorm.DB, *aggregation.Store) {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 	return db, aggregation.New(aggregation.Dependencies{DB: db})
 }
 

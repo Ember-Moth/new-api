@@ -16,19 +16,19 @@ import (
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
-	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/gin-gonic/gin"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
@@ -68,12 +68,13 @@ func TestDragonflyCacheContracts(t *testing.T) {
 
 	database, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	model.DB, model.LOG_DB = database, database
+	model.DB = database
+	model.LOG_DB = testdb.Logs(t, database)
 	common.BatchUpdateEnabled, common.SyncFrequency = false, 60
 	pool, err := database.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 
 	t.Run("concurrent reservations cannot spend the same cached balance twice", func(t *testing.T) {
 		user := model.User{Username: "dragonfly-reserve", AffCode: "dragonfly-reserve", Quota: 10, AuthVersion: 1}
@@ -558,7 +559,6 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		previousUnit := common.QuotaPerUnit
 		common.QuotaPerUnit = 10
 		t.Cleanup(func() { common.QuotaPerUnit = previousUnit })
-		require.NoError(t, schema.UpPostgres(pool, schema.Logs))
 		user := model.User{Username: "dragonfly-subpay", AffCode: "dragonfly-subpay", Quota: 50, Group: "default", AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)
 		_, err := model.GetUserCache(user.Id)
@@ -648,7 +648,6 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		previous := common.BatchUpdateEnabled
 		common.BatchUpdateEnabled = true
 		t.Cleanup(func() { require.NoError(t, model.FlushQuotaUpdates()); common.BatchUpdateEnabled = previous })
-		require.NoError(t, schema.UpPostgres(pool, schema.Logs))
 		user := model.User{Username: "df-reward-wallet", AffCode: "df-reward-wallet", Quota: 100, AffQuota: 20, AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)
 		reserved, err := model.TryReserveUserQuota(user.Id, 7)
@@ -674,7 +673,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.Equal(t, 10, user.AffQuota)
 		assert.EqualValues(t, 1, user.AuthVersion)
 		var count int64
-		require.NoError(t, database.Model(&model.Log{}).Where("user_id = ? AND type = ?", user.Id, model.LogTypeSystem).Count(&count).Error)
+		require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("user_id = ? AND type = ?", user.Id, model.LogTypeSystem).Count(&count).Error)
 		assert.EqualValues(t, 1, count)
 	})
 
@@ -714,7 +713,6 @@ func TestDragonflyCacheContracts(t *testing.T) {
 			require.NoError(t, model.FlushQuotaUpdates())
 			common.QuotaPerUnit, common.BatchUpdateEnabled = oldUnit, oldBatch
 		})
-		require.NoError(t, schema.UpPostgres(pool, schema.Logs))
 		for _, test := range []struct {
 			provider string
 			credit   int

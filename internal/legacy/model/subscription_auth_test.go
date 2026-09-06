@@ -83,18 +83,19 @@ func TestSubscriptionGroupTransitionsPreserveAuthVersionAndSessions(t *testing.T
 
 func TestSubscriptionGroupCacheRefreshFailureDoesNotChangeCommittedResult(t *testing.T) {
 	previousDB, previousLogDB := DB, LOG_DB
-	previousMainDatabaseType, previousLogDatabaseType := common.MainDatabaseType(), common.LogDatabaseType()
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	previousMainDatabaseType := common.MainDatabaseType()
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	DB, LOG_DB = db, db
+	DB = db
+	LOG_DB = testdb.Logs(t, db)
 	require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionPlan{}, &UserSubscription{}))
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(4)
 	t.Cleanup(func() {
 		DB, LOG_DB = previousDB, previousLogDB
-		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
+		common.SetMainDatabaseType(previousMainDatabaseType)
 		_ = sqlDB.Close()
 	})
 

@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	"github.com/QuantumNous/new-api/internal/module/billing/contract"
 	"github.com/QuantumNous/new-api/internal/module/billing/entity"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -37,8 +37,8 @@ func newRedemptionFixture(t *testing.T) *redemptionFixture {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	fixture := &redemptionFixture{db: db, allowed: true, router: gin.New()}
 	fixture.service = billing.New(billing.Dependencies{DB: db, PaymentAllowed: func() bool { return fixture.allowed }})
 	handler := billinghttp.New(fixture.service, billinghttp.ManagementHooks{Audit: func(c *gin.Context, action string, metadata map[string]any) {

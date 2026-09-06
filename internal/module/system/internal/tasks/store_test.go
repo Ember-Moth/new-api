@@ -459,7 +459,7 @@ func newTaskFixture(t *testing.T) *Runtime {
 	require.NoError(t, err)
 	pool, err := db.DB()
 	require.NoError(t, err)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
+	require.NoError(t, schema.UpPostgres(pool))
 	return New(Dependencies{DB: db, Master: true, NodeName: "test-runner"})
 }

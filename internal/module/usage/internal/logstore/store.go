@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	dbquery "github.com/QuantumNous/new-api/internal/infra/database/query"
 	"github.com/QuantumNous/new-api/internal/module/usage/entity"
 	"github.com/QuantumNous/new-api/internal/module/usage/metadata"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/types"
 	"gorm.io/gorm"
 )
@@ -37,24 +37,17 @@ const logSearchCountLimit = 10000
 
 type Dependencies struct {
 	DB           *gorm.DB
-	Kind         common.DatabaseType
 	ChannelNames func(context.Context, []int) (map[int]string, error)
 }
 type Store struct {
 	db           *gorm.DB
-	kind         common.DatabaseType
 	channelNames func(context.Context, []int) (map[int]string, error)
 }
 
 func New(deps Dependencies) *Store {
-	return &Store{db: deps.DB, kind: deps.Kind, channelNames: deps.ChannelNames}
+	return &Store{db: deps.DB, channelNames: deps.ChannelNames}
 }
-func (r *Store) groupColumn() string {
-	if r.kind == common.DatabaseTypeClickHouse {
-		return "`group`"
-	}
-	return `"group"`
-}
+func (r *Store) groupColumn() string { return "`group`" }
 func (r *Store) Create(ctx context.Context, log *Log) error {
 	if log.RequestId == "" {
 		log.RequestId = common.NewRequestId()
@@ -75,27 +68,16 @@ func (r *Store) applyExplicitLogTextFilter(tx *gorm.DB, column string, value str
 	return tx.Where(column+" = ?", value), nil
 }
 
-func (r *Store) buildLogLikeCondition(column string, value string) (string, string, error) {
-	if r.kind == common.DatabaseTypeClickHouse {
-		pattern, err := sanitizeClickHouseLikePattern(value)
-		if err != nil {
-			return "", "", err
-		}
-		return column + " LIKE ?", pattern, nil
-	}
-
-	pattern, err := dbquery.SanitizeLikePattern(value)
+func (r *Store) buildLogLikeCondition(column, value string) (string, string, error) {
+	pattern, err := sanitizeClickHouseLikePattern(value)
 	if err != nil {
 		return "", "", err
 	}
-	return column + " LIKE ? ESCAPE '!'", pattern, nil
+	return column + " LIKE ?", pattern, nil
 }
 
 func (r *Store) GetLogByTokenId(ctx context.Context, tokenId int) (logs []*Log, err error) {
-	order := "id desc"
-	if r.kind == common.DatabaseTypeClickHouse {
-		order = clickHouseLogOrder("")
-	}
+	order := clickHouseLogOrder("")
 	err = r.db.WithContext(ctx).Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
@@ -142,18 +124,13 @@ func (r *Store) GetAllLogs(ctx context.Context, logType int, startTimestamp int6
 		if err = tx.Model(&Log{}).Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
-		order := "logs.created_at desc, logs.id desc"
-		if r.kind == common.DatabaseTypeClickHouse {
-			order = clickHouseLogOrder("logs.")
-		}
+		order := clickHouseLogOrder("logs.")
 		err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	}
 	if err != nil {
 		return nil, 0, err
 	}
-	if r.kind == common.DatabaseTypeClickHouse {
-		assignDisplayLogIds(logs, startIdx)
-	}
+	assignDisplayLogIds(logs, startIdx)
 
 	channelIds := types.NewSet[int]()
 	for _, log := range logs {
@@ -210,10 +187,7 @@ func (r *Store) GetUserLogs(ctx context.Context, userId int, logType int, startT
 		if err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error; err != nil {
 			return nil, 0, err
 		}
-		order := "logs.id desc"
-		if r.kind == common.DatabaseTypeClickHouse {
-			order = clickHouseLogOrder("logs.")
-		}
+		order := clickHouseLogOrder("logs.")
 		err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
 	}
 	if err != nil {
@@ -329,34 +303,24 @@ func (r *Store) DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, li
 		return 0, ctx.Err()
 	}
 
-	if r.kind == common.DatabaseTypeClickHouse {
-		// ClickHouse DELETE is a heavy mutation that rewrites data parts, so
-		// per-batch mutations would be pathologically slow. Remove all matching
-		// rows in a single synchronous mutation regardless of limit; the reported
-		// count lets the caller's progress loop complete in one pass.
-		total, err := r.CountOldLog(ctx, targetTimestamp)
-		if err != nil {
-			return 0, err
-		}
-		if total == 0 {
-			return 0, nil
-		}
-		if err := r.db.WithContext(ctx).Exec(
-			"ALTER TABLE logs DELETE WHERE created_at < ? SETTINGS mutations_sync = 1",
-			targetTimestamp,
-		).Error; err != nil {
-			return 0, err
-		}
-		return total, nil
+	// ClickHouse DELETE is a heavy mutation that rewrites data parts, so
+	// per-batch mutations would be pathologically slow. Remove all matching
+	// rows in a single synchronous mutation regardless of limit; the reported
+	// count lets the caller's progress loop complete in one pass.
+	total, err := r.CountOldLog(ctx, targetTimestamp)
+	if err != nil {
+		return 0, err
 	}
-
-	query := r.db.WithContext(ctx)
-	ids := query.Model(&Log{}).Select("id").Where("created_at < ?", targetTimestamp).Order("id").Limit(limit)
-	result := query.Where("id IN (?)", ids).Delete(&Log{})
-	if nil != result.Error {
-		return 0, result.Error
+	if total == 0 {
+		return 0, nil
 	}
-	return result.RowsAffected, nil
+	if err := r.db.WithContext(ctx).Exec(
+		"ALTER TABLE logs DELETE WHERE created_at < ? SETTINGS mutations_sync = 1",
+		targetTimestamp,
+	).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func sanitizeClickHouseLikePattern(input string) (string, error) {
@@ -370,7 +334,7 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 func clickHouseLogOrder(prefix string) string {
-	return prefix + "created_at desc, " + prefix + "request_id desc"
+	return prefix + "created_at desc, " + prefix + "request_id desc, " + prefix + "event_id desc"
 }
 
 func assignDisplayLogIds(logs []*Log, startIdx int) {

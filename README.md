@@ -121,26 +121,27 @@ docker-compose up -d
 # 拉取最新镜像
 docker pull calciumion/new-api:latest
 
-# 使用 PostgreSQL（必须配置 SQL_DSN）
+# 使用 PostgreSQL 主库和 ClickHouse 日志库（两个 DSN 均必填）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
   -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="clickhouse://default:password@clickhouse-host:9000/new_api_logs" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# 使用 PostgreSQL 并配置独立日志库
+# PostgreSQL 主库 + ClickHouse 日志库
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
   -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
-  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
+  -e LOG_SQL_DSN="clickhouse://default:password@clickhouse-host:9000/new_api_logs" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
 > **💡 提示：** `-v ./data:/data` 会将数据保存在当前目录的 `data` 文件夹中，你也可以改为绝对路径如 `-v /your/custom/path:/data`
-> 这里只保存本地文件；PostgreSQL 数据库需要单独备份。
+> 这里只保存本地文件；PostgreSQL 主库和 ClickHouse 日志库需要分别备份。
 
 </details>
 
@@ -359,22 +360,23 @@ docker-compose up -d
 <details>
 <summary><strong>方式 2：Docker 命令</strong></summary>
 
-**使用 PostgreSQL（必须配置 SQL_DSN）：**
+**使用 PostgreSQL 主库和 ClickHouse 日志库（两个 DSN 均必填）：**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
   -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
+  -e LOG_SQL_DSN="clickhouse://default:password@clickhouse-host:9000/new_api_logs" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**使用 PostgreSQL 并配置独立日志库：**
+**PostgreSQL 主库 + ClickHouse 日志库：**
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
   -e SQL_DSN="postgresql://user:password@postgres-host:5432/new-api" \
-  -e LOG_SQL_DSN="postgresql://user:password@postgres-host:5432/new-api-log" \
+  -e LOG_SQL_DSN="clickhouse://default:password@clickhouse-host:9000/new_api_logs" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -382,7 +384,7 @@ docker run --name new-api -d --restart always \
 
 > **💡 路径说明：**
 > - `./data:/data` - 相对路径，数据保存在当前目录的 data 文件夹
-> 这里只保存本地文件；PostgreSQL 数据库需要单独备份。
+> 这里只保存本地文件；PostgreSQL 主库和 ClickHouse 日志库需要分别备份。
 > - 也可使用绝对路径，如：`/your/custom/path:/data`
 
 </details>

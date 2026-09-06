@@ -10,9 +10,9 @@ import (
 
 	"gorm.io/driver/postgres"
 
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,13 +29,11 @@ func TestMain(m *testing.M) {
 		panic("failed to open test db: " + err.Error())
 	}
 	DB = db
-	LOG_DB = db
 
-	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
-	initCol()
 
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -43,14 +41,19 @@ func TestMain(m *testing.M) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 
-	if err := schema.UpPostgres(sqlDB, schema.Main); err != nil {
+	if err := schema.UpPostgres(sqlDB); err != nil {
 		panic(err)
 	}
-	if err := schema.UpPostgres(sqlDB, schema.Logs); err != nil {
+	logs, _, cleanupLogs, err := testdb.NewLogDatabase(db)
+	if err != nil {
 		panic(err)
 	}
+	LOG_DB = logs
 
 	code := m.Run()
+	if err := cleanupLogs(); err != nil {
+		panic(err)
+	}
 	_ = sqlDB.Close()
 	if err := cleanup(); err != nil {
 		panic(err)
@@ -72,7 +75,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM user_oauth_bindings")
 		DB.Exec("DELETE FROM users")
-		DB.Exec("DELETE FROM logs")
+		testdb.ClearLogs(t, LOG_DB)
 		DB.Exec("DELETE FROM channels")
 		DB.Exec("DELETE FROM quota_data")
 		DB.Exec("DELETE FROM abilities")

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/module/channel/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
@@ -20,23 +20,26 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestPostgreSQLBelow18IsRejectedForMainAndLogDatabases(t *testing.T) {
+func TestPostgreSQLBelow18IsRejectedForMainDatabase(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_OLD_DSN")
 	if dsn == "" {
-		t.Skip("TEST_POSTGRES_OLD_DSN is required to exercise an unsupported PostgreSQL server")
+		t.Skip("TEST_POSTGRES_OLD_DSN is required")
 	}
-	for _, isLog := range []bool{false, true} {
-		envName := "SQL_DSN"
-		if isLog {
-			envName = "LOG_SQL_DSN"
-		}
-		t.Run(envName, func(t *testing.T) {
-			t.Setenv(envName, dsn)
-			db, _, err := chooseDB(envName, isLog)
-			require.ErrorContains(t, err, "requires PostgreSQL 18 or newer")
-			assert.Nil(t, db)
-			assert.Contains(t, err.Error(), envName)
-		})
+	t.Setenv("SQL_DSN", dsn)
+	db, _, err := chooseDB("SQL_DSN", false)
+	require.ErrorContains(t, err, "requires PostgreSQL 18 or newer")
+	assert.Nil(t, db)
+}
+func TestLogDatabaseRejectsPostgreSQLAndNeverFallsBackToPrimary(t *testing.T) {
+	previous := LOG_DB
+	t.Cleanup(func() { LOG_DB = previous })
+	LOG_DB = nil
+	for _, dsn := range []string{"", "   ", "postgres://user:private-password@127.0.0.1:1/logs", "postgresql://user:private-password@127.0.0.1:1/logs"} {
+		t.Setenv("LOG_SQL_DSN", dsn)
+		err := InitLogDB()
+		require.ErrorContains(t, err, "ClickHouse")
+		assert.NotContains(t, err.Error(), "private-password")
+		assert.Nil(t, LOG_DB)
 	}
 }
 
@@ -64,7 +67,11 @@ func TestDatabaseRejectsMissingAndUnsupportedDSNs(t *testing.T) {
 				require.Error(t, err)
 				assert.Nil(t, db)
 				assert.Contains(t, err.Error(), envName)
-				assert.Contains(t, err.Error(), "PostgreSQL")
+				if isLog {
+					assert.Contains(t, err.Error(), "ClickHouse")
+				} else {
+					assert.Contains(t, err.Error(), "PostgreSQL")
+				}
 				assert.NotContains(t, err.Error(), "private-password")
 			}
 		})
@@ -78,76 +85,70 @@ func TestDatabaseRejectsMissingAndUnsupportedDSNs(t *testing.T) {
 }
 
 func TestPostgreSQLStartupPreservesDataAndIndexesAcrossRestarts(t *testing.T) {
-	for _, separateLog := range []bool{false, true} {
-		name := "shared log database"
-		if separateLog {
-			name = "separate log database"
-		}
-		t.Run(name, func(t *testing.T) {
-			previousDB, previousLogDB := DB, LOG_DB
-			previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
-			previousMaster := common.IsMasterNode
-			t.Cleanup(func() {
-				DB, LOG_DB = previousDB, previousLogDB
-				common.SetDatabaseTypes(previousMainType, previousLogType)
-				common.IsMasterNode = previousMaster
-				initCol()
-			})
-			common.IsMasterNode = true
-			t.Setenv("SQL_DSN", testdb.DSN(t))
-			t.Setenv("LOG_SQL_DSN", "")
-			if separateLog {
-				t.Setenv("LOG_SQL_DSN", testdb.DSN(t))
-			}
-			require.NoError(t, InitDB())
-			require.NoError(t, InitLogDB())
-			t.Cleanup(func() { require.NoError(t, CloseDB()) })
+	previousDB, previousLogDB := DB, LOG_DB
+	previousMainType := common.MainDatabaseType()
+	previousMaster := common.IsMasterNode
+	t.Cleanup(func() {
+		DB, LOG_DB = previousDB, previousLogDB
+		common.SetMainDatabaseType(previousMainType)
+		common.IsMasterNode = previousMaster
+	})
+	common.IsMasterNode = true
+	t.Setenv("SQL_DSN", testdb.DSN(t))
+	require.NoError(t, InitDB())
+	_, dsn, cleanup, err := testdb.NewLogDatabase(DB)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, cleanup()) })
+	t.Setenv("LOG_SQL_DSN", dsn)
+	require.NoError(t, InitLogDB())
+	t.Cleanup(func() { require.NoError(t, CloseDB()) })
 
-			user := User{Username: "postgres-restart", DisplayName: "数据库验证", Quota: 1 << 40}
-			require.NoError(t, DB.Create(&user).Error)
-			token := Token{UserId: user.Id, Key: strings.Repeat("k", 64), Group: "default"}
-			require.NoError(t, DB.Create(&token).Error)
-			plan := SubscriptionPlan{Title: "preserved plan", PriceAmount: 1.234567, Enabled: true}
-			require.NoError(t, DB.Create(&plan).Error)
-			entry := Log{UserId: user.Id, Content: "preserved log", RequestId: "restart-request"}
-			require.NoError(t, LOG_DB.Create(&entry).Error)
+	user := User{Username: "postgres-restart", DisplayName: "数据库验证", Quota: 1 << 40}
+	require.NoError(t, DB.Create(&user).Error)
+	token := Token{UserId: user.Id, Key: strings.Repeat("k", 64), Group: "default"}
+	require.NoError(t, DB.Create(&token).Error)
+	plan := SubscriptionPlan{Title: "preserved plan", PriceAmount: 1.234567, Enabled: true}
+	require.NoError(t, DB.Create(&plan).Error)
+	entry := Log{UserId: user.Id, Content: "preserved log", RequestId: "restart-request"}
+	require.NoError(t, LOG_DB.Create(&entry).Error)
 
-			var originalIndexes []string
-			require.NoError(t, DB.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname`).Scan(&originalIndexes).Error)
-			var originalLogIndexes []string
-			require.NoError(t, LOG_DB.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname`).Scan(&originalLogIndexes).Error)
-			for range 2 {
-				require.NoError(t, CloseDB())
-				require.NoError(t, InitDB())
-				require.NoError(t, InitLogDB())
-			}
-
-			var preservedUser User
-			require.NoError(t, DB.First(&preservedUser, user.Id).Error)
-			assert.Equal(t, user.Quota, preservedUser.Quota)
-			assert.Equal(t, user.DisplayName, preservedUser.DisplayName)
-			var preservedPlan SubscriptionPlan
-			require.NoError(t, DB.First(&preservedPlan, plan.Id).Error)
-			assert.Equal(t, plan.PriceAmount, preservedPlan.PriceAmount)
-			assert.True(t, preservedPlan.Enabled)
-			var preservedLog Log
-			require.NoError(t, LOG_DB.First(&preservedLog, entry.Id).Error)
-			assert.Equal(t, entry.Content, preservedLog.Content)
-			var indexes, logIndexes []string
-			require.NoError(t, DB.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname`).Scan(&indexes).Error)
-			require.NoError(t, LOG_DB.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname`).Scan(&logIndexes).Error)
-			assert.Equal(t, originalIndexes, indexes)
-			assert.Equal(t, originalLogIndexes, logIndexes)
-			assert.Error(t, DB.Create(&Token{UserId: user.Id, Key: token.Key}).Error)
-			group := entity.PrefillGroup{Name: "reusable-name", Type: "model", Items: entity.JSONValue(`[]`)}
-			require.NoError(t, DB.Create(&group).Error)
-			assert.Error(t, DB.Create(&entity.PrefillGroup{Name: group.Name, Type: group.Type}).Error)
-			require.NoError(t, DB.Delete(&group).Error)
-			require.NoError(t, DB.Create(&entity.PrefillGroup{Name: group.Name, Type: group.Type}).Error)
-			assert.Equal(t, common.DatabaseTypePostgreSQL, common.MainDatabaseType())
-			assert.Equal(t, common.DatabaseTypePostgreSQL, common.LogDatabaseType())
-		})
+	var originalIndexes []string
+	require.NoError(t, DB.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname`).Scan(&originalIndexes).Error)
+	var originalLogDefinition string
+	require.NoError(t, LOG_DB.Raw("SHOW CREATE TABLE logs").Scan(&originalLogDefinition).Error)
+	for range 2 {
+		require.NoError(t, CloseDB())
+		require.NoError(t, InitDB())
+		require.NoError(t, InitLogDB())
 	}
+
+	var preservedUser User
+	require.NoError(t, DB.First(&preservedUser, user.Id).Error)
+	assert.Equal(t, user.Quota, preservedUser.Quota)
+	assert.Equal(t, user.DisplayName, preservedUser.DisplayName)
+	var preservedPlan SubscriptionPlan
+	require.NoError(t, DB.First(&preservedPlan, plan.Id).Error)
+	assert.Equal(t, plan.PriceAmount, preservedPlan.PriceAmount)
+	assert.True(t, preservedPlan.Enabled)
+	var preservedLog Log
+	require.NoError(t, LOG_DB.Where("event_id = ?", entry.EventID).Take(&preservedLog).Error)
+	assert.Equal(t, entry.Content, preservedLog.Content)
+	var indexes []string
+	var logDefinition string
+	require.NoError(t, DB.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() ORDER BY indexname`).Scan(&indexes).Error)
+	require.NoError(t, LOG_DB.Raw("SHOW CREATE TABLE logs").Scan(&logDefinition).Error)
+	assert.Equal(t, originalIndexes, indexes)
+	assert.Equal(t, originalLogDefinition, logDefinition)
+	assert.False(t, DB.Migrator().HasTable("logs"))
+	assert.False(t, DB.Migrator().HasTable("schema_migrations_logs"))
+	assert.Error(t, DB.Create(&Token{UserId: user.Id, Key: token.Key}).Error)
+	group := entity.PrefillGroup{Name: "reusable-name", Type: "model", Items: entity.JSONValue(`[]`)}
+	require.NoError(t, DB.Create(&group).Error)
+	assert.Error(t, DB.Create(&entity.PrefillGroup{Name: group.Name, Type: group.Type}).Error)
+	require.NoError(t, DB.Delete(&group).Error)
+	require.NoError(t, DB.Create(&entity.PrefillGroup{Name: group.Name, Type: group.Type}).Error)
+	assert.Equal(t, common.DatabaseTypePostgreSQL, common.MainDatabaseType())
+	assert.Equal(t, "clickhouse", LOG_DB.Dialector.Name())
 }
 
 func TestPostgreSQLMigrationsSerializeAndLeaveApplicationPoolUsable(t *testing.T) {
@@ -160,22 +161,21 @@ func TestPostgreSQLMigrationsSerializeAndLeaveApplicationPoolUsable(t *testing.T
 	for range 2 {
 		go func() {
 			<-start
-			errors <- schema.UpPostgres(pool, schema.Main)
+			errors <- schema.UpPostgres(pool)
 		}()
 	}
 	close(start)
 	for range 2 {
 		require.NoError(t, <-errors)
 	}
-	require.NoError(t, schema.UpPostgres(pool, schema.Logs))
 	user := User{Username: "migration-user", AuthVersion: 1}
 	require.NoError(t, db.Create(&user).Error)
 	assert.Positive(t, user.Id, "the SQL identity must generate keys for GORM inserts")
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
+	require.NoError(t, schema.UpPostgres(pool))
 	var preserved User
 	require.NoError(t, db.First(&preserved, user.Id).Error)
 	assert.Equal(t, user.Username, preserved.Username)
-	for _, table := range []string{"schema_migrations", "schema_migrations_logs"} {
+	for _, table := range []string{"schema_migrations"} {
 		var state struct {
 			Version int
 			Dirty   bool
@@ -197,25 +197,21 @@ func TestPostgreSQLMigrationDownPreservesUnrelatedTablesAndAllowsReinitializatio
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("CREATE TABLE unrelated_records (id bigint PRIMARY KEY)").Error)
 	require.NoError(t, db.Exec("INSERT INTO unrelated_records VALUES (1)").Error)
-	for _, scope := range []schema.Scope{schema.Main, schema.Logs} {
-		require.NoError(t, schema.UpPostgres(pool, scope))
-	}
-	for _, scope := range []schema.Scope{schema.Logs, schema.Main} {
-		client, err := schema.NewPostgres(pool, scope)
-		require.NoError(t, err)
-		downErr := client.Down()
-		sourceErr, databaseErr := client.Close()
-		require.NoError(t, downErr)
-		require.NoError(t, sourceErr)
-		require.NoError(t, databaseErr)
-	}
+	require.NoError(t, schema.UpPostgres(pool))
+	client, err := schema.NewPostgres(pool)
+	require.NoError(t, err)
+	downErr := client.Down()
+	sourceErr, databaseErr := client.Close()
+	require.NoError(t, downErr)
+	require.NoError(t, sourceErr)
+	require.NoError(t, databaseErr)
+
 	assert.False(t, db.Migrator().HasTable(&User{}))
 	assert.False(t, db.Migrator().HasTable(&Log{}))
 	var retained int
 	require.NoError(t, db.Raw("SELECT id FROM unrelated_records").Scan(&retained).Error)
 	assert.Equal(t, 1, retained)
-	require.NoError(t, schema.UpPostgres(pool, schema.Main))
-	require.NoError(t, schema.UpPostgres(pool, schema.Logs))
+	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, db.Create(&User{Username: "reinitialized"}).Error)
 }
 
@@ -226,10 +222,10 @@ func TestPostgreSQLFailedMigrationRollsBackDDLAndRefusesAutomaticDirtyRecovery(t
 	require.NoError(t, err)
 	// A conflicting table causes a failure after earlier tables in the file.
 	require.NoError(t, db.Exec("CREATE TABLE tokens (id bigint PRIMARY KEY)").Error)
-	require.Error(t, schema.UpPostgres(pool, schema.Main))
+	require.Error(t, schema.UpPostgres(pool))
 	assert.False(t, db.Migrator().HasTable(&Ability{}), "failed migration must not leave partial tables behind")
 	var dirty migrate.ErrDirty
-	require.ErrorAs(t, schema.UpPostgres(pool, schema.Main), &dirty)
+	require.ErrorAs(t, schema.UpPostgres(pool), &dirty)
 	assert.Equal(t, 1, dirty.Version)
 	require.NoError(t, pool.PingContext(t.Context()))
 }
@@ -270,11 +266,8 @@ func TestClickHouseLogMigrationsPreserveRowsAndApplyRetention(t *testing.T) {
 		require.NoError(t, <-results)
 	}
 	previousDB, previousLogDB, previousMaster := DB, LOG_DB, common.IsMasterNode
-	previousType := common.LogDatabaseType()
 	t.Cleanup(func() {
 		DB, LOG_DB, common.IsMasterNode = previousDB, previousLogDB, previousMaster
-		common.SetLogDatabaseType(previousType)
-		initCol()
 	})
 	DB, common.IsMasterNode = coordinator, true
 	t.Setenv("LOG_SQL_DSN", logDSN)
