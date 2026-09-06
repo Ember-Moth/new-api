@@ -13,7 +13,7 @@ import (
 )
 
 // These are dependency contracts, not a check of directory names alone.
-// Legacy business packages remain outside the migrated-module boundary until
+// Transitional packages remain outside the migrated-module boundary until
 // their capabilities have been moved; the completion checklist tracks them.
 func TestModularDependencyBoundaries(t *testing.T) {
 	root, err := filepath.Abs("../..")
@@ -54,10 +54,10 @@ func TestModularDependencyBoundaries(t *testing.T) {
 			if dep == "internal/app" || strings.HasPrefix(dep, "internal/app/") {
 				assert.True(t, strings.HasPrefix(dir, "cmd/") || dir == "internal/app" || strings.HasPrefix(dir, "internal/app/"), "%s: only command entrypoints may import the application composition root", path)
 			}
-			assert.False(t, dep == "router" || strings.HasPrefix(dep, "router/") || dep == "middleware" || strings.HasPrefix(dep, "middleware/"), "%s: use HTTP transport packages instead of removed root adapters", path)
+			first := strings.Split(dep, "/")[0]
+			assert.NotContains(t, []string{"router", "middleware", "controller", "service", "model"}, first, "%s: removed root packages must not be imported", path)
 			if moduleCode || strings.HasPrefix(dir, "internal/infra/") {
-				first := strings.Split(dep, "/")[0]
-				assert.NotContains(t, []string{"controller", "service", "model"}, first, "%s: migrated modules and infrastructure must not depend on legacy business packages", path)
+				assert.False(t, strings.HasPrefix(dep, "internal/legacy/"), "%s: migrated modules and infrastructure must not depend on transitional business packages", path)
 				assert.False(t, strings.HasPrefix(dep, "internal/transport/"), "%s: application adapters must not be dependencies of modules or infrastructure", path)
 			}
 			if strings.HasPrefix(dir, "internal/infra/") {

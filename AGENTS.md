@@ -17,7 +17,7 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ## Architecture
 
-The application is being organized as a modular monolith. See `docs/modular-monolith.md` for the full target, dependency rules, and completion checklist. The remaining root-level business packages are migration work, not the final architecture.
+The application is being organized as a modular monolith. See `docs/modular-monolith.md` for the full target, dependency rules, and completion checklist. The remaining transitional packages are under internal/legacy and internal/transport/http/controller. Their directory relocation is complete; business-level separation remains ongoing.
 
 ```
 cmd/new-api/    — Executable and CLI entrypoint
@@ -36,9 +36,9 @@ internal/module/usage/ — Log entities, audience filtering, event assembly, cur
 internal/module/subscription/ — Plan configuration/cache, grants/lifecycle, quota accounting, payment orders, balance purchase and maintenance; legacy configuration/runtime adapters are still being migrated
 internal/migration/schema/ — Versioned production SQL schema
 internal/arch/  — Executable dependency boundary rules
-controller/    — Request handlers awaiting migration to their modules
-service/       — Business logic awaiting migration to its modules
-model/         — Data and business operations awaiting module ownership
+internal/transport/http/controller/ — Remaining HTTP handlers, moved as a package before further business separation
+internal/legacy/service/ — Transitional runtime/business package; module extraction remains ongoing
+internal/legacy/model/ — Transitional data/runtime package; module extraction remains ongoing
 relay/         — AI API relay/proxy with provider adapters
   relay/channel/ — Provider-specific adapters (openai/, claude/, gemini/, aws/, etc.)
 setting/       — Configuration management (ratio, model, operation, system, performance)
@@ -54,7 +54,7 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 ```
 
 - Only command entrypoints may import `internal/app` to assemble the runtime.
-- New module implementations must not import the legacy `controller`, `service`, or `model` packages. Pass the required dependencies through constructors.
+- New module implementations must not import `internal/legacy/*` or the transitional HTTP controller package. Pass the required dependencies through constructors.
 - Module core code uses `context.Context` and owned contracts; Gin handlers belong in the module's `transport/http` package.
 - Infrastructure must not depend on business modules or inbound transport. Keep module implementation under its own nested `internal/` directory.
 - Build the executable with `go build ./cmd/new-api`; `web/assets.go` embeds the built `web/dist` resources.
@@ -111,7 +111,7 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 - Cache services use DragonflyDB. Keep the Redis-compatible client and `REDIS_CONN_STRING`/`REDIS_POOL_SIZE` configuration names. Exercise real DragonflyDB with `TEST_DRAGONFLY_DSN` for changes affecting Lua scripts, TTLs, transactions, rate limits, sessions, or quota caches; in-memory Redis test doubles alone do not establish DragonflyDB compatibility.
 - PostgreSQL versions below 18 must be rejected before migrations for both the primary database and separate PostgreSQL log databases. ClickHouse log connections are exempt from PostgreSQL version checks.
 - Prefer GORM methods over raw SQL, and let GORM generate primary keys.
-- Standard `SELECT ... FOR UPDATE` queries in `model/` MUST use `lockForUpdate(tx)`. Do not use the ignored GORM v1 `gorm:query_option` mechanism or duplicate the shared locking helper.
+- Standard `SELECT ... FOR UPDATE` queries in `internal/legacy/model/` MUST use `lockForUpdate(tx)`. Do not use the ignored GORM v1 `gorm:query_option` mechanism or duplicate the shared locking helper.
 - Primary database SQL uses PostgreSQL quoting. Use `commonGroupCol` and `commonKeyCol` for reserved columns. Keep PostgreSQL and ClickHouse log behavior separate through `common.UsingLogDatabase(...)`.
 - Avoid GORM boolean default tags when code already enforces the business default. Verify that migrations do not repeatedly alter defaults on restart.
 
@@ -132,7 +132,7 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 - Watch for validation bypass paths: passthrough fields (e.g. `Extra["parameters"]`), task `metadata` maps, and multipart form fields can carry the same quantities around the standard DTO validation. Any adaptor that reads a multiplier from such a path must enforce the same bound (or clamp) locally.
 - Durations parsed from media metadata are user/upstream-controlled too: audio file headers (transcription token counting, TTS response duration) and upstream deduction numbers (e.g. Kling `FinalUnitDeduction`) can claim absurd values. Convert them with saturation before they become token counts.
 - Never convert a computed quota or token count to `int` with a bare cast like `int(float64(quota) * ratio)`, `int(math.Round(...))` on unbounded input, or `int(decimal.IntPart())`. All quota rounding/conversion is centralized in `common/quota_math.go`; use those helpers: `common.QuotaFromFloat` (truncating) for float products, `common.QuotaRound` (half-away-from-zero) where rounding is intended, and `common.QuotaFromDecimal` for decimal products. `billingexpr.QuotaRound` delegates to `common.QuotaRound`. Do not reintroduce local conversion helpers or bare casts. Single-request saturation stays at the int32 boundary so batch accumulation cannot approach 64-bit wraparound; wallet/top-up conversion uses `common.WalletQuotaFromDecimalStrict` with the JavaScript-safe `common.MaxWalletQuota` boundary. Every clamp/NaN fallback is logged via `common.SysError`.
-- Saturation events are also audited: each helper has a `*Checked` variant (`common.QuotaFromFloatChecked` / `QuotaRoundChecked` / `QuotaFromDecimalChecked`) that additionally returns a `*common.QuotaClamp` when clamping occurred. Billing paths that compute a charge capture that clamp onto `relayInfo.QuotaClamp` (or thread it into task settlement) and, right before writing the consume/task log, call `attachQuotaSaturation` (in `service/log_info_generate.go`) which nests the marker under the log's `other.admin_info.quota_saturation` and emits a request-correlated `logger.LogWarn`. Nesting under `admin_info` makes it admin-only for free (non-admin log views strip `admin_info`). When adding a new billing path, use the `*Checked` variant and surface the clamp the same way so the anomaly stays auditable in both the admin log UI and backend logs.
+- Saturation events are also audited: each helper has a `*Checked` variant (`common.QuotaFromFloatChecked` / `QuotaRoundChecked` / `QuotaFromDecimalChecked`) that additionally returns a `*common.QuotaClamp` when clamping occurred. Billing paths that compute a charge capture that clamp onto `relayInfo.QuotaClamp` (or thread it into task settlement) and, right before writing the consume/task log, call `attachQuotaSaturation` (in `internal/legacy/service/log_info_generate.go`) which nests the marker under the log's `other.admin_info.quota_saturation` and emits a request-correlated `logger.LogWarn`. Nesting under `admin_info` makes it admin-only for free (non-admin log views strip `admin_info`). When adding a new billing path, use the `*Checked` variant and surface the clamp the same way so the anomaly stays auditable in both the admin log UI and backend logs.
 - Multiplier maps go through `types.PriceData.AddOtherRatio`, which rejects non-positive, NaN, and +Inf ratios. Do not write to `PriceData.OtherRatios` directly, and do not weaken these guards.
 - Pre-consume (预扣费) and settle (结算/差额) must both be safe: a saturated oversized quota must fail pre-consume with insufficient-quota, never silently wrap. When adding a new billing path (new relay format, new task platform, new adjustment hook), trace the full chain — validation → EstimateBilling/OtherRatios → quota conversion → pre-consume → settle/refund — and confirm each step preserves these invariants.
 - Fields parsed into unsigned types (`*uint`) accept huge positive JSON numbers (e.g. `18446744073686646784`, a wrapped negative); a `>= 0` check is not sufficient, an upper bound is mandatory.
@@ -140,7 +140,7 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 
 **Backend test quality:** Backend tests must protect real behavior, API contracts, billing/accounting invariants, data compatibility, or regression paths.
 
-- **Do not scatter tests for a small change:** For a focused feature or fix, extend an existing suitable test file first. If a new test file is necessary, add at most one and consolidate the key regression cases there. MUST NOT create separate test files for the same small feature across `controller/`, `service/`, `setting/`, or other layers merely because its call chain crosses those layers. Do not repeat fixtures and assertions at each layer. Keep the cases compact and focused on observable behavior; the number of production files touched is not a reason to add more test files.
+- **Do not scatter tests for a small change:** For a focused feature or fix, extend an existing suitable test file first. If a new test file is necessary, add at most one and consolidate the key regression cases there. MUST NOT create separate test files for the same small feature across `internal/transport/http/controller/`, `internal/legacy/service/`, `setting/`, or other layers merely because its call chain crosses those layers. Do not repeat fixtures and assertions at each layer. Keep the cases compact and focused on observable behavior; the number of production files touched is not a reason to add more test files.
 - Do not add tests that only improve coverage numbers, prove that code happens to run, or lock in implementation details without a user-visible or cross-module contract.
 - Avoid fake fuzz/stress/smoke/performance tests built from random inputs, large loop counts, sleeps, timing comparisons, or log-only assertions.
 - Avoid duplicate tests that exercise the same branch with different names but no new invariant.

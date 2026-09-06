@@ -1,7 +1,7 @@
 package router
 
 import (
-	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	billinghttp "github.com/QuantumNous/new-api/internal/module/billing/transport/http"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"

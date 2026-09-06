@@ -12,7 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityhttp "github.com/QuantumNous/new-api/internal/module/identity/transport/http"
-	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

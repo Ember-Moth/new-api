@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/static"

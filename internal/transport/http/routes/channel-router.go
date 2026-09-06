@@ -3,7 +3,7 @@ package router
 import (
 	"net/http"
 
-	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	channelhttp "github.com/QuantumNous/new-api/internal/module/channel/transport/http"
 	"github.com/QuantumNous/new-api/internal/module/identity/authz"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"

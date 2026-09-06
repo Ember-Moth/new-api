@@ -7,7 +7,7 @@ import (
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
 	"github.com/QuantumNous/new-api/internal/module/usage/contract"
-	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 )
 
 // rankingModelMetadata projects one billing snapshot for usage rankings.

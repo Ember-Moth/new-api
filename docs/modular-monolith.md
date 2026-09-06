@@ -42,7 +42,8 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 - [ ] billing/subscription 按业务职责拆分，并验证账务一致性。
 - [ ] usage 模块聚合日志与统计，覆盖 PostgreSQL/ClickHouse。
 - [ ] system 模块聚合系统配置、节点和调度；后台入口不再依赖 HTTP controller。
-- [ ] 根目录 `controller`、`service`、`model` 等横向大包消除；不存在换名后保留全部业务的通用大包。
+- [x] 根目录 `controller`、`service`、`model` 已清空，完成整包目录迁移。
+- [ ] `internal/legacy` 和 `internal/transport/http/controller` 的过渡实现继续按业务归属拆分，完成最终模块边界。
 - [ ] 模块实现、应用组装及基础设施依赖由架构检查约束；公开契约不形成循环。
 - [ ] 主应用和 RelayKit 独立构建、静态检查和有效回归测试通过；新库初始化与重复启动通过。
 - [ ] 路由、鉴权、计费、日志、插件和 Web 资源契约保持；文档和部署脚本反映最终布局。
@@ -51,7 +52,17 @@ HTTP 路由与公共中间件属于入站适配层，核心业务以 `context.Co
 
 当前处于实施阶段，整体目标尚未完成。
 
-按用户要求，优先拆分控制面的 CRUD。identity 的主要账户、安全凭据和会话管理、channel 配置、subscription 生命周期与支付、usage 日志统计、system 任务/节点/选项，以及 billing 充值结账均已归入业务模块。当前继续消除旧配置适配和账户计费运行时依赖，随后整理网关转发。最终根目录不得保留 controller、service、model；目录消除必须伴随业务归属清晰，不能将横向大包整体换名搬走。
+按用户最新要求，先完成目录迁移，再继续拆分逻辑。剩余 178 个文件保持原有 Go 包和函数实现，controller 整包迁至 internal/transport/http/controller，service/model 迁至 internal/legacy 下的同名包；导入路径与架构检查同步更新。已拆出的业务模块继续保持现有边界。目录迁移已经完成，旧包内部和包间的业务耦合仍待后续整理。
+
+当前迁移位置：
+
+| 原目录 | 当前位置 |
+|---|---|
+| controller/ | internal/transport/http/controller/ |
+| service/ | internal/legacy/service/ |
+| model/ | internal/legacy/model/ |
+
+下文前四十二批中的路径和验证命令记录的是当时状态；当前代码请按上表定位。
 
 已完成的第一批改动：
 
@@ -332,6 +343,13 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 月份输入严格解析，查询使用月初到下月月初的半开区间；记录和累计统计在只读 repeatable-read 事务中读取。累计奖励和令牌总额度用精确 JSON 数字表达，避免整数相加溢出。
 - 账单保留 USD/CNY/TOKENS、无限令牌与过期时间语义，先检查查询结果再访问数据；用户读取失败不再被后一次查询覆盖。Token usage 仍由原只读令牌鉴权保护，响应包含用量和模型限制，不返回密钥。
 - 支付合规确认由 paymentconfig 调用系统选项管理器一次事务保存五个字段，保留禁止 API access token 确认的限制；数据库错误不会发布部分确认配置。
+
+第四十三批按最新要求优先完成整包目录迁移：
+
+- controller、service、model 的剩余 178 个文件一次性移动到上表位置，保留 package 名称和原有实现。189 个 Go 文件中的相关导入路径同步更新。
+- 已逐个对照 HEAD 中的原文件，确认移动文件除导入路径外内容一致；根目录三个目录均不存在，也没有残留旧路径的 Go 导入。
+- 架构检查禁止所有生产代码重新导入旧根包，同时继续禁止已迁移模块依赖 internal/legacy 或入站适配层。目录移动没有放开已有模块的依赖边界。
+- 这一批完成目录层面的整理；业务拆分不作为本批迁移的前置条件，后续按用户优先级继续进行。
 
 ## 第一批验证（2026-09-05）
 
@@ -1265,3 +1283,24 @@ python3 /tmp/verify-new-api-pricing-startup.py
 DragonflyDB 集成验证缓存预扣 7、签到奖励 5、邀请转入 10 后缓存与最终数据库余额均为 108，认证版本不变且系统日志只有一条。签到审计另行分别写入真实 PostgreSQL 和 ClickHouse 隔离日志库，验证重复请求不重复记录。
 
 输出：`/tmp/new-api-wallet-control-build.log`、`/tmp/new-api-wallet-control-tests.log`、`/tmp/new-api-wallet-control-compliance-tests.log`、`/tmp/new-api-wallet-control-race.log`、`/tmp/new-api-wallet-control-dragonfly.log`、`/tmp/new-api-wallet-control-full-tests.log`、`/tmp/new-api-wallet-control-vet.log`、`/tmp/new-api-wallet-control-startup.log`。
+
+## 第四十三批验证（2026-09-06）
+
+本批按“先移动目录”的要求处理，178 个原文件除导入路径外内容一致。所有生产代码的旧 controller/service/model 导入已清除，根目录三个目录均不存在。已拆模块的依赖检查继续生效，业务函数未在本批重写。
+
+验证环境沿用 Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。以下检查全部通过：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./...)
+python3 /tmp/verify-new-api-pricing-startup.py
+```
+
+完整回归覆盖迁移后包路径、模块依赖约束及真实数据库/缓存。三种日志配置均使用新库启动并重启两次，schema 版本、保留数据和供应商唯一约束检查通过。
+
+输出：`/tmp/new-api-directory-move-build.log`、`/tmp/new-api-directory-move-tests.log`、`/tmp/new-api-directory-move-vet.log`、`/tmp/new-api-directory-move-startup.log`。
