@@ -28,6 +28,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/internal/legacy/relay/common"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/internal/migration/schema"
+	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
@@ -87,6 +88,69 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("channel routing and pricing load only from published snapshots", func(t *testing.T) {
+		previousMemory := common.MemoryCacheEnabled
+		common.MemoryCacheEnabled = false
+		t.Cleanup(func() {
+			common.MemoryCacheEnabled = previousMemory
+			require.NoError(t, client.Del(context.Background(), "config:snapshot:channels").Err())
+		})
+		writer := channelmodule.New(channelmodule.Dependencies{DB: database, Cache: client})
+		reader := channelmodule.New(channelmodule.Dependencies{Cache: client, ReadOnly: true})
+		require.Error(t, reader.ReloadChannelCache(t.Context()))
+		lowPriority, highPriority := int64(1), int64(9)
+		channel := model.Channel{Type: 1, Name: "snapshot-low", Key: "snapshot-secret", Status: common.ChannelStatusEnabled, Models: model.StringList{"snapshot-model"}, Group: model.StringList{"default"}, Priority: &lowPriority}
+		require.NoError(t, writer.InsertChannel(&channel))
+		higher := model.Channel{Type: 1, Name: "snapshot-high", Key: "higher-secret", Status: common.ChannelStatusEnabled, Models: model.StringList{"snapshot-model"}, Group: model.StringList{"default"}, Priority: &highPriority}
+		require.NoError(t, writer.InsertChannel(&higher))
+		t.Cleanup(func() {
+			require.NoError(t, database.Where("channel_id IN ?", []int{channel.Id, higher.Id}).Delete(&model.Ability{}).Error)
+			require.NoError(t, database.Delete(&model.Channel{}, []int{channel.Id, higher.Id}).Error)
+		})
+		require.NoError(t, writer.ReloadChannelCache(t.Context()))
+		require.NoError(t, reader.ReloadChannelCache(t.Context()))
+		assert.Equal(t, writer.ChannelSnapshotVersion(), reader.ChannelSnapshotVersion())
+		selected, err := reader.GetRandomSatisfiedChannel("default", "snapshot-model", 0, nil)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		assert.Equal(t, higher.Id, selected.Id)
+		assert.Equal(t, "higher-secret", selected.Key)
+		fallback, err := reader.GetRandomSatisfiedChannel("default", "snapshot-model", 1, nil)
+		require.NoError(t, err)
+		require.NotNil(t, fallback)
+		assert.Equal(t, channel.Id, fallback.Id)
+		assert.Equal(t, []string{"snapshot-model"}, reader.GetGroupEnabledModels("default"))
+		abilities, err := reader.EnabledPricingAbilities(t.Context())
+		require.NoError(t, err)
+		require.Len(t, abilities, 2)
+		assert.Equal(t, 1, abilities[0].ChannelType)
+		redacted, err := reader.GetChannelById(higher.Id, false)
+		require.NoError(t, err)
+		assert.Empty(t, redacted.Key)
+		full, err := reader.GetChannelById(higher.Id, true)
+		require.NoError(t, err)
+		assert.Equal(t, "higher-secret", full.Key)
+		// Failed optimistic local changes can be reconciled even if the source version is unchanged.
+		reader.CacheUpdateChannelStatus(higher.Id, common.ChannelStatusAutoDisabled)
+		require.NoError(t, reader.ReloadChannelCache(t.Context()))
+		selected, err = reader.GetRandomSatisfiedChannel("default", "snapshot-model", 0, nil)
+		require.NoError(t, err)
+		assert.Equal(t, higher.Id, selected.Id)
+		require.True(t, writer.UpdateChannelStatus(higher.Id, higher.Key, common.ChannelStatusManuallyDisabled, "test"))
+		require.NoError(t, writer.ReloadChannelCache(t.Context()))
+		require.NoError(t, reader.ReloadChannelCache(t.Context()))
+		selected, err = reader.GetRandomSatisfiedChannel("default", "snapshot-model", 0, nil)
+		require.NoError(t, err)
+		assert.Equal(t, channel.Id, selected.Id)
+		version := reader.ChannelSnapshotVersion()
+		require.NoError(t, database.Exec("ALTER TABLE abilities RENAME TO test_unavailable_abilities").Error)
+		err = writer.ReloadChannelCache(t.Context())
+		require.NoError(t, database.Exec("ALTER TABLE test_unavailable_abilities RENAME TO abilities").Error)
+		require.Error(t, err)
+		require.NoError(t, reader.ReloadChannelCache(t.Context()))
+		assert.Equal(t, version, reader.ChannelSnapshotVersion())
+	})
 
 	t.Run("versioned options publish and data readers never access PostgreSQL", func(t *testing.T) {
 		previous := common.OptionMap

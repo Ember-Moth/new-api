@@ -19,6 +19,19 @@ func (r *Runtime) GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error
 }
 
 func (r *Runtime) EnabledPricingAbilities(ctx context.Context) ([]AbilityWithChannel, error) {
+	if r.snapshot.readOnly {
+		r.channelSyncLock.RLock()
+		defer r.channelSyncLock.RUnlock()
+		result := make([]AbilityWithChannel, 0, len(r.snapshotAbilities))
+		for _, ability := range r.snapshotAbilities {
+			if ability.Enabled {
+				if channel := r.channelsIDM[ability.ChannelId]; channel != nil {
+					result = append(result, AbilityWithChannel{Ability: ability, ChannelType: channel.Type})
+				}
+			}
+		}
+		return result, nil
+	}
 	var abilities []AbilityWithChannel
 	err := r.db.WithContext(ctx).Table("abilities").
 		Select("abilities.*, channels.type as channel_type").
@@ -29,6 +42,9 @@ func (r *Runtime) EnabledPricingAbilities(ctx context.Context) ([]AbilityWithCha
 }
 
 func (r *Runtime) GetGroupEnabledModels(group string) []string {
+	if r.snapshot.readOnly {
+		return r.snapshotModels(&group)
+	}
 	var models []string
 	// Find distinct models
 	r.db.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
@@ -36,6 +52,9 @@ func (r *Runtime) GetGroupEnabledModels(group string) []string {
 }
 
 func (r *Runtime) GetEnabledModels() []string {
+	if r.snapshot.readOnly {
+		return r.snapshotModels(nil)
+	}
 	var models []string
 	// Find distinct models
 	r.db.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
@@ -43,6 +62,17 @@ func (r *Runtime) GetEnabledModels() []string {
 }
 
 func (r *Runtime) GetAllEnableAbilities() []Ability {
+	if r.snapshot.readOnly {
+		r.channelSyncLock.RLock()
+		defer r.channelSyncLock.RUnlock()
+		result := make([]Ability, 0, len(r.snapshotAbilities))
+		for _, ability := range r.snapshotAbilities {
+			if ability.Enabled {
+				result = append(result, ability)
+			}
+		}
+		return result
+	}
 	var abilities []Ability
 	r.db.Find(&abilities, "enabled = ?", true)
 	return abilities
@@ -99,6 +129,9 @@ func (r *Runtime) GetChannel(
 	retry int,
 	filters []dto.ChannelFilter,
 ) (*Channel, error) {
+	if r.snapshot.readOnly {
+		return r.GetRandomSatisfiedChannel(group, model, retry, filters)
+	}
 	var abilities []Ability
 	err := r.db.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
 	if err != nil {
@@ -326,4 +359,19 @@ func (r *Runtime) FixAbility() (int, int, error) {
 	}
 	r.InitChannelCache()
 	return successCount, failCount, nil
+}
+
+func (r *Runtime) snapshotModels(group *string) []string {
+	models := make(map[string]struct{})
+	for _, ability := range r.GetAllEnableAbilities() {
+		if group == nil || ability.Group == *group {
+			models[ability.Model] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(models))
+	for model := range models {
+		result = append(result, model)
+	}
+	sort.Strings(result)
+	return result
 }

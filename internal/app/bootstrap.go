@@ -61,6 +61,8 @@ func initResources() error {
 		return err
 	}
 	channelDeps := model.ChannelDependencies()
+	channelDeps.Cache = common.RDB
+	channelDeps.ReadOnly = !common.IsControlPlane
 	channelDeps.Pricing = channelPricing{}
 	channelDeps.Providers = channelprovider.Adapter{}
 	channelDeps.DisableChannel = service.DisableChannel

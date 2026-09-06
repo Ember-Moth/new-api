@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/samber/lo"
@@ -265,6 +265,23 @@ func (r *Runtime) SearchChannels(keyword string, group string, model string, idS
 // MemoryCacheEnabled is false. Direct use is appropriate only where fresh r.db
 // state is required, e.g. admin CRUD, channel testing, or cache (re)building.
 func (r *Runtime) GetChannelById(id int, selectAll bool) (*Channel, error) {
+	if r.snapshot.readOnly {
+		r.channelSyncLock.RLock()
+		defer r.channelSyncLock.RUnlock()
+		cached, ok := r.channelsIDM[id]
+		if !ok {
+			return nil, gorm.ErrRecordNotFound
+		}
+		copied, err := common.DeepCopy(cached)
+		if err != nil {
+			return nil, err
+		}
+		if !selectAll {
+			copied.Key = ""
+			copied.Keys = nil
+		}
+		return copied, nil
+	}
 	channel := &Channel{Id: id}
 	var err error = nil
 	if selectAll {
@@ -746,6 +763,25 @@ func (r *Runtime) SearchTags(keyword string, group string, model string, idSort 
 }
 
 func (r *Runtime) GetChannelsByIds(ids []int) ([]*Channel, error) {
+	if r.snapshot.readOnly {
+		channels := make([]*Channel, 0, len(ids))
+		seen := make(map[int]bool)
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			channel, err := r.GetChannelById(id, true)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			channels = append(channels, channel)
+		}
+		return channels, nil
+	}
 	var channels []*Channel
 	err := r.db.Where("id in (?)", ids).Find(&channels).Error
 	return channels, err

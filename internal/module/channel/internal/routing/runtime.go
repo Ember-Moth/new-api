@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/QuantumNous/new-api/internal/infra/configsync"
+
 	"github.com/QuantumNous/new-api/internal/infra/database/value"
 	"github.com/QuantumNous/new-api/internal/module/channel/entity"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
@@ -23,6 +25,8 @@ const commonKeyCol = `"key"`
 // Its callbacks expose the two cross-module effects: pricing invalidation and
 // accounting's optional channel-usage batching.
 type Runtime struct {
+	snapshot                     snapshotState
+	snapshotAbilities            []Ability
 	db                           *gorm.DB
 	changed                      func()
 	queueQuota                   func(int, int) bool
@@ -37,11 +41,15 @@ type Runtime struct {
 	taskAliasRebuildMu           sync.Mutex
 }
 
-func New(db *gorm.DB, changed func(), queueQuota func(int, int) bool) *Runtime {
+func New(db *gorm.DB, changed func(), queueQuota func(int, int) bool, configs ...SnapshotConfig) *Runtime {
 	if changed == nil {
 		changed = func() {}
 	}
-	return &Runtime{db: db, changed: changed, queueQuota: queueQuota}
+	config := SnapshotConfig{}
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	return &Runtime{db: db, changed: changed, queueQuota: queueQuota, snapshot: snapshotState{store: configsync.New(config.Cache, "channels"), configured: config.Cache != nil, readOnly: config.ReadOnly}}
 }
 
 // AdvancedConfigs returns the parsed routing configurations needed to build a

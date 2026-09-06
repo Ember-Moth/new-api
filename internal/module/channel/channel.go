@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/routing"
 	"github.com/QuantumNous/new-api/internal/module/channel/internal/upstream"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
@@ -33,6 +34,8 @@ type Service struct {
 }
 
 type Dependencies struct {
+	Cache             *redis.Client
+	ReadOnly          bool
 	DB                *gorm.DB
 	Pricing           CatalogPricing
 	RoutingChanged    func()
@@ -43,7 +46,7 @@ type Dependencies struct {
 }
 
 func New(deps Dependencies) *Service {
-	return &Service{Runtime: routing.New(deps.DB, deps.RoutingChanged, deps.QueueUsedQuota), prefillGroups: repo.NewPrefillGroups(deps.DB), catalog: repo.NewCatalog(deps.DB), pricing: deps.Pricing, upstream: upstream.New(), providers: deps.Providers, disable: deps.DisableChannel, notifyModels: deps.NotifyModelUpdate}
+	return &Service{Runtime: routing.New(deps.DB, deps.RoutingChanged, deps.QueueUsedQuota, routing.SnapshotConfig{Cache: deps.Cache, ReadOnly: deps.ReadOnly}), prefillGroups: repo.NewPrefillGroups(deps.DB), catalog: repo.NewCatalog(deps.DB), pricing: deps.Pricing, upstream: upstream.New(), providers: deps.Providers, disable: deps.DisableChannel, notifyModels: deps.NotifyModelUpdate}
 }
 
 func (s *Service) ListPrefillGroups(ctx context.Context, groupType string) ([]*contract.PrefillGroup, error) {

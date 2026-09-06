@@ -180,3 +180,26 @@ python3 /tmp/verify-new-api-planes.py
 新库两角色各启动两轮。数据面使用独立 PostgreSQL 登录角色，明确撤销其 `options` 表的全部权限；仍可从缓存启动，节点上报与发布端版本一致。运行中修改源配置后，数据面版本收敛，期间仍无该表读取权限。原登录会话、业务数据、签名消费凭证及 ClickHouse 日志重启保留。
 
 输出记录：`/tmp/new-api-config-{full-tests,build,vet,startup}.log`。渠道与插件配置、请求级快照、后台任务恢复、可靠计费交付和容器入口验证继续推进；整体目标未完成。
+
+## 第八批：渠道路由快照
+
+渠道与对应能力通过单条 PostgreSQL MVCC 查询读取，发布者先取得按 schema 区分的事务 advisory lock，防止迟到发布覆盖后续版本。控制面通过共享 configsync 发布完整渠道快照，数据面只读 DragonflyDB。选路、按 ID 获取配置、模型列表、定价能力投影和任务模型别名在数据面使用本地快照，替换不完整的新视图之前不会清空旧路由。
+
+启动显式检查快照加载结果，移除原 panic 后自动修复 abilities 的分支；后台订阅支持取消并保留周期补偿。路由映射一次性替换，保留现有本地多 Key 轮询位置。本地乐观修改会标记脏状态，使同一源版本也能校正未持久化的本地变更。节点上报 `info.extra.channels_version`。
+
+本批没有把所有渠道写入迁出数据面：额度累计、自动停用及多 Key 运行状态仍需在后续后台/计费路径中收敛。自动状态写入目前仍可能依赖控制面周期发布；请求级配置隔离和插件配置也未完成。
+
+验证使用 PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**，沿用前文三个 TEST_*_DSN：
+
+```sh
+GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+完整根模块与 RelayKit 测试通过。真实 DragonflyDB/PostgreSQL 回归覆盖无数据库连接的数据面选路、优先级回退、模型列表/能力、读取密钥时的副本隔离、渠道停用、同版本纠正本地状态，以及源查询失败保留旧快照。
+
+新库双角色各启动两轮。数据面的 PostgreSQL 角色被撤销 options、channels、abilities 权限，仅对 channels 额外授予额度累计所需的 id/used_quota 列权限。运行中创建渠道并发布后，通过真实 API Key 向数据面发送聊天请求，本地测试上游收到正确请求和渠道密钥，返回结果成功；重启后同样通过。该验证针对应用直连端口，尚未覆盖 Nginx/容器入口。
+
+输出：`/tmp/new-api-channel-snapshot-{full-tests,regression,dragonfly,build,vet,startup}.log`。下一批继续插件配置快照，再推进请求级快照、运行状态和可靠结算。

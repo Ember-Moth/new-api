@@ -3,8 +3,8 @@ package model
 import (
 	"sync"
 
-	"github.com/QuantumNous/new-api/internal/shared/dto"
 	channelmodule "github.com/QuantumNous/new-api/internal/module/channel"
+	"github.com/QuantumNous/new-api/internal/shared/dto"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"gorm.io/gorm"
 )
@@ -177,8 +177,6 @@ func UpdateAbilityByTag(tag string, newTag *string, priority *int64, weight *uin
 func FixAbility() (int, int, error) { return ChannelService().FixAbility() }
 
 func InitChannelCache() { ChannelService().InitChannelCache() }
-
-func SyncChannelCache(frequency int) { ChannelService().SyncChannelCache(frequency) }
 
 func GetRandomSatisfiedChannel(
 	group string,

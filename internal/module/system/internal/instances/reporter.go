@@ -16,11 +16,12 @@ import (
 )
 
 type ReportConfig struct {
-	OptionsVersion func() string
-	Node           common.NodeIdentity
-	Version        string
-	StartedAt      int64
-	Resources      func() contract.SystemInstanceResources
+	OptionsVersion  func() string
+	ChannelsVersion func() string
+	Node            common.NodeIdentity
+	Version         string
+	StartedAt       int64
+	Resources       func() contract.SystemInstanceResources
 }
 
 type Reporter struct {
@@ -94,6 +95,12 @@ func (r *Reporter) ReportCurrentSystemInstance(ctx context.Context) error {
 	}
 	if r.config.OptionsVersion != nil {
 		info.Extra = map[string]any{"options_version": r.config.OptionsVersion()}
+	}
+	if r.config.ChannelsVersion != nil {
+		if info.Extra == nil {
+			info.Extra = make(map[string]any)
+		}
+		info.Extra["channels_version"] = r.config.ChannelsVersion()
 	}
 	return r.registry.UpsertSystemInstance(ctx, identity.Name, info, r.config.StartedAt, common.GetTimestamp())
 }

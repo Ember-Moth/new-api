@@ -106,22 +106,11 @@ func Run(assets router.WebAssets) {
 		common.SysLog("memory cache enabled")
 		common.SysLog(fmt.Sprintf("sync frequency: %d seconds", common.SyncFrequency))
 
-		// Add panic recovery and retry for InitChannelCache
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					common.SysLog(fmt.Sprintf("InitChannelCache panic: %v, retrying once", r))
-					// Retry once
-					_, _, fixErr := model.FixAbility()
-					if fixErr != nil {
-						common.FatalLog(fmt.Sprintf("InitChannelCache failed: %s", fixErr.Error()))
-					}
-				}
-			}()
-			model.InitChannelCache()
-		}()
-
-		go model.SyncChannelCache(common.SyncFrequency)
+		if err := model.ChannelService().ReloadChannelCache(runCtx); err != nil {
+			common.FatalLog("failed to initialize channel snapshot: " + err.Error())
+			return
+		}
+		go model.ChannelService().WatchChannelCache(runCtx, common.SyncFrequency)
 	}
 
 	// Warm pricing after channel cache initialization so Advanced Custom
@@ -208,7 +197,7 @@ func Run(assets router.WebAssets) {
 	logService := usage.New(usage.Dependencies{Performance: performance, RankingMetadata: rankingModelMetadata, Aggregates: aggregates, DB: model.LOG_DB, ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
 	systemService := system.New(system.Dependencies{Cache: common.RDB, Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsControlPlane,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
-		InstanceReport: system.InstanceReportConfig{OptionsVersion: model.OptionManager().AppliedVersion, Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
+		InstanceReport: system.InstanceReportConfig{ChannelsVersion: model.ChannelService().ChannelSnapshotVersion, OptionsVersion: model.OptionManager().AppliedVersion, Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})
 	instanceReporterDone := systemService.StartSystemInstanceReporter(runCtx)
 	defer func() { cancelRun(); <-instanceReporterDone }()

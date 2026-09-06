@@ -1,30 +1,35 @@
 package routing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
-	"time"
 
+	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/shared/dto"
-	"github.com/QuantumNous/new-api/internal/infra/logger"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/internal/config/setting/ratio_setting"
 )
 
 func (r *Runtime) InitChannelCache() {
-	if !common.MemoryCacheEnabled {
+	if !common.MemoryCacheEnabled && !r.snapshot.configured && !r.snapshot.readOnly {
 		r.changed()
 		r.rebuildTaskAliasView()
 		return
 	}
+	if err := r.ReloadChannelCache(context.Background()); err != nil {
+		common.SysError("failed to reload channel snapshot: " + err.Error())
+	}
+}
+
+func (r *Runtime) applyChannelSnapshot(snapshot channelSnapshot) {
 	newChannelId2channel := make(map[int]*Channel)
 	newChannel2advancedCustomConfig := make(map[int]*kitdto.AdvancedCustomConfig)
-	var channels []*Channel
-	r.db.Find(&channels)
+	channels := snapshot.Channels
 	for _, channel := range channels {
 		newChannelId2channel[channel.Id] = channel
 		if channel.Type == constant.ChannelTypeAdvancedCustom {
@@ -33,11 +38,11 @@ func (r *Runtime) InitChannelCache() {
 			}
 		}
 	}
-	var abilities []*Ability
-	r.db.Find(&abilities)
 	groups := make(map[string]bool)
-	for _, ability := range abilities {
-		groups[ability.Group] = true
+	for _, channel := range channels {
+		for _, group := range channel.GetGroups() {
+			groups[group] = true
+		}
 	}
 	newGroup2model2channels := make(map[string]map[string][]int)
 	for group := range groups {
@@ -85,22 +90,16 @@ func (r *Runtime) InitChannelCache() {
 			}
 		}
 	}
+	r.snapshotAbilities = snapshot.Abilities
 	r.channelsIDM = newChannelId2channel
 	r.channel2advancedCustomConfig = newChannel2advancedCustomConfig
+	r.snapshot.dirty.Store(false)
 	r.channelSyncLock.Unlock()
 	// Release the routing lock before notifying projections: a pricing rebuild
 	// may read the parsed channel snapshot through AdvancedConfigs.
 	r.changed()
 	r.rebuildTaskAliasView()
-	common.SysLog("channels synced from database")
-}
 
-func (r *Runtime) SyncChannelCache(frequency int) {
-	for {
-		time.Sleep(time.Duration(frequency) * time.Second)
-		common.SysLog("syncing channels from database")
-		r.InitChannelCache()
-	}
 }
 
 func (r *Runtime) GetRandomSatisfiedChannel(
@@ -110,7 +109,7 @@ func (r *Runtime) GetRandomSatisfiedChannel(
 	filters []dto.ChannelFilter,
 ) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
-	if !common.MemoryCacheEnabled {
+	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
 		return r.GetChannel(group, model, retry, filters)
 	}
 
@@ -206,7 +205,7 @@ func (r *Runtime) GetRandomSatisfiedChannel(
 }
 
 func (r *Runtime) CacheGetChannel(id int) (*Channel, error) {
-	if !common.MemoryCacheEnabled {
+	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
 		return r.GetChannelById(id, true)
 	}
 	r.channelSyncLock.RLock()
@@ -220,7 +219,7 @@ func (r *Runtime) CacheGetChannel(id int) (*Channel, error) {
 }
 
 func (r *Runtime) CacheGetChannelInfo(id int) (*ChannelInfo, error) {
-	if !common.MemoryCacheEnabled {
+	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
 		channel, err := r.GetChannelById(id, true)
 		if err != nil {
 			return nil, err
@@ -238,7 +237,8 @@ func (r *Runtime) CacheGetChannelInfo(id int) (*ChannelInfo, error) {
 }
 
 func (r *Runtime) CacheUpdateChannelStatus(id int, status int) {
-	if !common.MemoryCacheEnabled {
+	defer r.snapshot.dirty.Store(true)
+	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
 		return
 	}
 	r.channelSyncLock.Lock()
@@ -263,7 +263,8 @@ func (r *Runtime) CacheUpdateChannelStatus(id int, status int) {
 }
 
 func (r *Runtime) CacheUpdateChannel(channel *Channel) {
-	if !common.MemoryCacheEnabled {
+	defer r.snapshot.dirty.Store(true)
+	if !common.MemoryCacheEnabled && !r.snapshot.readOnly {
 		return
 	}
 	r.channelSyncLock.Lock()

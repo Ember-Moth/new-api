@@ -81,17 +81,23 @@ func (r *Runtime) buildTaskAliasView(generation *jsplugin.RoutingGeneration) *ta
 		expiresAt:  time.Now().Add(taskAliasViewTTL),
 		byFold:     make(map[string]TaskAliasTarget),
 	}
-	if r.db == nil {
-		return view
-	}
-
 	var channels []Channel
-	err := r.db.Select("id", "type", "models", "model_mapping").
-		Where("status = ?", common.ChannelStatusEnabled).
-		Find(&channels).Error
-	if err != nil {
-		common.SysError(fmt.Sprintf("rebuild task alias view: %s", err.Error()))
-		return view
+	if r.snapshot.readOnly {
+		r.channelSyncLock.RLock()
+		for _, channel := range r.channelsIDM {
+			if channel.Status == common.ChannelStatusEnabled {
+				channels = append(channels, *channel)
+			}
+		}
+		r.channelSyncLock.RUnlock()
+	} else {
+		if r.db == nil {
+			return view
+		}
+		if err := r.db.Select("id", "type", "models", "model_mapping").Where("status = ?", common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
+			common.SysError(err.Error())
+			return view
+		}
 	}
 
 	drafts := make(map[string]*taskAliasDraft)
