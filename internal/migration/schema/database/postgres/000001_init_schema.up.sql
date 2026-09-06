@@ -450,23 +450,7 @@ CREATE INDEX idx_subscription_pre_consume_records_user_id ON subscription_pre_co
 
 CREATE INDEX idx_subscription_pre_consume_records_user_subscription_id ON subscription_pre_consume_records USING btree (user_subscription_id);
 
-CREATE TABLE system_instances (
-    node_name character varying(128) NOT NULL,
-    info text,
-    started_at bigint,
-    last_seen_at bigint,
-    created_at bigint,
-    updated_at bigint,
-    CONSTRAINT system_instances_pkey PRIMARY KEY (node_name)
-);
 
-CREATE INDEX idx_system_instances_created_at ON system_instances USING btree (created_at);
-
-CREATE INDEX idx_system_instances_last_seen_at ON system_instances USING btree (last_seen_at);
-
-CREATE INDEX idx_system_instances_started_at ON system_instances USING btree (started_at);
-
-CREATE INDEX idx_system_instances_updated_at ON system_instances USING btree (updated_at);
 
 CREATE TABLE system_task_locks (
     type character varying(64) NOT NULL,

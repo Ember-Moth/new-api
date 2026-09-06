@@ -206,7 +206,7 @@ func Run(assets router.WebAssets) {
 	// schedules and executes them. Control-plane-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	logService := usage.New(usage.Dependencies{Performance: performance, RankingMetadata: rankingModelMetadata, Aggregates: aggregates, DB: model.LOG_DB, ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
-	systemService := system.New(system.Dependencies{Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsControlPlane,
+	systemService := system.New(system.Dependencies{Cache: common.RDB, Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsControlPlane,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
 		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})

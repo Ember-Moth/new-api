@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/system/internal/instances"
 	"github.com/QuantumNous/new-api/internal/module/system/internal/options"
 	implementation "github.com/QuantumNous/new-api/internal/module/system/internal/tasks"
+	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
@@ -19,6 +20,7 @@ type Service struct {
 
 type InstanceReportConfig = instances.ReportConfig
 type Dependencies struct {
+	Cache          *redis.Client
 	Options        *Options
 	DB             *gorm.DB
 	NodeName       string
@@ -58,7 +60,7 @@ func New(deps Dependencies) *Service {
 	if optionManager == nil {
 		optionManager = NewOptions(OptionDependencies{DB: deps.DB})
 	}
-	registry := instances.NewRegistry(deps.DB)
+	registry := instances.NewRegistry(deps.Cache)
 	return &Service{
 		Manager:  optionManager,
 		Runtime:  implementation.New(implementation.Dependencies{DB: deps.DB, NodeName: deps.NodeName, Master: deps.Master, Logs: deps.Logs}),

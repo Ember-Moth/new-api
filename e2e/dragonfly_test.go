@@ -13,6 +13,9 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/module/billing"
 	billingentity "github.com/QuantumNous/new-api/internal/module/billing/entity"
+	"github.com/QuantumNous/new-api/internal/module/system"
+	systemcontract "github.com/QuantumNous/new-api/internal/module/system/contract"
+	systemhttp "github.com/QuantumNous/new-api/internal/module/system/transport/http"
 
 	billingcontract "github.com/QuantumNous/new-api/internal/module/billing/contract"
 
@@ -75,6 +78,112 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("instance heartbeats and guarded stale deletion", func(t *testing.T) {
+		cpuUsage := 12.5
+		config := system.InstanceReportConfig{Node: common.NodeIdentity{Name: "node-a"}, Version: "test-version", StartedAt: 1000, Resources: func() systemcontract.SystemInstanceResources {
+			return systemcontract.SystemInstanceResources{CPU: systemcontract.SystemInstanceResourceUsage{UsagePercent: cpuUsage}, Storage: systemcontract.SystemInstanceStorageMetrics{TotalBytes: 100, UsedBytes: 20, FreeBytes: 80, UsedPercent: 20}}
+		}}
+		service := system.New(system.Dependencies{Cache: common.RDB, Master: true, InstanceReport: config})
+		require.NoError(t, service.ReportCurrentSystemInstance(t.Context()))
+		cpuUsage = 25
+		require.NoError(t, service.ReportCurrentSystemInstance(t.Context()))
+		rows, err := service.ListSystemInstances(t.Context())
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		refreshed := rows[0]
+		t.Cleanup(func() {
+			require.NoError(t, common.RDB.Del(context.Background(), "system:instance:node-a", "system:instance:revived-node", "system:instance:stale-node", "system:instance:boundary-node").Err())
+		})
+		ttl, err := common.RDB.TTL(t.Context(), "system:instance:node-a").Result()
+		require.NoError(t, err)
+		assert.InDelta(t, (24 * time.Hour).Seconds(), ttl.Seconds(), 2)
+		var info systemcontract.SystemInstanceInfo
+		require.NoError(t, common.UnmarshalJsonStr(refreshed.Info, &info))
+		assert.Equal(t, "node-a", info.Node.Name)
+		assert.Equal(t, "test-version", info.Runtime.Version)
+		assert.Equal(t, int64(1000), info.Runtime.StartedAt)
+		assert.True(t, info.Role.IsMaster)
+		assert.Equal(t, 25.0, info.Resources.CPU.UsagePercent)
+		assert.Equal(t, uint64(100), info.Resources.Storage.TotalBytes)
+		now := common.GetTimestamp()
+		require.NoError(t, service.UpsertSystemInstance(t.Context(), "stale-node", map[string]string{"version": "old"}, 1, now-1000))
+		require.NoError(t, service.UpsertSystemInstance(t.Context(), "boundary-node", nil, 1, now-90))
+		deleted, err := service.DeleteStaleSystemInstance(t.Context(), "boundary-node", now)
+		require.NoError(t, err)
+		assert.False(t, deleted)
+		deleted, err = service.DeleteStaleSystemInstance(t.Context(), "boundary-node", now+1)
+		require.NoError(t, err)
+		assert.True(t, deleted)
+		// A heartbeat that refreshed an old row must protect it from the delete predicate.
+		require.NoError(t, service.UpsertSystemInstance(t.Context(), "revived-node", nil, 1, now-1000))
+		require.NoError(t, service.UpsertSystemInstance(t.Context(), "revived-node", nil, 2, now))
+		deleted, err = service.DeleteStaleSystemInstance(t.Context(), "revived-node", now)
+		require.NoError(t, err)
+		assert.False(t, deleted)
+		handler := systemhttp.New(service)
+		router := gin.New()
+		router.GET("/instances", handler.ListSystemInstances)
+		router.DELETE("/instances/stale", handler.DeleteStaleSystemInstances)
+		router.DELETE("/instances/:node_name", handler.DeleteStaleSystemInstance)
+		list := httptest.NewRecorder()
+		router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/instances", nil))
+		require.Equal(t, http.StatusOK, list.Code)
+		var response struct {
+			Success bool                                    `json:"success"`
+			Data    []systemcontract.SystemInstanceResponse `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(list.Body.Bytes(), &response))
+		require.True(t, response.Success)
+		require.Len(t, response.Data, 3)
+		assert.Equal(t, "stale-node", response.Data[2].NodeName)
+		assert.Equal(t, systemcontract.SystemInstanceStatusStale, response.Data[2].Status)
+		alive := httptest.NewRecorder()
+		router.ServeHTTP(alive, httptest.NewRequest(http.MethodDelete, "/instances/node-a", nil))
+		assert.Contains(t, alive.Body.String(), `"success":false`)
+		cleanup := httptest.NewRecorder()
+		router.ServeHTTP(cleanup, httptest.NewRequest(http.MethodDelete, "/instances/stale", nil))
+		assert.Contains(t, cleanup.Body.String(), `"deleted_count":1`)
+		rows, err = service.ListSystemInstances(t.Context())
+		require.NoError(t, err)
+		assert.Len(t, rows, 2)
+		// Expiration removes a node without PostgreSQL cleanup or a running worker.
+		require.NoError(t, common.RDB.PExpireAt(t.Context(), "system:instance:node-a", time.Unix(1, 0)).Err())
+		rows, err = service.ListSystemInstances(t.Context())
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "revived-node", rows[0].NodeName)
+	})
+
+	t.Run("instance hostname fallback and shutdown", func(t *testing.T) {
+		service := system.New(system.Dependencies{Cache: common.RDB, InstanceReport: system.InstanceReportConfig{Version: "fallback", StartedAt: 1}})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := service.StartSystemInstanceReporter(ctx)
+		require.Eventually(t, func() bool {
+			rows, err := service.Instances(t.Context())
+			return err == nil && len(rows) == 1
+		}, 2*time.Second, 10*time.Millisecond)
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("instance reporter did not stop")
+		}
+		hostname, err := os.Hostname()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, common.RDB.Del(context.Background(), "system:instance:"+hostname).Err()) })
+		rows, err := service.ListSystemInstances(t.Context())
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		row := rows[0]
+		assert.Equal(t, hostname, row.NodeName)
+		var info systemcontract.SystemInstanceInfo
+		require.NoError(t, common.UnmarshalJsonStr(row.Info, &info))
+		assert.Equal(t, common.NodeNameSourceHostname, info.Node.Source)
+		assert.True(t, info.Node.ShouldConfigureManually)
+		assert.False(t, info.Role.IsMaster)
+	})
 
 	t.Run("concurrent reservations cannot spend the same cached balance twice", func(t *testing.T) {
 		user := model.User{Username: "dragonfly-reserve", AffCode: "dragonfly-reserve", Quota: 10, AuthVersion: 1}

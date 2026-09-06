@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"os"
 	"strings"
 
 	"github.com/QuantumNous/new-api/internal/app/channelprovider"
@@ -33,6 +35,9 @@ func initResources() error {
 
 	// 加载环境变量
 	common.InitEnv()
+	if os.Getenv("REDIS_CONN_STRING") == "" {
+		return errors.New("REDIS_CONN_STRING is required for shared runtime state in DragonflyDB")
+	}
 
 	logger.SetupLogger()
 

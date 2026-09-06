@@ -1379,3 +1379,8 @@ python3 /tmp/verify-new-api-clickhouse-only.py
 ### 第四十六批：控制面与数据面监听角色
 
 新增 `APP_ROLE=control|data`，移除 `NODE_TYPE`。管理、前端与转发路由分离，迁移/授权初始化/维护仅控制面执行，提供统一 `/healthz`。Compose 拆分两个应用进程及统一 Nginx 入口。根模块与 RelayKit 测试、build/vet，以及 PostgreSQL 18.6、ClickHouse 26.9.1.762、DragonflyDB v1.40.2 上的新库双角色两轮启动验证通过。容器运行时不可用，入口代理集成验证待补。详细边界及后续状态、配置、账务工作见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第四十七批：节点心跳迁入 DragonflyDB
+
+系统实例注册、读取和离线清理由 DragonflyDB 接管，24 小时自动过期，Lua 保证离线删除与心跳更新的原子性。PostgreSQL 初始 schema 移除节点状态表和索引，应用启动要求共享 DragonflyDB。原节点回归迁入真实 DragonflyDB 集成套件；新库两角色各两轮启动、业务数据保留、节点缓存 TTL 与主库无节点状态表验证通过。执行租约、短期流程、配置发布和可靠结算继续推进。

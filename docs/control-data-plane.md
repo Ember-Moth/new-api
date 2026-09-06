@@ -42,3 +42,24 @@ python3 /tmp/verify-new-api-planes.py
 
 本地验证输出：`/tmp/new-api-plane-build.log`、`/tmp/new-api-plane-tests.log`、`/tmp/new-api-plane-vet.log`、`/tmp/new-api-plane-startup.log`。临时验证脚本是本次执行记录，长期路由契约由仓库内 `TestApplicationPlaneRouteIsolation` 维护。
 
+
+## 第二批：DragonflyDB 节点心跳
+
+节点状态注册器只依赖注入的 DragonflyDB 客户端，不再依赖 GORM/PostgreSQL。每个节点独立键、24 小时 TTL；上报周期 30 秒、离线阈值 90 秒。列表容忍 SCAN 重复以及读取时过期；删除通过 Lua 原子检查最后心跳，避免删掉刚恢复的节点。PostgreSQL 初始 SQL 中的 `system_instances` 表与索引已移除，生产启动强制配置 `REDIS_CONN_STRING`。
+
+原节点报告、资源更新、重复上报、90 秒边界、恢复后禁止删除、批量清理、hostname 回退与取消退出回归迁到 `e2e/dragonfly_test.go` 的真实 DragonflyDB 测试，并覆盖 TTL 和服务端过期。注册器测试不注入 PostgreSQL，验证节点能力不依赖业务库。
+
+验证继续使用 PostgreSQL 18.6、ClickHouse 26.9.1.762、DragonflyDB df-v1.40.2 及上文 DSN：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+# 使用上文 TEST_POSTGRES_DSN / TEST_CLICKHOUSE_DSN / TEST_DRAGONFLY_DSN
+GOWORK=off go test ./e2e ./internal/module/system/... ./internal/migration/... -count=1
+GOWORK=off make test
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+两角色再次在新建数据库上各启动两轮，确认 PostgreSQL 无节点状态表、DragonflyDB 上报与 TTL 正常，缺少 DragonflyDB 配置在迁移前被拒绝，业务数据和 ClickHouse 日志重启保留。日志位于 `/tmp/new-api-instance-{tests,full-tests,build,vet,startup}.log`。
+
+下一批继续迁移执行租约和短期认证流程；配置版本发布与可靠结算尚未完成。

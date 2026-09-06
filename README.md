@@ -321,7 +321,7 @@ docker run --name new-api -d --restart always \
 | `USER_SESSION_HOURLY_ALERT_THRESHOLD` | 全局每小时 Session 签发告警阈值；只告警，不拒绝登录 | `5000` |
 | `CRYPTO_SECRET` | 缓存键 HMAC 密钥；共享 DragonflyDB 的节点必须使用相同有效值 | 默认跟随 `SESSION_SECRET` |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
-| `REDIS_CONN_STRING` | DragonflyDB 连接字符串                                                  | - |
+| `REDIS_CONN_STRING` | 必填：所有实例共享的 DragonflyDB 连接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |
 | `MAX_REQUEST_BODY_MB` | 请求体最大大小（MB，**解压后**计；防止超大请求/zip bomb 导致内存暴涨），超过将返回 `413` | `32` |
@@ -409,13 +409,9 @@ docker run --name new-api -d --restart always \
 
 登录 Session 和单用户活跃数/签发数限制均以数据库为权威。DragonflyDB 中的 Session 仅为短期缓存，TTL 跟随 `SYNC_FREQUENCY`（默认 60 秒），且不会超过 Session 的剩余寿命。
 
-| DragonflyDB 拓扑 | Session 状态传播 | 限流语义 |
-| --- | --- | --- |
-| 所有节点共享 DragonflyDB | 撤销和版本发布通常即时传播 | DragonflyDB 限流额度在节点间共享 |
-| 每个节点使用独立 DragonflyDB | 最迟在有效 `SYNC_FREQUENCY` 内回源数据库收敛；版本轮换后，新 Token 在持有旧缓存的节点上可能短暂返回 401 | 每个节点独立计数，集群总额度最坏约为单节点阈值乘以节点数 |
-| 不使用 DragonflyDB | 每次 Session 校验直接读取数据库 | 各节点使用独立的内存限流额度 |
+应用启动必须配置 `REDIS_CONN_STRING`，所有实例共用同一个 DragonflyDB 逻辑数据库。会话撤销与版本发布通常即时传播，限流额度在实例之间共享。节点心跳仅存 DragonflyDB：每 30 秒更新、90 秒未上报视为离线，记录在最后一次写入 24 小时后自动过期。PostgreSQL 不再创建 `system_instances` 表。
 
-缩短 `SYNC_FREQUENCY` 可减小独立 DragonflyDB 的陈旧窗口，但每个活跃 SID 在每个节点上会按该 TTL 增加一次数据库主键点查。上述保证只让 Session 鉴权在不同拓扑下保持有界陈旧；限流和其他 DragonflyDB 控制面缓存仍受拓扑影响。
+Session 的持久化与认证流程仍是后续状态迁移范围；当前仍保留数据库回源校验。
 
 Token、Origin 校验和 PAT 契约见[用户鉴权与登录会话](./docs/authentication.md)。
 
@@ -509,4 +505,4 @@ Docker Compose 会启动两个应用进程和 Nginx 入口，仍通过 `http://l
 
 两种角色均提供 `/healthz`；默认直接调试端口仅绑定本机，控制面 `3001`、数据面 `3002`。生产入口将 `/api/*`、前端与账单查询送到控制面，将 `/v1/*`（账单查询除外）、`/v1beta/*`、`/pg/*`、Midjourney 路径送到数据面。自定义插件若声明其他路径，须在 `deploy/nginx.conf` 补充对应的数据面转发规则。
 
-当前数据面仍访问 PostgreSQL 进行鉴权、计费和任务持久化。本批完成监听接口与维护任务的角色隔离；共享临时状态迁入 DragonflyDB、配置主动发布和可靠结算尚在后续实施中。部署边界及验证见 [控制面与数据面拆分](docs/control-data-plane.md)。
+当前数据面仍访问 PostgreSQL 进行鉴权、计费和任务持久化。本批完成监听接口与维护任务的角色隔离；节点心跳已迁入 DragonflyDB；执行租约、短期流程状态、配置主动发布和可靠结算仍在后续实施中。部署边界及验证见 [控制面与数据面拆分](docs/control-data-plane.md)。
