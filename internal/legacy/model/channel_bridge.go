@@ -79,11 +79,11 @@ func BatchInsertChannels(channels []Channel) error {
 
 func BatchDeleteChannels(ids []int) (int64, error) { return ChannelService().BatchDeleteChannels(ids) }
 
-func GetChannelPollingLock(channelId int) *sync.Mutex {
-	return ChannelService().GetChannelPollingLock(channelId)
+func GetChannelKeyLock(channelId int) *sync.Mutex {
+	return ChannelService().GetChannelKeyLock(channelId)
 }
 
-func CleanupChannelPollingLocks() { ChannelService().CleanupChannelPollingLocks() }
+func CleanupChannelKeyLocks() { ChannelService().CleanupChannelKeyLocks() }
 
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) bool {
 	return ChannelService().UpdateChannelStatus(channelId, usingKey, status, reason)

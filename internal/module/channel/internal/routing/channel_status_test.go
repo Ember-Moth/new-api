@@ -37,10 +37,9 @@ func TestUpdateChannelStatusPersistsMultiKeyState(t *testing.T) {
 		Key:    "key-a\nkey-b",
 		Status: common.ChannelStatusEnabled,
 		ChannelInfo: ChannelInfo{
-			IsMultiKey:           true,
-			MultiKeySize:         2,
-			MultiKeyMode:         constant.MultiKeyModePolling,
-			MultiKeyPollingIndex: 1,
+			IsMultiKey:   true,
+			MultiKeySize: 2,
+			MultiKeyMode: constant.MultiKeyModePolling,
 		},
 	}
 	require.NoError(t, db.Create(&channel).Error)
@@ -54,7 +53,6 @@ func TestUpdateChannelStatusPersistsMultiKeyState(t *testing.T) {
 	assert.Equal(t, common.ChannelStatusAutoDisabled, stored.ChannelInfo.MultiKeyStatusList[0])
 	assert.Equal(t, "provider rejected key", stored.ChannelInfo.MultiKeyDisabledReason[0])
 	assert.NotZero(t, stored.ChannelInfo.MultiKeyDisabledTime[0])
-	assert.Equal(t, 1, stored.ChannelInfo.MultiKeyPollingIndex)
 }
 
 func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.T) {
@@ -75,10 +73,9 @@ func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.
 	require.NoError(t, err)
 
 	concurrentChannelInfo := ChannelInfo{
-		IsMultiKey:           true,
-		MultiKeySize:         2,
-		MultiKeyMode:         constant.MultiKeyModePolling,
-		MultiKeyPollingIndex: 1,
+		IsMultiKey:   true,
+		MultiKeySize: 2,
+		MultiKeyMode: constant.MultiKeyModePolling,
 	}
 	require.NoError(t, db.Model(&Channel{}).Where("id = ?", channel.Id).Updates(map[string]any{
 		"key":          "rotated-key",

@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/go-redis/redis/v8"
+
 	"github.com/QuantumNous/new-api/internal/infra/configsync"
 
 	"github.com/QuantumNous/new-api/internal/infra/database/value"
@@ -25,13 +27,14 @@ const commonKeyCol = `"key"`
 // Its callbacks expose the two cross-module effects: pricing invalidation and
 // accounting's optional channel-usage batching.
 type Runtime struct {
+	cache                        *redis.Client
 	snapshot                     snapshotState
 	snapshotAbilities            []Ability
 	db                           *gorm.DB
 	changed                      func()
 	queueQuota                   func(int, int) bool
 	channelStatusLock            sync.Mutex
-	channelPollingLocks          sync.Map
+	channelKeyLocks              sync.Map
 	fixLock                      sync.Mutex
 	group2model2channels         map[string]map[string][]int
 	channelsIDM                  map[int]*Channel
@@ -49,7 +52,7 @@ func New(db *gorm.DB, changed func(), queueQuota func(int, int) bool, configs ..
 	if len(configs) > 0 {
 		config = configs[0]
 	}
-	return &Runtime{db: db, changed: changed, queueQuota: queueQuota, snapshot: snapshotState{store: configsync.New(config.Cache, "channels"), configured: config.Cache != nil, readOnly: config.ReadOnly}}
+	return &Runtime{cache: config.Cache, db: db, changed: changed, queueQuota: queueQuota, snapshot: snapshotState{store: configsync.New(config.Cache, "channels"), configured: config.Cache != nil, readOnly: config.ReadOnly}}
 }
 
 // AdvancedConfigs returns the parsed routing configurations needed to build a

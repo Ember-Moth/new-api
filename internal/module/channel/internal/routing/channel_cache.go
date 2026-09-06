@@ -77,17 +77,10 @@ func (r *Runtime) applyChannelSnapshot(snapshot channelSnapshot) {
 	r.channelSyncLock.Lock()
 	r.group2model2channels = newGroup2model2channels
 	//r.channelsIDM = newChannelId2channel
-	for i, channel := range newChannelId2channel {
+	for _, channel := range newChannelId2channel {
 		if channel.ChannelInfo.IsMultiKey {
 			channel.Keys = channel.GetKeys()
-			if channel.ChannelInfo.MultiKeyMode == constant.MultiKeyModePolling {
-				if oldChannel, ok := r.channelsIDM[i]; ok {
-					// 存在旧的渠道，如果是多key且轮询，保留轮询索引信息
-					if oldChannel.ChannelInfo.IsMultiKey && oldChannel.ChannelInfo.MultiKeyMode == constant.MultiKeyModePolling {
-						channel.ChannelInfo.MultiKeyPollingIndex = oldChannel.ChannelInfo.MultiKeyPollingIndex
-					}
-				}
-			}
+
 		}
 	}
 	r.snapshotAbilities = snapshot.Abilities
@@ -276,8 +269,8 @@ func (r *Runtime) CacheUpdateChannel(channel *Channel) {
 	if r.channelsIDM == nil {
 		r.channelsIDM = make(map[int]*Channel)
 	}
-	if oldChannel, ok := r.channelsIDM[channel.Id]; ok {
-		logger.LogDebug(nil, "CacheUpdateChannel before: id=%d, name=%s, status=%d, polling_index=%d", channel.Id, channel.Name, channel.Status, oldChannel.ChannelInfo.MultiKeyPollingIndex)
+	if _, ok := r.channelsIDM[channel.Id]; ok {
+		logger.LogDebug(nil, "CacheUpdateChannel before: id=%d, name=%s, status=%d", channel.Id, channel.Name, channel.Status)
 	}
 	r.channelsIDM[channel.Id] = channel
 	if r.channel2advancedCustomConfig == nil {
@@ -289,7 +282,7 @@ func (r *Runtime) CacheUpdateChannel(channel *Channel) {
 			r.channel2advancedCustomConfig[channel.Id] = config
 		}
 	}
-	logger.LogDebug(nil, "CacheUpdateChannel after: id=%d, name=%s, status=%d, polling_index=%d", channel.Id, channel.Name, channel.Status, channel.ChannelInfo.MultiKeyPollingIndex)
+	logger.LogDebug(nil, "CacheUpdateChannel after: id=%d, name=%s, status=%d", channel.Id, channel.Name, channel.Status)
 	// Notify pricing after releasing the routing lock; a projection refresh may
 	// read AdvancedConfigs and must not re-enter the same lock.
 	r.channelSyncLock.Unlock()

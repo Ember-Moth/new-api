@@ -1419,3 +1419,8 @@ OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/�
 ### 第五十四批：插件配置快照
 
 插件覆盖集合改为控制面发布、数据面只读 DragonflyDB，保留整批编译发布与 last-good 行为。插件初始化先于系统任务启动，节点上报完整应用版本。修复一个依赖 VM 复用的模型漂移测试。完整测试、build/vet、禁止 task_plugins 查询的数据面动态路由热加载及重启验证通过，详见 [控制面与数据面拆分](control-data-plane.md)。剩余运行状态和可靠结算继续推进。
+
+
+### 第五十五批：多 Key 轮询游标迁入 DragonflyDB
+
+轮询改用按渠道/密钥池隔离的有界 Lua 游标，移除 PostgreSQL 和前端配置中的 polling index。真实跨节点轮询及重启后继续使用下一枚 Key 的转发验证、完整 Go 测试、前端类型/lint/14 项测试通过。自动停用状态和结算仍待继续，见 [控制面与数据面拆分](control-data-plane.md)。

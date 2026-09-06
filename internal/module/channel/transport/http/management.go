@@ -13,9 +13,9 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/infra/httpclient"
 
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
-	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 
 	"github.com/gin-gonic/gin"
@@ -1164,7 +1164,7 @@ func (h *Handler) ManageMultiKeys(c *gin.Context) {
 		})
 	}
 
-	lock := h.channel.GetChannelPollingLock(channel.Id)
+	lock := h.channel.GetChannelKeyLock(channel.Id)
 	lock.Lock()
 	defer lock.Unlock()
 

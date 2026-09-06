@@ -514,3 +514,5 @@ Docker Compose 会启动两个应用进程和 Nginx 入口，仍通过 `http://l
 渠道路由由控制面发布到 DragonflyDB，数据面从快照选择渠道、列出模型及构建定价能力。节点 `info.extra.channels_version` 表示已应用版本。渠道 CRUD 与周期刷新会发布新快照；额度记账和自动停用等写入尚未完全从数据面移出。
 
 插件覆盖配置由控制面发布到 DragonflyDB，数据面不读取 `task_plugins`。节点 `info.extra.plugins_version` 仅在整批配置完整应用时上报版本；部分编译/路由失败时为空。坏插件保留已有可用版本，源快照读取失败保留当前运行代；插件初始化完成后才启动系统任务执行器。
+
+多 Key 的 polling 模式使用 DragonflyDB 共享游标，跨实例原子选择下一个可用密钥。游标按渠道和密钥列表指纹隔离，空闲 24 小时后过期；不再写入 PostgreSQL `channel_info` 或前端渠道配置。随机模式保持原有行为。

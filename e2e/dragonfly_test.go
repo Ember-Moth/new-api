@@ -36,6 +36,7 @@ import (
 	usersessions "github.com/QuantumNous/new-api/internal/module/identity/sessions"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
@@ -89,6 +90,72 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("multi-key polling shares a bounded cursor without PostgreSQL writes", func(t *testing.T) {
+		node := redis.NewClient(client.Options())
+		t.Cleanup(func() { _ = node.Close() })
+		one := channelmodule.New(channelmodule.Dependencies{Cache: client, ReadOnly: true})
+		two := channelmodule.New(channelmodule.Dependencies{Cache: node, ReadOnly: true})
+		channel := model.Channel{Name: "shared-key-pool", Type: 1, Key: "key-a\nkey-b\nkey-c", Status: common.ChannelStatusEnabled, ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeySize: 3, MultiKeyMode: constant.MultiKeyModePolling, MultiKeyStatusList: map[int]int{1: common.ChannelStatusAutoDisabled}}}
+		require.NoError(t, database.Create(&channel).Error)
+		t.Cleanup(func() { require.NoError(t, database.Delete(&model.Channel{}, channel.Id).Error) })
+		var before string
+		require.NoError(t, database.Raw("SELECT channel_info::text FROM channels WHERE id = ?", channel.Id).Scan(&before).Error)
+		for i, expected := range []string{"key-a", "key-c", "key-a", "key-c"} {
+			worker := one
+			if i%2 == 1 {
+				worker = two
+			}
+			key, _, apiErr := worker.GetNextEnabledKey(&channel)
+			require.Nil(t, apiErr)
+			assert.Equal(t, expected, key)
+		}
+		start := make(chan struct{})
+		results := make(chan string, 2)
+		failures := make(chan bool, 2)
+		for _, worker := range []*channelmodule.Service{one, two} {
+			go func() {
+				<-start
+				key, _, apiErr := worker.GetNextEnabledKey(&channel)
+				results <- key
+				failures <- apiErr != nil
+			}()
+		}
+		close(start)
+		assert.ElementsMatch(t, []string{"key-a", "key-c"}, []string{<-results, <-results})
+		assert.False(t, <-failures)
+		assert.False(t, <-failures)
+		rotated := channel
+		rotated.Key = "rotated-a\nrotated-b"
+		rotated.Keys = nil
+		rotated.ChannelInfo.MultiKeyStatusList = nil
+		key, _, apiErr := one.GetNextEnabledKey(&rotated)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "rotated-a", key)
+		_, _, apiErr = two.GetNextEnabledKey(&channel)
+		require.Nil(t, apiErr)
+		key, _, apiErr = two.GetNextEnabledKey(&rotated)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "rotated-b", key)
+		keys, err := client.Keys(t.Context(), fmt.Sprintf("channel:poll:%d:*", channel.Id)).Result()
+		require.NoError(t, err)
+		require.Len(t, keys, 2)
+		for _, key := range keys {
+			ttl, err := client.TTL(t.Context(), key).Result()
+			require.NoError(t, err)
+			assert.InDelta(t, 86400, ttl.Seconds(), 2)
+			assert.NotContains(t, key, "key-a")
+		}
+		t.Cleanup(func() { require.NoError(t, client.Del(context.Background(), keys...).Err()) })
+		var after string
+		require.NoError(t, database.Raw("SELECT channel_info::text FROM channels WHERE id = ?", channel.Id).Scan(&after).Error)
+		assert.Equal(t, before, after)
+		assert.NotContains(t, after, "multi_key_polling_index")
+		require.NoError(t, node.Close())
+		key, _, apiErr = two.GetNextEnabledKey(&channel)
+		require.NotNil(t, apiErr)
+		assert.Empty(t, key)
+	})
 
 	t.Run("plugin snapshots compile without a database and retain the last good generation", func(t *testing.T) {
 		oldRegistry := jsplugin.DefaultRegistry

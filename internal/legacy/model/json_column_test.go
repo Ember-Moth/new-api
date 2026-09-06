@@ -21,7 +21,7 @@ func TestJSONColumnValuersReturnString(t *testing.T) {
 		{
 			name:   "ChannelInfo",
 			valuer: ChannelInfo{IsMultiKey: true, MultiKeySize: 2},
-			want:   `{"is_multi_key":true,"multi_key_size":2,"multi_key_status_list":null,"multi_key_polling_index":0,"multi_key_mode":""}`,
+			want:   `{"is_multi_key":true,"multi_key_size":2,"multi_key_status_list":null,"multi_key_mode":""}`,
 		},
 		{
 			name:   "Properties",

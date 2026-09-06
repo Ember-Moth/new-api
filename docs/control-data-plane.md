@@ -226,3 +226,29 @@ python3 /tmp/verify-new-api-planes.py
 新库双角色两轮启动中，数据面账号被禁止读取 `task_plugins`，仍能在运行中加载新增插件的动态路由，重启后继续可用。该路由在数据面进入正常鉴权拦截，在控制面返回 404；没有执行测试插件的业务任务。原生 OpenAI 请求仍通过受限数据面转发到本地测试上游，业务数据、会话、日志和安全凭证保留。
 
 输出：`/tmp/new-api-plugin-snapshot-{tests,dragonfly,adaptor,full-tests,build,vet,startup}.log`。该批完成插件配置传输和初始化顺序，尚未完成所有运行状态、请求级配置隔离、后台任务恢复、可靠结算以及 Nginx/容器入口验证。
+
+## 第十批：共享多 Key 轮询游标
+
+polling 模式由 DragonflyDB Lua 原子选取下一个可用密钥，游标始终限制在密钥池范围内，跳过已停用密钥。键名包含渠道 ID 和密钥列表 HMAC 指纹，缓存不保存密钥明文；密钥池变化后的新游标不受旧快照请求影响。空闲 24 小时后自动过期。缓存不可用时返回选 Key 错误，不退回本地独立轮询。
+
+移除 `ChannelInfo.MultiKeyPollingIndex`、数据库序列化字段及前端 Zod 默认值。轮询不再触发 SaveChannelInfo，也不再在渠道快照刷新时搬运本地游标。原 per-channel mutex 更名为 key-state lock，继续保护进程内的密钥状态编辑；自动停用状态的共享与写入路径仍待下一批处理。
+
+验证使用 PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**，沿用前文 TEST_*_DSN：
+
+```sh
+GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+cd web
+bun install --frozen-lockfile
+bun run typecheck
+bunx --no-install oxlint -c .oxlintrc.json src/features/channels/types.ts
+bun run test src/features/channels/lib/__tests__
+```
+
+完整 Go/RelayKit 测试通过。真实 DragonflyDB 回归覆盖跨客户端连续轮询、并发轮次、跳过禁用项、密钥池切换隔离、TTL、缓存失败及 PostgreSQL JSON 不被轮询修改。新库双角色两轮启动的真实转发使用 polling 密钥池，重启后的下一次请求使用下一枚密钥，且渠道 JSON 没有游标字段。
+
+前端依赖按锁文件安装，类型检查与改动文件 lint 通过；渠道相关 5 个测试文件、14 项测试通过。没有新增界面文案或视觉改动。
+
+输出：`/tmp/new-api-polling-{full-tests,build,vet,startup,typecheck,lint,web-tests}.log`。自动停用状态、后台任务恢复、可靠结算和入口容器验证仍未完成。

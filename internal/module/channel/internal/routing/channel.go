@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/QuantumNous/new-api/internal/infra/logger"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/shared/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -107,7 +106,7 @@ func (r *Runtime) GetNextEnabledKey(channel *Channel) (string, int, *types.NewAP
 		return "", 0, types.NewError(errors.New("no keys available"), types.ErrorCodeChannelNoAvailableKey)
 	}
 
-	lock := r.GetChannelPollingLock(channel.Id)
+	lock := r.GetChannelKeyLock(channel.Id)
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -143,37 +142,11 @@ func (r *Runtime) GetNextEnabledKey(channel *Channel) (string, int, *types.NewAP
 		selectedIdx := enabledIdx[rand.Intn(len(enabledIdx))]
 		return keys[selectedIdx], selectedIdx, nil
 	case constant.MultiKeyModePolling:
-		// Use channel-specific lock to ensure thread-safe polling
-
-		channelInfo, err := r.CacheGetChannelInfo(channel.Id)
+		index, err := r.nextPollingIndex(channel.Id, keys, enabledIdx)
 		if err != nil {
 			return "", 0, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
-		defer func() {
-			if common.DebugEnabled {
-				logger.LogDebug(nil, "channel %d polling index: %d", channel.Id, channel.ChannelInfo.MultiKeyPollingIndex)
-			}
-			if !common.MemoryCacheEnabled {
-				_ = r.SaveChannelInfo(channel)
-			} else {
-				// r.CacheUpdateChannel(channel)
-			}
-		}()
-		// Start from the saved polling index and look for the next enabled key
-		start := channelInfo.MultiKeyPollingIndex
-		if start < 0 || start >= len(keys) {
-			start = 0
-		}
-		for i := 0; i < len(keys); i++ {
-			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled {
-				// update polling index for next call (point to the next position)
-				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
-				return keys[idx], idx, nil
-			}
-		}
-		// Fallback – should not happen, but return first enabled key
-		return keys[enabledIdx[0]], enabledIdx[0], nil
+		return keys[index], index, nil
 	default:
 		// Unknown mode, default to first enabled key (or original key string)
 		return keys[enabledIdx[0]], enabledIdx[0], nil
@@ -441,20 +414,20 @@ func (r *Runtime) DeleteChannel(channel *Channel) error {
 	return err
 }
 
-// GetChannelPollingLock returns or creates a mutex for the given channel ID
-func (r *Runtime) GetChannelPollingLock(channelId int) *sync.Mutex {
-	if lock, exists := r.channelPollingLocks.Load(channelId); exists {
+// GetChannelKeyLock returns or creates a mutex for the given channel ID
+func (r *Runtime) GetChannelKeyLock(channelId int) *sync.Mutex {
+	if lock, exists := r.channelKeyLocks.Load(channelId); exists {
 		return lock.(*sync.Mutex)
 	}
 	// Create new lock for this channel
 	newLock := &sync.Mutex{}
-	actual, _ := r.channelPollingLocks.LoadOrStore(channelId, newLock)
+	actual, _ := r.channelKeyLocks.LoadOrStore(channelId, newLock)
 	return actual.(*sync.Mutex)
 }
 
-// CleanupChannelPollingLocks removes locks for channels that no longer exist
+// CleanupChannelKeyLocks removes locks for channels that no longer exist
 // This is optional and can be called periodically to prevent memory leaks
-func (r *Runtime) CleanupChannelPollingLocks() {
+func (r *Runtime) CleanupChannelKeyLocks() {
 	var activeChannelIds []int
 	r.db.Model(&Channel{}).Pluck("id", &activeChannelIds)
 
@@ -463,10 +436,10 @@ func (r *Runtime) CleanupChannelPollingLocks() {
 		activeChannelSet[id] = true
 	}
 
-	r.channelPollingLocks.Range(func(key, value interface{}) bool {
+	r.channelKeyLocks.Range(func(key, value interface{}) bool {
 		channelId := key.(int)
 		if !activeChannelSet[channelId] {
-			r.channelPollingLocks.Delete(channelId)
+			r.channelKeyLocks.Delete(channelId)
 		}
 		return true
 	})
@@ -543,12 +516,11 @@ func (r *Runtime) UpdateChannelStatus(channelId int, usingKey string, status int
 		defer r.channelStatusLock.Unlock()
 	}
 
-	// ChannelInfo stores both multi-key status and the polling cursor. Hold the
-	// same per-channel lock from the first read through persistence so neither
-	// writer can save a stale JSON snapshot over the other.
-	pollingLock := r.GetChannelPollingLock(channelId)
-	pollingLock.Lock()
-	defer pollingLock.Unlock()
+	// Serialize local key-status edits. The shared polling cursor is held in
+	// DragonflyDB and is never persisted as channel configuration.
+	keyLock := r.GetChannelKeyLock(channelId)
+	keyLock.Lock()
+	defer keyLock.Unlock()
 
 	if common.MemoryCacheEnabled {
 		channelCache, _ := r.CacheGetChannel(channelId)
