@@ -1,26 +1,20 @@
 package common
 
 import (
+	"context"
+	"errors"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
-
-type verificationValue struct {
-	code string
-	time time.Time
-}
 
 const (
 	EmailVerificationPurpose = "v"
 	PasswordResetPurpose     = "r"
 )
 
-var verificationMutex sync.Mutex
-var verificationMap map[string]verificationValue
-var verificationMapMaxSize = 10
 var VerificationValidMinutes = 10
 
 func GenerateVerificationCode(length int) string {
@@ -32,47 +26,45 @@ func GenerateVerificationCode(length int) string {
 	return code[:length]
 }
 
-func RegisterVerificationCodeWithKey(key string, code string, purpose string) {
-	verificationMutex.Lock()
-	defer verificationMutex.Unlock()
-	verificationMap[purpose+key] = verificationValue{
-		code: code,
-		time: time.Now(),
-	}
-	if len(verificationMap) > verificationMapMaxSize {
-		removeExpiredPairs()
-	}
+// Neither email addresses nor the plaintext code are stored in DragonflyDB.
+func verificationKey(key, purpose string) string {
+	return "auth:verification:" + GenerateHMACWithKey([]byte("verification-key:"+CryptoSecret), purpose+":"+key)
 }
 
-func VerifyCodeWithKey(key string, code string, purpose string) bool {
-	verificationMutex.Lock()
-	defer verificationMutex.Unlock()
-	value, okay := verificationMap[purpose+key]
-	now := time.Now()
-	if !okay || int(now.Sub(value.time).Seconds()) >= VerificationValidMinutes*60 {
+func RegisterVerificationCodeWithKey(key, code, purpose string) error {
+	if RDB == nil {
+		return errors.New("DragonflyDB is required for verification codes")
+	}
+	if key == "" || code == "" || purpose == "" || VerificationValidMinutes <= 0 {
+		return errors.New("invalid verification code configuration")
+	}
+	cacheKey := verificationKey(key, purpose)
+	digest := GenerateHMACWithKey([]byte("verification-code:"+CryptoSecret), cacheKey+":"+code)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return RDB.Set(ctx, cacheKey, digest, time.Duration(VerificationValidMinutes)*time.Minute).Err()
+}
+
+var consumeVerificationCode = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+return redis.call('DEL', KEYS[1])
+`)
+
+// VerifyCodeWithKey consumes a matching code exactly once. Wrong codes leave
+// the challenge intact; cache failures reject the verification. A subsequent
+// database failure requires a new code, rather than rearming a consumed secret.
+func VerifyCodeWithKey(key, code, purpose string) bool {
+	if RDB == nil || key == "" || code == "" || purpose == "" {
 		return false
 	}
-	return code == value.code
-}
-
-func DeleteKey(key string, purpose string) {
-	verificationMutex.Lock()
-	defer verificationMutex.Unlock()
-	delete(verificationMap, purpose+key)
-}
-
-// no lock inside, so the caller must lock the verificationMap before calling!
-func removeExpiredPairs() {
-	now := time.Now()
-	for key := range verificationMap {
-		if int(now.Sub(verificationMap[key].time).Seconds()) >= VerificationValidMinutes*60 {
-			delete(verificationMap, key)
-		}
+	cacheKey := verificationKey(key, purpose)
+	digest := GenerateHMACWithKey([]byte("verification-code:"+CryptoSecret), cacheKey+":"+code)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	consumed, err := consumeVerificationCode.Run(ctx, RDB, []string{cacheKey}, digest).Int64()
+	if err != nil {
+		SysError("failed to consume verification code: " + err.Error())
+		return false
 	}
-}
-
-func init() {
-	verificationMutex.Lock()
-	defer verificationMutex.Unlock()
-	verificationMap = make(map[string]verificationValue)
+	return consumed == 1
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
+	"github.com/QuantumNous/new-api/internal/transport/http/controller"
 	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
@@ -79,6 +80,93 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("verification codes are shared single-use secrets with expiry", func(t *testing.T) {
+		const email = "verification@example.test"
+		const code = "123abc"
+		require.NoError(t, common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose))
+		// A separate application client sees the challenge issued by the first.
+		node := redis.NewClient(client.Options())
+		common.RDB = node
+		t.Cleanup(func() {
+			common.RDB = client
+			_ = node.Close()
+		})
+		keys, err := node.Keys(t.Context(), "auth:verification:*").Result()
+		require.NoError(t, err)
+		require.Len(t, keys, 1)
+		assert.NotContains(t, keys[0], email)
+		stored, err := node.Get(t.Context(), keys[0]).Result()
+		require.NoError(t, err)
+		assert.NotEqual(t, code, stored)
+		ttl, err := node.TTL(t.Context(), keys[0]).Result()
+		require.NoError(t, err)
+		assert.InDelta(t, float64(common.VerificationValidMinutes*60), ttl.Seconds(), 2)
+		assert.False(t, common.VerifyCodeWithKey(email, code, common.PasswordResetPurpose))
+		assert.False(t, common.VerifyCodeWithKey("other@example.test", code, common.EmailVerificationPurpose))
+		assert.False(t, common.VerifyCodeWithKey(email, "wrong", common.EmailVerificationPurpose))
+		start := make(chan struct{})
+		results := make(chan bool, 2)
+		for range 2 {
+			go func() { <-start; results <- common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose) }()
+		}
+		close(start)
+		accepted := 0
+		for range 2 {
+			if <-results {
+				accepted++
+			}
+		}
+		assert.Equal(t, 1, accepted)
+		assert.False(t, common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose))
+		require.NoError(t, common.RegisterVerificationCodeWithKey(email, "old-code", common.EmailVerificationPurpose))
+		require.NoError(t, common.RegisterVerificationCodeWithKey(email, "new-code", common.EmailVerificationPurpose))
+		assert.False(t, common.VerifyCodeWithKey(email, "old-code", common.EmailVerificationPurpose))
+		assert.True(t, common.VerifyCodeWithKey(email, "new-code", common.EmailVerificationPurpose))
+		require.NoError(t, common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose))
+		require.NoError(t, node.PExpireAt(t.Context(), keys[0], time.Unix(1, 0)).Err())
+		assert.False(t, common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose))
+		require.NoError(t, common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose))
+		assert.True(t, common.VerifyCodeWithKey(email, code, common.PasswordResetPurpose))
+		assert.False(t, common.VerifyCodeWithKey(email, code, common.PasswordResetPurpose))
+		passwordHash, err := common.Password2Hash("previous-password")
+		require.NoError(t, err)
+		user := model.User{Username: "verification-reset", Email: email, Password: passwordHash, Status: common.UserStatusEnabled, AuthVersion: 1}
+		require.NoError(t, database.Create(&user).Error)
+		require.NoError(t, common.RegisterVerificationCodeWithKey(email, "reset-once", common.PasswordResetPurpose))
+		router := gin.New()
+		router.POST("/reset", controller.ResetPassword)
+		body, err := common.Marshal(controller.PasswordResetRequest{Email: email, Token: "reset-once"})
+		require.NoError(t, err)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/reset", strings.NewReader(string(body))))
+		var reset struct {
+			Success bool   `json:"success"`
+			Data    string `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &reset))
+		require.True(t, reset.Success, response.Body.String())
+		require.NotEmpty(t, reset.Data)
+		var updated model.User
+		require.NoError(t, database.First(&updated, user.Id).Error)
+		assert.True(t, common.ValidatePasswordAndHash(reset.Data, updated.Password))
+		assert.Greater(t, updated.AuthVersion, user.AuthVersion)
+		replay := httptest.NewRecorder()
+		router.ServeHTTP(replay, httptest.NewRequest(http.MethodPost, "/reset", strings.NewReader(string(body))))
+		var replayBody struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(replay.Body.Bytes(), &replayBody))
+		assert.False(t, replayBody.Success)
+		var unchanged model.User
+		require.NoError(t, database.First(&unchanged, user.Id).Error)
+		assert.Equal(t, updated.Password, unchanged.Password)
+		assert.Equal(t, updated.AuthVersion, unchanged.AuthVersion)
+
+		require.NoError(t, node.Close())
+		require.Error(t, common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose))
+		assert.False(t, common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose))
+	})
 
 	t.Run("system task leases fence competing workers and recover expired executions", func(t *testing.T) {
 		first := system.New(system.Dependencies{DB: database, Cache: client})

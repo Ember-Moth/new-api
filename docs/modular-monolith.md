@@ -1389,3 +1389,8 @@ python3 /tmp/verify-new-api-clickhouse-only.py
 ### 第四十八批：系统任务执行租约迁入 DragonflyDB
 
 按任务类型的 TTL 租约、续期和持有者校验改为 DragonflyDB，移除 PostgreSQL `system_task_locks` 表及模型。任务执行历史、完成结果和执行者记录仍持久化，并通过行锁与租约检查防止旧执行者覆盖结果。真实 DragonflyDB/PostgreSQL 并发、到期、故障保护回归及新库双角色两轮启动验证见 [控制面与数据面拆分](control-data-plane.md)。后续继续短期流程、配置发布与可靠结算。
+
+
+### 第四十九批：邮箱验证与重置码迁入 DragonflyDB
+
+移除进程内验证码 map，改用 HMAC 缓存键/值及自动过期，并通过 Lua 原子消费。删除密码重置后的无条件缓存删除，避免删掉新签发验证码。真实 DragonflyDB 单次消费、重放、到期和故障保护，以及真实 PostgreSQL HTTP 密码重置回归通过。剩余认证流程事务解耦继续推进，详见 [控制面与数据面拆分](control-data-plane.md)。

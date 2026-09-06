@@ -84,3 +84,23 @@ python3 /tmp/verify-new-api-planes.py
 真实 DragonflyDB + PostgreSQL 回归覆盖并发领取唯一执行者、续期、外来释放不影响持有者、TTL 到期、旧执行者更新/完成被拒绝、过期恢复解除活动任务限制、旧租约释放不影响新任务、缓存不可用时禁止提交。PostgreSQL 事务回归覆盖领取写入失败后的缓存租约释放。新库两角色两轮启动确认不再创建节点或租约表，业务数据、任务主表及 ClickHouse 日志初始化正常。
 
 输出记录：`/tmp/new-api-lease-{tests,dragonfly,regression,full-tests,build,vet,startup}.log`。独立 Nginx/容器入口验证仍待补；短期认证状态、配置发布、计费可靠交付及其他维护任务统一调度仍未完成。
+
+## 第四批：邮箱验证码与密码重置码共享
+
+原进程内验证码 map 已移除。邮箱验证和密码重置挑战仅存 DragonflyDB，键和值使用带域区分的 HMAC，缓存不存邮箱或验证码明文；TTL 跟随 `VerificationValidMinutes`（默认 10 分钟）。Lua 原子校验并删除匹配验证码，并发请求只有一个成功；错误码、错误邮箱、错误用途不会消耗正确挑战。重新发送会替换旧码。
+
+密码重置不再在数据库更新后按邮箱删除缓存，避免误删并发新签发的验证码。成功验证会立即消费挑战，之后业务数据库操作失败需要重新获取验证码，不重新启用已消费的秘密。DragonflyDB 写入失败时不发送无法验证的邮件；密码重置邮件接口继续对存在和不存在的账号返回相同响应。
+
+实际服务版本：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。以下命令通过（环境 DSN 与前文相同）：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+# 设置前文三个 TEST_*_DSN 后执行
+GOWORK=off go test ./e2e ./internal/transport/http/controller ./internal/shared/common -count=1
+GOWORK=off go test ./e2e -run 'TestDragonflyCacheContracts/verification' -count=1
+GOWORK=off go vet ./internal/shared/common ./internal/transport/http/controller ./e2e
+```
+
+真实 DragonflyDB 回归覆盖另一客户端验证、并发单次消费、用途/邮箱绑定、错误码重试、替换旧码、服务端到期和缓存故障。真实 PostgreSQL + HTTP 密码重置回归验证新密码生效、认证版本推进，重放同一码被拒绝且密码/认证版本不再变化。此批没有 schema/启动迁移修改；没有重复执行新库启动验证。
+
+输出：`/tmp/new-api-verification-{build,tests,reset,vet}.log`。OAuth、Passkey、Telegram 和两步登录的短期流程仍有 PostgreSQL 事务耦合，下一步继续迁移；会话状态、配置发布及可靠结算仍未完成。
