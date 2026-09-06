@@ -1,4 +1,4 @@
-package dto
+package contract
 
 type UpstreamDTO struct {
 	ID       int    `json:"id,omitempty"`
@@ -36,4 +36,9 @@ type SyncableChannel struct {
 	BaseURL string `json:"base_url"`
 	Status  int    `json:"status"`
 	Type    int    `json:"type"`
+}
+
+type PricingSyncResult struct {
+	Differences map[string]map[string]DifferenceItem `json:"differences"`
+	TestResults []TestResult                         `json:"test_results"`
 }

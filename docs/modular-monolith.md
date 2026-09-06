@@ -316,6 +316,14 @@ Waffo 两套协议按各自 SDK 的签名与确认约定处理。钱包结账、
 - 应用层渠道管理和排行榜从 billing 快照获得元数据。删除三个根 controller 文件及 model/pricing.go、pricing_default.go、pricing_refresh.go、model_extra.go；原两个定价回归文件合并至模块，并使用正式 SQL 的隔离数据库。
 - model/pricing_runtime.go 暂为未迁移的模型列表/转发调用方绑定模块实例。上游价格同步与请求实际计价仍在后续拆分范围内。
 
+第四十一批迁移上游定价同步：
+
+- billing/pricesync 拥有来源选择、并发抓取、格式转换与差异计算，私有实现按 fetch/decode/converters/differences 分开。controller/ratio_sync.go 删除；管理请求/差异 DTO 移至 billing/contract，RelayKit 的控制面 ratio_sync DTO 文件删除。
+- 保留 ratio_config、pricing 数组、OpenRouter 和 models.dev 四种格式，以及官方/models.dev 预设、零值价格、表达式、倍率差异和可信度字段。结果按输入来源顺序返回，不再由网络完成顺序决定。
+- 抓取复用应用的 HTTP 设施和配置中的 SSRF/代理策略；固定八个工作任务处理来源列表，排队、请求和重试响应取消。默认超时 10 秒，上限 120 秒；响应实际超过 10 MiB 明确拒绝。
+- 渠道模块提供带 context 的来源查询，目录投影不读取密钥。OpenRouter 从选择的渠道取得启用密钥，校验目标同源；带认证请求禁止跨源重定向，避免把渠道密钥发送到替换地址。
+- 转换结果只允许有限的非负价格与字符串表达式，拒绝负数、NaN/Inf、嵌套对象等无效值。保留模型间零价格和上游部分失败的报告；比较不修改本地定价，应用层仍负责本地配置快照。
+
 ## 第一批验证（2026-09-05）
 
 Go **1.27.1**，PostgreSQL **18.6**，ClickHouse **26.9.1.762**。本批没有修改缓存 Lua/TTL/事务行为，未重新启用 DragonflyDB 集成实例。
@@ -1185,3 +1193,32 @@ python3 /tmp/verify-new-api-pricing-startup.py
 启动脚本在共享 PostgreSQL 日志、独立 PostgreSQL 日志、ClickHouse 日志三种配置中分别建立新数据库并重启两次；全部启用批处理。在每个主库实际插入重复供应商，要求数据库报 unique_violation，并在重启后验证只有一条有效记录。保留数据和主/日志 schema 版本检查继续通过。完整回归继续覆盖真实 DragonflyDB 与 ClickHouse。
 
 输出：`/tmp/new-api-pricing-build.log`、`/tmp/new-api-pricing-module-tests.log`、`/tmp/new-api-pricing-race.log`、`/tmp/new-api-pricing-full-tests.log`、`/tmp/new-api-pricing-vet.log`、`/tmp/new-api-pricing-startup.log`。
+
+## 第四十一批验证（2026-09-06）
+
+Go **1.27.1**、PostgreSQL **18.6**、ClickHouse **26.9.1.762**、DragonflyDB **v1.40.2**。主模块 build/vet、RelayKit 独立 build/vet、完整后端回归、同步器竞态检查和三种日志配置的新库/两次重启全部通过。
+
+本批命令：
+
+```sh
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test ./internal/module/billing/... ./internal/arch -run 'TestPriceSync|TestModular' -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+GOWORK=off go test -race ./internal/module/billing -run TestPriceSync -count=1
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' \
+GOWORK=off make test
+(cd relaykit && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+python3 /tmp/verify-new-api-pricing-startup.py
+```
+
+本地 HTTP 服务覆盖四种价格格式、可选价格显式零值、表达式、models.dev 最便宜非零候选、OpenRouter 非有限/动态价格跳过、差异可信度、无变化来源剔除和输入顺序。无效标量/嵌套价格与超过 10 MiB 的响应被拒绝；八个在途来源加一个排队来源验证取消会结束全部任务且不发出排队请求。
+
+真实 PostgreSQL 的渠道投影、密钥选择和 HTTP handler 测试验证来源目录无密钥、预设 ID、channel_ids 路径、OpenRouter 仅向保存渠道同源地址附加认证，以及跨源重定向被阻止。还验证参数错误 400、空来源业务错误和查询失败 500。测试使用本地服务提供上游价格响应。
+
+完整回归继续覆盖真实 DragonflyDB 与 ClickHouse；新库启动、两次重启、schema 版本、保留数据和供应商唯一约束检查继续通过。
+
+输出：`/tmp/new-api-price-sync-build.log`、`/tmp/new-api-price-sync-tests.log`、`/tmp/new-api-price-sync-race.log`、`/tmp/new-api-price-sync-full-tests.log`、`/tmp/new-api-price-sync-vet.log`、`/tmp/new-api-price-sync-startup.log`。
