@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/module/identity/contract"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -83,7 +83,7 @@ func TestSessionManagementRefreshListAndRevocation(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = runtime.ValidateLoginSession(current)
 	require.Error(t, err)
-	var stored model.UserSession
-	require.NoError(t, f.db.First(&stored, "sid = ?", first.Session.SID).Error)
+	stored, err := model.GetUserSessionBySID(first.Session.SID)
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
 }

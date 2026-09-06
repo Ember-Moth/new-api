@@ -180,7 +180,7 @@ func seedManagedUser(t *testing.T, f *userFixture, name string, role int) *model
 func seedManagedSession(t *testing.T, f *userFixture, user *model.User, sid string) {
 	t.Helper()
 	now := time.Now().Unix()
-	require.NoError(t, f.db.Create(&model.UserSession{SID: sid, UserID: user.Id, Version: 1, UserAuthVersion: user.AuthVersion, Status: model.UserSessionStatusActive, RefreshHash: "refresh-" + sid, LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600}).Error)
+	require.NoError(t, model.CreateUserSession(&model.UserSession{SID: sid, UserID: user.Id, Version: 1, UserAuthVersion: user.AuthVersion, Status: model.UserSessionStatusActive, RefreshHash: "refresh-" + sid, LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600}))
 }
 
 func TestUserDirectorySortsAndFiltersWithoutLeakingCredentials(t *testing.T) {
@@ -289,8 +289,8 @@ func TestUserCreationAndEditCommitPermissionsAtomically(t *testing.T) {
 	assert.True(t, common.ValidatePasswordAndHash("NewPassword123", user.Password))
 	assert.EqualValues(t, 2, user.AuthVersion)
 	assert.Equal(t, []string{"admin_user_update"}, f.revocations)
-	var session model.UserSession
-	require.NoError(t, f.db.First(&session, "sid = ?", "edit-session").Error)
+	session, err := model.GetUserSessionBySID("edit-session")
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, session.Status)
 	// Failed creation must not leave either the user or a welcome grant behind.
 	f.authorization.fail = true
@@ -313,8 +313,8 @@ func TestUserManagementProtectsRolesAndRevokesSessionsOnce(t *testing.T) {
 	assert.Equal(t, common.UserStatusDisabled, target.Status)
 	assert.EqualValues(t, 2, target.AuthVersion)
 	assert.Equal(t, []string{"user_security_changed"}, f.revocations)
-	var session model.UserSession
-	require.NoError(t, f.db.First(&session, "sid = ?", "disable-session").Error)
+	session, err := model.GetUserSessionBySID("disable-session")
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, session.Status)
 	admin := seedManagedUser(t, f, "managed-demote", common.RoleAdminUser)
 	seedManagedSession(t, f, admin, "demote-one")
@@ -326,10 +326,9 @@ func TestUserManagementProtectsRolesAndRevokesSessionsOnce(t *testing.T) {
 	assert.Equal(t, common.RoleCommonUser, admin.Role)
 	assert.EqualValues(t, 2, admin.AuthVersion)
 	assert.Equal(t, []string{"user_security_changed", "admin_demote"}, f.revocations)
-	var sessions []model.UserSession
-	require.NoError(t, f.db.Where("user_id = ?", admin.Id).Find(&sessions).Error)
-	require.Len(t, sessions, 2)
-	for _, session := range sessions {
+	for _, sid := range []string{"demote-one", "demote-two"} {
+		session, err := model.GetUserSessionBySID(sid)
+		require.NoError(t, err)
 		assert.Equal(t, model.UserSessionStatusRevoked, session.Status)
 		assert.Equal(t, "admin_demote", session.RevokedReason)
 	}
@@ -384,7 +383,7 @@ func TestUserDeletionClearsCredentialsAndBindingClaims(t *testing.T) {
 	var count int64
 	require.NoError(t, f.db.Unscoped().Model(&entity.User{}).Where("id = ?", user.Id).Count(&count).Error)
 	assert.Zero(t, count)
-	for _, record := range []any{&model.Token{}, &model.UserSession{}, &model.UserOAuthBinding{}} {
+	for _, record := range []any{&model.Token{}, &model.UserOAuthBinding{}} {
 		require.NoError(t, f.db.Unscoped().Model(record).Where("user_id = ?", user.Id).Count(&count).Error)
 		assert.Zero(t, count)
 	}
@@ -507,8 +506,8 @@ func TestSelfProfileUsesSafeProjectionAndRotatesOnlyCurrentSession(t *testing.T)
 	require.NoError(t, err)
 	_, _, err = service.ValidateLoginSession(replacement)
 	require.NoError(t, err)
-	var other model.UserSession
-	require.NoError(t, f.db.First(&other, "sid = ?", second.Session.SID).Error)
+	other, err := model.GetUserSessionBySID(second.Session.SID)
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, other.Status)
 	assert.Equal(t, "password_changed", other.RevokedReason)
 	// A previously validated request cannot change the password after its session version is obsolete.
@@ -637,8 +636,8 @@ func TestSelfPersonalTokenEmailAndDeletionRespectOwnership(t *testing.T) {
 	assert.Equal(t, []string{"user_deleted"}, f.revocations)
 	_, err = f.service.RotatePersonalAccessToken(t.Context(), user.Id)
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
-	var revoked model.UserSession
-	require.NoError(t, f.db.First(&revoked, "sid = ?", "self-delete-session").Error)
+	revoked, err := model.GetUserSessionBySID("self-delete-session")
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, revoked.Status)
 	root := seedManagedUser(t, f, "self-root", common.RoleRootUser)
 	require.Error(t, f.service.DeleteSelf(t.Context(), root.Id))

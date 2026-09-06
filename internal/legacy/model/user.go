@@ -573,7 +573,7 @@ func (user *User) Delete() error {
 	if err := PublishCommittedUserAuthVersion(user.Id, nextAuthVersion); err != nil {
 		return err
 	}
-	if _, err := RevokeAllUserSessions(user.Id, "user_deleted"); err != nil {
+	if err := DeleteUserSessions(user.Id); err != nil {
 		return err
 	}
 	return InvalidateUserCache(user.Id)
@@ -604,6 +604,9 @@ func (user *User) HardDelete() error {
 	if err != nil {
 		return err
 	}
+	if err := DeleteUserSessions(user.Id); err != nil {
+		common.SysError("failed to erase deleted user sessions: " + err.Error())
+	}
 	if err := flows.New(nil, common.RDB).DeleteUserAuthFlows(context.Background(), user.Id); err != nil {
 		common.SysError(fmt.Sprintf("failed to remove authentication flows after deleting user %d: %v", user.Id, err))
 	}
@@ -626,7 +629,6 @@ func DeleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 	for _, authenticationData := range []any{
 		&TwoFABackupCode{},
 		&TwoFA{},
-		&UserSession{},
 		&PasskeyCredential{},
 		&Token{},
 	} {

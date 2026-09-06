@@ -2,859 +2,392 @@ package sessions
 
 import (
 	"context"
-	"crypto/hmac"
 	"errors"
-	"fmt"
+	"sort"
+	"strconv"
 	"time"
 
 	identitycontract "github.com/QuantumNous/new-api/internal/module/identity/contract"
 	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
-
-	"github.com/go-redis/redis/v8"
-
 	"github.com/QuantumNous/new-api/internal/shared/common"
-
+	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
-type Store struct{ db *gorm.DB }
+type Store struct {
+	db    *gorm.DB
+	cache *redis.Client
+}
 
-func New(db *gorm.DB) *Store { return &Store{db: db} }
-
-const (
-	UserSessionStatusActive   = "active"
-	UserSessionStatusRevoking = "revoking"
-	UserSessionStatusRevoked  = "revoked"
-
-	userSessionCacheSchema      = 1
-	userSessionListLimit        = 100
-	userSessionRevokeBatchSize  = 500
-	userSessionCleanupScanLimit = 1000
-	userSessionCleanupBatchSize = 500
-)
-
-var (
-	ErrUserSessionInvalid               = identitycontract.ErrUserSessionInvalid
-	ErrUserSessionInactive              = identitycontract.ErrUserSessionInactive
-	ErrUserSessionRefreshInvalid        = identitycontract.ErrUserSessionRefreshInvalid
-	ErrUserSessionRefreshRace           = identitycontract.ErrUserSessionRefreshRace
-	ErrUserSessionRefreshReuse          = identitycontract.ErrUserSessionRefreshReuse
-	ErrUserSessionLimit                 = identitycontract.ErrUserSessionLimit
-	ErrUserSessionIssuanceLimit         = identitycontract.ErrUserSessionIssuanceLimit
-	errUserSessionCacheObservationStale = errors.New("user session cache observation is stale")
-)
+func New(db *gorm.DB, cache *redis.Client) *Store { return &Store{db: db, cache: cache} }
 
 type UserSession = identityentity.UserSession
 type User = identityentity.User
 
-type userSessionCacheEntry struct {
-	SID             string
-	UserID          int
-	Version         int64
-	UserAuthVersion int64
-	Status          string
-	LoginMethod     string
-	IP              string
-	UserAgent       string
-	CreatedAt       int64
-	LastActiveAt    int64
-	ExpiresAt       int64
-	RevokedAt       int64
-	RevokedReason   string
-	CacheSchema     int
-}
+const (
+	UserSessionStatusActive  = "active"
+	UserSessionStatusRevoked = "revoked"
+	userSessionListLimit     = 100
+)
 
-func sessionCacheEntry(session *UserSession) *userSessionCacheEntry {
-	return &userSessionCacheEntry{
-		SID:             session.SID,
-		UserID:          session.UserID,
-		Version:         session.Version,
-		UserAuthVersion: session.UserAuthVersion,
-		Status:          session.Status,
-		LoginMethod:     session.LoginMethod,
-		IP:              session.IP,
-		UserAgent:       session.UserAgent,
-		CreatedAt:       session.CreatedAt,
-		LastActiveAt:    session.LastActiveAt,
-		ExpiresAt:       session.ExpiresAt,
-		RevokedAt:       session.RevokedAt,
-		RevokedReason:   session.RevokedReason,
-		CacheSchema:     userSessionCacheSchema,
-	}
-}
-
-func (entry *userSessionCacheEntry) session() *UserSession {
-	return &UserSession{
-		SID:             entry.SID,
-		UserID:          entry.UserID,
-		Version:         entry.Version,
-		UserAuthVersion: entry.UserAuthVersion,
-		Status:          entry.Status,
-		LoginMethod:     entry.LoginMethod,
-		IP:              entry.IP,
-		UserAgent:       entry.UserAgent,
-		CreatedAt:       entry.CreatedAt,
-		LastActiveAt:    entry.LastActiveAt,
-		ExpiresAt:       entry.ExpiresAt,
-		RevokedAt:       entry.RevokedAt,
-		RevokedReason:   entry.RevokedReason,
-	}
-}
+var (
+	ErrUserSessionInvalid        = identitycontract.ErrUserSessionInvalid
+	ErrUserSessionInactive       = identitycontract.ErrUserSessionInactive
+	ErrUserSessionRefreshInvalid = identitycontract.ErrUserSessionRefreshInvalid
+	ErrUserSessionRefreshRace    = identitycontract.ErrUserSessionRefreshRace
+	ErrUserSessionRefreshReuse   = identitycontract.ErrUserSessionRefreshReuse
+	ErrUserSessionLimit          = identitycontract.ErrUserSessionLimit
+	ErrUserSessionIssuanceLimit  = identitycontract.ErrUserSessionIssuanceLimit
+)
 
 func userSessionCacheKey(sid string) string {
-	digest := common.GenerateHMACWithKey([]byte("user-session-cache-v1:"+common.SessionSecret), sid)
-	return "auth:session:" + digest
+	return "auth:session:" + common.GenerateHMACWithKey([]byte("user-session-cache-v1:"+common.SessionSecret), sid)
+}
+func userSessionIndex(userID int, kind string) string {
+	return "auth:sessions:" + strconv.Itoa(userID) + ":" + kind
 }
 
-func userSessionCacheDeadline() time.Time {
-	return time.Now().Add(time.Duration(userCacheTTLSeconds()) * time.Second)
-}
+var createSession = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 1 then return -1 end
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[1])
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', tonumber(ARGV[1])-tonumber(ARGV[5]))
+redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', tonumber(ARGV[1])-tonumber(ARGV[5]))
+if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[2]) then return -2 end
+if redis.call('ZCOUNT', KEYS[3], '('..ARGV[4], '+inf') >= tonumber(ARGV[3]) then return -3 end
+for i=10,#ARGV,2 do redis.call('HSET', KEYS[1], ARGV[i], ARGV[i+1]) end
+redis.call('PEXPIRE', KEYS[1], ARGV[6])
+redis.call('ZADD', KEYS[2], ARGV[9], ARGV[7])
+if redis.call('PTTL', KEYS[2]) < tonumber(ARGV[6]) then redis.call('PEXPIRE', KEYS[2], ARGV[6]) end
+redis.call('ZADD', KEYS[3], ARGV[8], ARGV[7])
+redis.call('ZADD', KEYS[4], ARGV[8], ARGV[7])
+redis.call('EXPIRE', KEYS[3], ARGV[5])
+redis.call('EXPIRE', KEYS[4], ARGV[5])
+return 1
+`)
 
-func (r *Store) CreateUserSession(session *UserSession) error {
+func (r *Store) CreateUserSession(s *UserSession) error {
+	if r.cache == nil {
+		return errors.New("DragonflyDB is required for login sessions")
+	}
 	now := time.Now().Unix()
-	if session == nil || session.SID == "" || session.UserID <= 0 || session.UserAuthVersion <= 0 || session.RefreshHash == "" || session.ExpiresAt <= now {
+	if s == nil || s.SID == "" || s.UserID <= 0 || s.UserAuthVersion <= 0 || s.RefreshHash == "" || s.ExpiresAt <= now || common.UserSessionActiveLimit <= 0 || common.UserSessionIssuanceLimit <= 0 || common.UserSessionIssuanceWindowSeconds <= 0 {
 		return ErrUserSessionInvalid
 	}
-	if session.Version <= 0 {
-		session.Version = 1
+	if s.Version <= 0 {
+		s.Version = 1
 	}
-	if session.Status == "" {
-		session.Status = UserSessionStatusActive
+	if s.Status == "" {
+		s.Status = UserSessionStatusActive
 	}
-	if session.Status != UserSessionStatusActive || session.RevokedAt != 0 {
+	if s.Status != UserSessionStatusActive || s.RevokedAt != 0 {
 		return ErrUserSessionInvalid
 	}
-	if session.LastActiveAt == 0 {
-		session.LastActiveAt = now
+	if s.CreatedAt == 0 {
+		s.CreatedAt = now
 	}
-	if session.CreatedAt == 0 {
-		session.CreatedAt = now
+	if s.LastActiveAt == 0 {
+		s.LastActiveAt = now
 	}
-	cacheDeadline := userSessionCacheDeadline()
-	if err := r.db.Create(session).Error; err != nil {
+	ttl := time.Until(time.Unix(s.ExpiresAt, 0))
+	if ttl < time.Millisecond {
+		return ErrUserSessionInvalid
+	}
+	args := []any{now, common.UserSessionActiveLimit, common.UserSessionIssuanceLimit, now - common.UserSessionIssuanceWindowSeconds, max(common.UserSessionIssuanceWindowSeconds, int64(max(common.UserSessionRevokedRetentionDays, 1))*86400, 3600), ttl.Milliseconds(), s.SID, s.CreatedAt, s.ExpiresAt,
+		"SID", s.SID, "UserID", s.UserID, "Version", s.Version, "UserAuthVersion", s.UserAuthVersion, "Status", s.Status, "RefreshHash", s.RefreshHash, "PreviousRefreshHash", s.PreviousRefreshHash, "PreviousValidUntil", s.PreviousValidUntil,
+		"LoginMethod", s.LoginMethod, "IP", s.IP, "UserAgent", s.UserAgent, "CreatedAt", s.CreatedAt, "LastActiveAt", s.LastActiveAt, "ExpiresAt", s.ExpiresAt, "RevokedAt", s.RevokedAt, "RevokedReason", s.RevokedReason}
+	code, err := createSession.Run(context.Background(), r.cache, []string{userSessionCacheKey(s.SID), userSessionIndex(s.UserID, "active"), userSessionIndex(s.UserID, "issued"), userSessionIndex(0, "issued")}, args...).Int()
+	if err != nil {
 		return err
 	}
-	if err := r.writeUserSessionCache(sessionCacheEntry(session), cacheDeadline); err != nil {
-		if errors.Is(err, errUserSessionCacheObservationStale) {
-			return r.confirmUserSessionActiveSnapshot(session)
-		}
-		if errors.Is(err, ErrUserSessionInactive) {
-			return err
-		}
-		common.SysLog("failed to populate newly created user session cache: " + err.Error())
+	switch code {
+	case 1:
+		return nil
+	case -2:
+		return ErrUserSessionLimit
+	case -3:
+		return ErrUserSessionIssuanceLimit
+	default:
+		return ErrUserSessionInvalid
 	}
-	return nil
 }
 
 func (r *Store) CountActiveUserSessions(userID int, now int64) (int64, error) {
+	if r.cache == nil {
+		return 0, errors.New("DragonflyDB is required for login sessions")
+	}
 	if userID <= 0 {
 		return 0, ErrUserSessionInvalid
 	}
 	if now <= 0 {
 		now = time.Now().Unix()
 	}
-	var count int64
-	err := r.db.Model(&UserSession{}).
-		Where("user_id = ? AND status = ? AND expires_at > ?", userID, UserSessionStatusActive, now).
-		Count(&count).Error
-	return count, err
+	return r.cache.ZCount(context.Background(), userSessionIndex(userID, "active"), "("+strconv.FormatInt(now, 10), "+inf").Result()
 }
-
-// CountUserSessionsCreatedSince counts every issued row, regardless of its
-// current status or expiry. userID zero selects the global count.
 func (r *Store) CountUserSessionsCreatedSince(userID int, createdAfter int64) (int64, error) {
+	if r.cache == nil {
+		return 0, errors.New("DragonflyDB is required for login sessions")
+	}
 	if userID < 0 || createdAfter <= 0 {
 		return 0, ErrUserSessionInvalid
 	}
-	query := r.db.Model(&UserSession{}).Where("created_at > ?", createdAfter)
-	if userID > 0 {
-		query = query.Where("user_id = ?", userID)
-	}
-	var count int64
-	err := query.Count(&count).Error
-	return count, err
+	return r.cache.ZCount(context.Background(), userSessionIndex(userID, "issued"), "("+strconv.FormatInt(createdAfter, 10), "+inf").Result()
 }
-
 func (r *Store) GetUserSessionBySID(sid string) (*UserSession, error) {
+	if r.cache == nil {
+		return nil, errors.New("DragonflyDB is required for login sessions")
+	}
 	if sid == "" {
 		return nil, ErrUserSessionInvalid
 	}
-	var session UserSession
-	if err := r.db.Where("sid = ?", sid).First(&session).Error; err != nil {
+	var s UserSession
+	if err := r.cache.HGetAll(context.Background(), userSessionCacheKey(sid)).Scan(&s); err != nil {
 		return nil, err
 	}
-	return &session, nil
+	if s.SID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if s.SID != sid || s.UserID <= 0 || s.Version <= 0 || s.UserAuthVersion <= 0 {
+		return nil, ErrUserSessionInvalid
+	}
+	return &s, nil
 }
-
-// GetUserSessionCached validates cached state first and falls back to the
-// database on a miss or Redis read failure. A deny tombstone never falls back.
 func (r *Store) GetUserSessionCached(sid string) (*UserSession, error) {
-	if sid == "" {
-		return nil, ErrUserSessionInvalid
+	s, err := r.GetUserSessionBySID(sid)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUserSessionInactive
 	}
-	if common.RedisEnabled {
-		entry, err := r.getUserSessionCache(sid)
-		if err == nil {
-			return entry.session(), nil
-		}
-		if errors.Is(err, ErrUserSessionInactive) {
-			return nil, err
-		}
-	}
-
-	cacheDeadline := userSessionCacheDeadline()
-	session, err := r.GetUserSessionBySID(sid)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().Unix()
-	if session.Status != UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now {
-		if common.RedisEnabled {
-			entry := sessionCacheEntry(session)
-			entry.Status = UserSessionStatusRevoked
-			_ = r.writeUserSessionCache(entry, time.Time{})
-		}
+	if s.Status != UserSessionStatusActive || s.RevokedAt != 0 || s.ExpiresAt <= time.Now().Unix() {
 		return nil, ErrUserSessionInactive
 	}
-	if common.RedisEnabled {
-		if err := r.writeUserSessionCache(sessionCacheEntry(session), cacheDeadline); err != nil {
-			if errors.Is(err, errUserSessionCacheObservationStale) {
-				if confirmErr := r.confirmUserSessionActiveSnapshot(session); confirmErr != nil {
-					return nil, confirmErr
-				}
-				return session, nil
-			}
-			if errors.Is(err, ErrUserSessionInactive) {
-				return nil, err
-			}
-			common.SysLog("failed to synchronously populate user session cache: " + err.Error())
-		}
-	}
-	return session, nil
+	return s, nil
 }
-
-func (r *Store) getUserSessionCache(sid string) (*userSessionCacheEntry, error) {
-	var entry userSessionCacheEntry
-	if err := common.RedisHGetObj(userSessionCacheKey(sid), &entry); err != nil {
-		return nil, err
-	}
-	if entry.CacheSchema != userSessionCacheSchema || entry.SID != sid || entry.UserID <= 0 || entry.Version <= 0 || entry.UserAuthVersion <= 0 {
-		return nil, fmt.Errorf("user session cache schema is stale")
-	}
-	if entry.Status != UserSessionStatusActive || entry.RevokedAt != 0 || entry.ExpiresAt <= time.Now().Unix() {
-		return nil, ErrUserSessionInactive
-	}
-	return &entry, nil
-}
-
-// writeUserSessionCache writes a bounded Session snapshot. Active snapshots
-// must carry a deadline captured immediately before their authoritative
-// database read or mutation. Delayed fills inherit the unspent portion of that
-// window, so a stale active snapshot cannot outlive a short deny tombstone and
-// reactivate a revoked Session after the tombstone expires. Deny states pass a
-// zero deadline because their TTL starts when they are published.
-func (r *Store) writeUserSessionCache(entry *userSessionCacheEntry, cacheDeadline time.Time) error {
-	if entry == nil || !common.RedisEnabled {
-		return nil
-	}
-	now := time.Now()
-	sessionExpiresAt := time.Unix(entry.ExpiresAt, 0)
-	sessionTTL := sessionExpiresAt.Sub(now)
-	var redisExpiration int64
-	if entry.Status == UserSessionStatusActive {
-		if cacheDeadline.IsZero() {
-			return ErrUserSessionInvalid
-		}
-		cacheTTL := cacheDeadline.Sub(now)
-		if cacheTTL <= 0 {
-			return errUserSessionCacheObservationStale
-		}
-		if sessionTTL <= 0 {
-			return ErrUserSessionInactive
-		}
-		cacheExpiresAt := cacheDeadline
-		if sessionExpiresAt.Before(cacheExpiresAt) {
-			cacheExpiresAt = sessionExpiresAt
-		}
-		if cacheExpiresAt.Sub(now) < time.Millisecond {
-			return errUserSessionCacheObservationStale
-		}
-		redisExpiration = cacheExpiresAt.UnixMilli()
-	} else {
-		ttl := min(sessionTTL, time.Duration(userCacheTTLSeconds())*time.Second)
-		if ttl <= 0 {
-			ttl = time.Second
-		}
-		redisExpiration = ttl.Milliseconds()
-		if redisExpiration <= 0 {
-			redisExpiration = 1
-		}
-	}
-	entry.CacheSchema = userSessionCacheSchema
-
-	result, err := writeUserSessionCacheScript.Run(context.Background(), common.RDB, []string{userSessionCacheKey(entry.SID)},
-		entry.SID, entry.UserID, entry.Version, entry.UserAuthVersion, entry.Status,
-		entry.LoginMethod, entry.IP, entry.UserAgent, entry.CreatedAt, entry.LastActiveAt,
-		entry.ExpiresAt, entry.RevokedAt, entry.RevokedReason, entry.CacheSchema, redisExpiration,
-	).Int()
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return ErrUserSessionInactive
-	}
-	if entry.Status == UserSessionStatusActive {
-		completedAt := time.Now()
-		if !completedAt.Before(cacheDeadline) {
-			return errUserSessionCacheObservationStale
-		}
-		if !completedAt.Before(sessionExpiresAt) {
-			return ErrUserSessionInactive
-		}
-	}
-	return nil
-}
-
-func (r *Store) confirmUserSessionActiveSnapshot(session *UserSession) error {
-	if session == nil || session.SID == "" || session.UserID <= 0 || session.Version <= 0 || session.UserAuthVersion <= 0 {
-		return ErrUserSessionInvalid
-	}
-	var count int64
-	err := r.db.Model(&UserSession{}).
-		Where(
-			"sid = ? AND user_id = ? AND status = ? AND revoked_at = ? AND expires_at > ? AND version = ? AND user_auth_version = ?",
-			session.SID,
-			session.UserID,
-			UserSessionStatusActive,
-			0,
-			time.Now().Unix(),
-			session.Version,
-			session.UserAuthVersion,
-		).
-		Count(&count).Error
-	if err != nil {
-		return err
-	}
-	if count != 1 {
-		return ErrUserSessionInactive
-	}
-	return nil
-}
-
-func (r *Store) writeUserSessionDenyFence(session *UserSession, status string, now int64, reason string) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	entry := sessionCacheEntry(session)
-	entry.Status = status
-	entry.RevokedAt = now
-	entry.RevokedReason = reason
-	return r.writeUserSessionCache(entry, time.Time{})
-}
-
 func (r *Store) ListActiveUserSessions(userID int, currentSID string, now int64) ([]UserSession, error) {
+	if r.cache == nil {
+		return nil, errors.New("DragonflyDB is required for login sessions")
+	}
 	if userID <= 0 {
 		return nil, ErrUserSessionInvalid
 	}
 	if now <= 0 {
 		now = time.Now().Unix()
 	}
-	var authVersion int64
-	if err := r.db.Model(&User{}).Where("id = ?", userID).Select("auth_version").Find(&authVersion).Error; err != nil {
+	var user User
+	if err := r.db.Select("id", "auth_version").First(&user, userID).Error; err != nil {
 		return nil, err
 	}
-	if authVersion <= 0 {
-		return nil, ErrUserSessionInvalid
+	sids, err := r.cache.ZRangeByScore(context.Background(), userSessionIndex(userID, "active"), &redis.ZRangeBy{Min: "(" + strconv.FormatInt(now, 10), Max: "+inf"}).Result()
+	if err != nil {
+		return nil, err
 	}
-	sessions := make([]UserSession, 0, userSessionListLimit)
-	if currentSID != "" {
-		var current []UserSession
-		if err := r.db.Where(
-			"user_id = ? AND user_auth_version = ? AND status = ? AND expires_at > ? AND sid = ?",
-			userID,
-			authVersion,
-			UserSessionStatusActive,
-			now,
-			currentSID,
-		).Limit(1).Find(&current).Error; err != nil {
+	rows := make([]UserSession, 0, len(sids))
+	for _, sid := range sids {
+		s, err := r.GetUserSessionBySID(sid)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
-		if len(current) == 1 {
-			sessions = append(sessions, current[0])
+		if s.Status == UserSessionStatusActive && s.RevokedAt == 0 && s.ExpiresAt > now && s.UserAuthVersion == user.AuthVersion {
+			rows = append(rows, *s)
 		}
 	}
-	remainingLimit := userSessionListLimit - len(sessions)
-
-	otherQuery := r.db.Where(
-		"user_id = ? AND user_auth_version = ? AND status = ? AND expires_at > ?",
-		userID,
-		authVersion,
-		UserSessionStatusActive,
-		now,
-	)
-	if currentSID != "" {
-		otherQuery = otherQuery.Where("sid <> ?", currentSID)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].SID == currentSID || rows[j].SID == currentSID {
+			return rows[i].SID == currentSID
+		}
+		if rows[i].LastActiveAt != rows[j].LastActiveAt {
+			return rows[i].LastActiveAt > rows[j].LastActiveAt
+		}
+		if rows[i].CreatedAt != rows[j].CreatedAt {
+			return rows[i].CreatedAt > rows[j].CreatedAt
+		}
+		return rows[i].SID < rows[j].SID
+	})
+	if len(rows) > userSessionListLimit {
+		rows = rows[:userSessionListLimit]
 	}
-	var others []UserSession
-	if err := otherQuery.Order("last_active_at DESC").Order("created_at DESC").Limit(remainingLimit).Find(&others).Error; err != nil {
-		return nil, err
-	}
-	sessions = append(sessions, others...)
-	return sessions, nil
+	return rows, nil
 }
 
-// RotateUserSessionRefresh atomically rotates HMAC digests. The UPDATE itself
-// is a compare-and-swap so concurrent refreshes have one winner. Only a
-// recognized previous digest outside its grace window is treated as reuse;
-// an unknown secret never revokes the victim session.
+var rotateSession = redis.NewScript(`
+if redis.call('HGET', KEYS[1], 'UserID') ~= ARGV[1] then return 0 end
+if redis.call('HGET', KEYS[1], 'Status') ~= 'active' or tonumber(redis.call('HGET',KEYS[1],'ExpiresAt')) <= tonumber(ARGV[4]) then return 0 end
+local current = redis.call('HGET', KEYS[1], 'RefreshHash')
+if current == ARGV[2] then
+    redis.call('HSET',KEYS[1],'PreviousRefreshHash',current,'PreviousValidUntil',ARGV[5],'RefreshHash',ARGV[3],'LastActiveAt',ARGV[4])
+    return 1
+end
+if redis.call('HGET',KEYS[1],'PreviousRefreshHash') ~= ARGV[2] then return -1 end
+if tonumber(ARGV[4]) <= tonumber(redis.call('HGET',KEYS[1],'PreviousValidUntil') or '0') then return -2 end
+redis.call('HSET',KEYS[1],'Status','revoked','RevokedAt',ARGV[4],'RevokedReason','refresh_reuse')
+redis.call('ZREM',KEYS[2],ARGV[6])
+if redis.call('PTTL',KEYS[1]) > tonumber(ARGV[7]) then redis.call('PEXPIRE',KEYS[1],ARGV[7]) end
+return -3
+`)
+
 func (r *Store) RotateUserSessionRefresh(userID int, sid, presentedHash, nextHash string, now int64, grace time.Duration) (*UserSession, error) {
-	if userID <= 0 || sid == "" || presentedHash == "" || nextHash == "" || hmac.Equal([]byte(presentedHash), []byte(nextHash)) {
+	if r.cache == nil {
+		return nil, errors.New("DragonflyDB is required for login sessions")
+	}
+	if userID <= 0 || sid == "" || presentedHash == "" || nextHash == "" || presentedHash == nextHash || grace < 0 {
 		return nil, ErrUserSessionInvalid
 	}
 	if now <= 0 {
 		now = time.Now().Unix()
 	}
-	graceSeconds := int64(grace / time.Second)
-	if graceSeconds < 0 {
-		return nil, ErrUserSessionInvalid
+	result, err := rotateSession.Run(context.Background(), r.cache, []string{userSessionCacheKey(sid), userSessionIndex(userID, "active")}, userID, presentedHash, nextHash, now, now+int64(grace/time.Second), sid, max(common.UserSessionRevokedRetentionDays, 1)*24*60*60*1000).Int()
+	if err != nil {
+		return nil, err
 	}
-	for range 3 {
-		cacheDeadline := userSessionCacheDeadline()
-		var session UserSession
-		if err := r.db.Where("sid = ? AND user_id = ?", sid, userID).First(&session).Error; err != nil {
-			return nil, err
-		}
-		if session.Status != UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now {
-			return nil, ErrUserSessionInactive
-		}
-
-		if hmac.Equal([]byte(session.RefreshHash), []byte(presentedHash)) {
-			result := r.db.Model(&UserSession{}).
-				Where("sid = ? AND user_id = ? AND status = ? AND revoked_at = ? AND expires_at > ? AND refresh_hash = ?",
-					sid, userID, UserSessionStatusActive, 0, now, presentedHash).
-				Updates(map[string]interface{}{
-					"previous_refresh_hash": session.RefreshHash,
-					"previous_valid_until":  now + graceSeconds,
-					"refresh_hash":          nextHash,
-					"last_active_at":        now,
-				})
-			if result.Error != nil {
-				return nil, result.Error
-			}
-			if result.RowsAffected == 0 {
-				continue
-			}
-			session.PreviousRefreshHash = session.RefreshHash
-			session.PreviousValidUntil = now + graceSeconds
-			session.RefreshHash = nextHash
-			session.LastActiveAt = now
-			if err := r.writeUserSessionCache(sessionCacheEntry(&session), cacheDeadline); err != nil {
-				if errors.Is(err, errUserSessionCacheObservationStale) {
-					if confirmErr := r.confirmUserSessionActiveSnapshot(&session); confirmErr != nil {
-						return nil, confirmErr
-					}
-				} else if errors.Is(err, ErrUserSessionInactive) {
-					return nil, err
-				} else {
-					common.SysLog("failed to update rotated user session cache: " + err.Error())
-				}
-			}
-			return &session, nil
-		}
-
-		if session.PreviousRefreshHash == "" || !hmac.Equal([]byte(session.PreviousRefreshHash), []byte(presentedHash)) {
-			return nil, ErrUserSessionRefreshInvalid
-		}
-		if now <= session.PreviousValidUntil {
-			return &session, ErrUserSessionRefreshRace
-		}
-
-		// Once a known previous token is replayed outside the grace window the
-		// whole token family is compromised. Publish the deny fence first, then
-		// revoke the active row regardless of a concurrent refresh rotation.
-		if err := r.writeUserSessionDenyFence(&session, UserSessionStatusRevoking, now, "refresh_reuse"); err != nil {
-			return nil, err
-		}
-		result := r.db.Model(&UserSession{}).
-			Where("sid = ? AND user_id = ? AND status = ? AND revoked_at = ? AND expires_at > ?",
-				sid, userID, UserSessionStatusActive, 0, now).
-			Updates(map[string]interface{}{
-				"status":         UserSessionStatusRevoked,
-				"revoked_at":     now,
-				"revoked_reason": "refresh_reuse",
-			})
-		if result.Error != nil {
-			return nil, result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil, ErrUserSessionInactive
-		}
-		session.Status = UserSessionStatusRevoked
-		session.RevokedAt = now
-		session.RevokedReason = "refresh_reuse"
-		if err := r.writeUserSessionCache(sessionCacheEntry(&session), time.Time{}); err != nil {
-			common.SysLog("failed to cache refresh-reuse session revoke: " + err.Error())
-		}
+	switch result {
+	case 0:
+		return nil, ErrUserSessionInactive
+	case -1:
+		return nil, ErrUserSessionRefreshInvalid
+	case -3:
 		return nil, ErrUserSessionRefreshReuse
 	}
-	return nil, ErrUserSessionRefreshInvalid
+	s, err := r.GetUserSessionCached(sid)
+	if err != nil {
+		return nil, err
+	}
+	if result == -2 {
+		return s, ErrUserSessionRefreshRace
+	}
+	return s, nil
 }
 
+var revokeSession = redis.NewScript(`
+if redis.call('HGET',KEYS[1],'Status') ~= 'active' or tonumber(redis.call('HGET',KEYS[1],'ExpiresAt') or '0') <= tonumber(ARGV[3]) then return 0 end
+if ARGV[1] ~= '' and redis.call('HGET',KEYS[1],'UserID') ~= ARGV[1] then return 0 end
+if ARGV[2] ~= '' then
+    local valid = redis.call('HGET',KEYS[1],'RefreshHash') == ARGV[2]
+    if not valid then valid = redis.call('HGET',KEYS[1],'PreviousRefreshHash') == ARGV[2] and tonumber(ARGV[3]) <= tonumber(redis.call('HGET',KEYS[1],'PreviousValidUntil') or '0') end
+    if not valid then return 0 end
+end
+redis.call('HSET',KEYS[1],'Status','revoked','RevokedAt',ARGV[3],'RevokedReason',ARGV[4])
+redis.call('ZREM',KEYS[2],ARGV[5])
+if redis.call('PTTL',KEYS[1]) > tonumber(ARGV[6]) then redis.call('PEXPIRE',KEYS[1],ARGV[6]) end
+return 1
+`)
+
 func (r *Store) RevokeUserSession(userID int, sid, reason string) (bool, error) {
+	if r.cache == nil {
+		return false, errors.New("DragonflyDB is required for login sessions")
+	}
 	if userID <= 0 || sid == "" {
 		return false, ErrUserSessionInvalid
 	}
-	now := time.Now().Unix()
-	var candidate UserSession
-	if err := r.db.Where("sid = ? AND user_id = ?", sid, userID).First(&candidate).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	if candidate.Status != UserSessionStatusActive || candidate.RevokedAt != 0 || candidate.ExpiresAt <= now {
-		return false, nil
-	}
-	if err := r.writeUserSessionDenyFence(&candidate, UserSessionStatusRevoking, now, reason); err != nil {
-		return false, err
-	}
-
-	var revoked bool
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		var current UserSession
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sid = ? AND user_id = ?", sid, userID).First(&current).Error; err != nil {
-			return err
-		}
-		if current.Status != UserSessionStatusActive || current.RevokedAt != 0 || current.ExpiresAt <= now {
-			return nil
-		}
-		result := tx.Model(&UserSession{}).Where("sid = ? AND status = ?", sid, UserSessionStatusActive).Updates(map[string]interface{}{
-			"status":         UserSessionStatusRevoked,
-			"revoked_at":     now,
-			"revoked_reason": reason,
-		})
-		if result.Error != nil {
-			return result.Error
-		}
-		revoked = result.RowsAffected == 1
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-	if revoked {
-		candidate.Status = UserSessionStatusRevoked
-		candidate.RevokedAt = now
-		candidate.RevokedReason = reason
-		if err := r.writeUserSessionCache(sessionCacheEntry(&candidate), time.Time{}); err != nil {
-			common.SysLog("failed to finalize user session revoke tombstone: " + err.Error())
-		}
-	}
-	return revoked, nil
+	result, err := revokeSession.Run(context.Background(), r.cache, []string{userSessionCacheKey(sid), userSessionIndex(userID, "active")}, userID, "", time.Now().Unix(), reason, sid, max(common.UserSessionRevokedRetentionDays, 1)*24*60*60*1000).Int()
+	return result == 1, err
 }
-
-// RevokeUserSessionByRefreshHash is used when logout is authenticated only by
-// the HttpOnly refresh cookie. Possession of a SID alone is insufficient. The
-// immediately previous digest is accepted only inside the refresh race window.
-func (r *Store) RevokeUserSessionByRefreshHash(sid, presentedHash, reason string) (bool, error) {
-	if sid == "" || presentedHash == "" {
+func (r *Store) RevokeUserSessionByRefreshHash(sid, hash, reason string) (bool, error) {
+	if hash == "" {
 		return false, ErrUserSessionInvalid
 	}
-	now := time.Now().Unix()
-	var session UserSession
-	var revoked bool
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sid = ?", sid).First(&session).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			return err
-		}
-		if session.Status != UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now {
-			return nil
-		}
-		validCurrent := hmac.Equal([]byte(session.RefreshHash), []byte(presentedHash))
-		validPrevious := session.PreviousRefreshHash != "" && now <= session.PreviousValidUntil &&
-			hmac.Equal([]byte(session.PreviousRefreshHash), []byte(presentedHash))
-		if !validCurrent && !validPrevious {
-			return nil
-		}
-		if err := r.writeUserSessionDenyFence(&session, UserSessionStatusRevoking, now, reason); err != nil {
-			return err
-		}
-		result := tx.Model(&UserSession{}).Where("sid = ? AND status = ?", sid, UserSessionStatusActive).Updates(map[string]interface{}{
-			"status":         UserSessionStatusRevoked,
-			"revoked_at":     now,
-			"revoked_reason": reason,
-		})
-		if result.Error != nil {
-			return result.Error
-		}
-		revoked = result.RowsAffected == 1
-		if revoked {
-			session.Status = UserSessionStatusRevoked
-			session.RevokedAt = now
-			session.RevokedReason = reason
-		}
-		return nil
-	})
+	s, err := r.GetUserSessionBySID(sid)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	if revoked {
-		if err := r.writeUserSessionCache(sessionCacheEntry(&session), time.Time{}); err != nil {
-			common.SysLog("failed to finalize refresh-authenticated session revoke tombstone: " + err.Error())
-		}
-	}
-	return revoked, nil
+	result, err := revokeSession.Run(context.Background(), r.cache, []string{userSessionCacheKey(sid), userSessionIndex(s.UserID, "active")}, s.UserID, hash, time.Now().Unix(), reason, sid, max(common.UserSessionRevokedRetentionDays, 1)*24*60*60*1000).Int()
+	return result == 1, err
 }
 
-// AdvanceUserSessionAuthVersion preserves one browser session across a
-// user-level security-version change. Both old access JWTs and concurrent
-// updates are invalidated by advancing the per-session version as well.
+var advanceSession = redis.NewScript(`
+if redis.call('HGET',KEYS[1],'UserID') ~= ARGV[1] or redis.call('HGET',KEYS[1],'Status') ~= 'active' or tonumber(redis.call('HGET',KEYS[1],'ExpiresAt') or '0') <= tonumber(ARGV[5]) then return 0 end
+if redis.call('HGET',KEYS[1],'Version') ~= ARGV[2] or redis.call('HGET',KEYS[1],'UserAuthVersion') ~= ARGV[3] then return 0 end
+redis.call('HINCRBY',KEYS[1],'Version',1)
+redis.call('HSET',KEYS[1],'UserAuthVersion',ARGV[4],'LastActiveAt',ARGV[5])
+return 1
+`)
+
 func (r *Store) AdvanceUserSessionAuthVersion(userID int, sid string, expectedSessionVersion, expectedUserAuthVersion, nextUserAuthVersion int64) (*UserSession, error) {
+	if r.cache == nil {
+		return nil, errors.New("DragonflyDB is required for login sessions")
+	}
 	if userID <= 0 || sid == "" || expectedSessionVersion <= 0 || expectedUserAuthVersion <= 0 || nextUserAuthVersion <= expectedUserAuthVersion {
 		return nil, ErrUserSessionInvalid
 	}
-	cacheDeadline := userSessionCacheDeadline()
-	now := time.Now().Unix()
-	var session UserSession
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sid = ? AND user_id = ?", sid, userID).First(&session).Error; err != nil {
-			return err
-		}
-		if session.Status != UserSessionStatusActive || session.ExpiresAt <= now ||
-			session.Version != expectedSessionVersion || session.UserAuthVersion != expectedUserAuthVersion {
-			return ErrUserSessionInactive
-		}
-		session.Version++
-		session.UserAuthVersion = nextUserAuthVersion
-		session.LastActiveAt = now
-		result := tx.Model(&UserSession{}).
-			Where("sid = ? AND status = ? AND version = ? AND user_auth_version = ?", sid, UserSessionStatusActive, expectedSessionVersion, expectedUserAuthVersion).
-			Updates(map[string]interface{}{
-				"version":           session.Version,
-				"user_auth_version": session.UserAuthVersion,
-				"last_active_at":    session.LastActiveAt,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrUserSessionInactive
-		}
-		return nil
-	})
+	result, err := advanceSession.Run(context.Background(), r.cache, []string{userSessionCacheKey(sid)}, userID, expectedSessionVersion, expectedUserAuthVersion, nextUserAuthVersion, time.Now().Unix()).Int()
 	if err != nil {
 		return nil, err
 	}
-	if err := r.writeUserSessionCache(sessionCacheEntry(&session), cacheDeadline); err != nil {
-		if errors.Is(err, errUserSessionCacheObservationStale) {
-			if confirmErr := r.confirmUserSessionActiveSnapshot(&session); confirmErr != nil {
-				return nil, confirmErr
-			}
-		} else {
-			return nil, err
-		}
+	if result != 1 {
+		return nil, ErrUserSessionInactive
 	}
-	return &session, nil
+	return r.GetUserSessionCached(sid)
 }
-
 func (r *Store) RevokeOtherUserSessions(userID int, currentSID, reason string) (int64, error) {
 	return r.revokeUserSessions(userID, currentSID, reason)
 }
-
 func (r *Store) RevokeAllUserSessions(userID int, reason string) (int64, error) {
 	return r.revokeUserSessions(userID, "", reason)
 }
-
 func (r *Store) revokeUserSessions(userID int, excludedSID, reason string) (int64, error) {
+	if r.cache == nil {
+		return 0, errors.New("DragonflyDB is required for login sessions")
+	}
 	if userID <= 0 {
 		return 0, ErrUserSessionInvalid
 	}
-	now := time.Now().Unix()
-	var totalAffected int64
-	for {
-		query := r.db.Where("user_id = ? AND status = ? AND expires_at > ?", userID, UserSessionStatusActive, now)
-		if excludedSID != "" {
-			query = query.Where("sid <> ?", excludedSID)
+	sids, err := r.cache.ZRange(context.Background(), userSessionIndex(userID, "active"), 0, -1).Result()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	for _, sid := range sids {
+		if sid == excludedSID {
+			continue
 		}
-		var candidates []UserSession
-		if err := query.Order("sid").Limit(userSessionRevokeBatchSize).Find(&candidates).Error; err != nil {
-			return totalAffected, err
-		}
-		if len(candidates) == 0 {
-			return totalAffected, nil
-		}
-		for i := range candidates {
-			if err := r.writeUserSessionDenyFence(&candidates[i], UserSessionStatusRevoking, now, reason); err != nil {
-				return totalAffected, err
-			}
-		}
-
-		sids := make([]string, 0, len(candidates))
-		for i := range candidates {
-			sids = append(sids, candidates[i].SID)
-		}
-		var affected int64
-		var revoked []UserSession
-		err := r.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sid IN ? AND status = ?", sids, UserSessionStatusActive).Find(&revoked).Error; err != nil {
-				return err
-			}
-			if len(revoked) == 0 {
-				return nil
-			}
-			lockedSIDs := make([]string, 0, len(revoked))
-			for i := range revoked {
-				lockedSIDs = append(lockedSIDs, revoked[i].SID)
-			}
-			result := tx.Model(&UserSession{}).Where("sid IN ? AND status = ?", lockedSIDs, UserSessionStatusActive).Updates(map[string]interface{}{
-				"status":         UserSessionStatusRevoked,
-				"revoked_at":     now,
-				"revoked_reason": reason,
-			})
-			affected = result.RowsAffected
-			return result.Error
-		})
+		revoked, err := r.RevokeUserSession(userID, sid, reason)
 		if err != nil {
-			return totalAffected, err
+			return count, err
 		}
-		totalAffected += affected
-		for i := range revoked {
-			revoked[i].Status = UserSessionStatusRevoked
-			revoked[i].RevokedAt = now
-			revoked[i].RevokedReason = reason
-			if err := r.writeUserSessionCache(sessionCacheEntry(&revoked[i]), time.Time{}); err != nil {
-				common.SysLog("failed to finalize bulk user session revoke tombstone: " + err.Error())
-			}
+		if revoked {
+			count++
 		}
 	}
+	return count, nil
 }
 
-func (r *Store) DeleteExpiredUserSessions(now int64) error {
-	if now <= 0 {
-		now = time.Now().Unix()
+var deleteSessionForUser = redis.NewScript(`
+if redis.call('HGET',KEYS[1],'UserID') ~= ARGV[1] then return 0 end
+local sid = redis.call('HGET',KEYS[1],'SID')
+redis.call('DEL',KEYS[1])
+for i=2,4 do redis.call('ZREM',KEYS[i],sid) end
+return 1
+`)
+
+// DeleteUserSessions erases session metadata after an account is hard-deleted.
+func (r *Store) DeleteUserSessions(userID int) error {
+	if r.cache == nil {
+		return errors.New("DragonflyDB is required for login sessions")
 	}
-	if common.UserSessionRevokedRetentionDays <= 0 || common.UserSessionIssuanceWindowSeconds <= 0 {
+	if userID <= 0 {
 		return ErrUserSessionInvalid
 	}
-	issuanceCutoff := now - common.UserSessionIssuanceWindowSeconds
-	revokedBefore := now - int64(common.UserSessionRevokedRetentionDays)*24*60*60
-	return r.deleteExpiredUserSessionsBefore(now, issuanceCutoff, revokedBefore)
-}
-
-func (r *Store) DeleteOldRevokedUserSessions(now int64) error {
-	if now <= 0 {
-		now = time.Now().Unix()
-	}
-	if common.UserSessionRevokedRetentionDays <= 0 || common.UserSessionIssuanceWindowSeconds <= 0 {
-		return ErrUserSessionInvalid
-	}
-	issuanceCutoff := now - common.UserSessionIssuanceWindowSeconds
-	revokedBefore := now - int64(common.UserSessionRevokedRetentionDays)*24*60*60
-	return r.deleteRevokedUserSessionsBefore(revokedBefore, issuanceCutoff)
-}
-
-func (r *Store) deleteExpiredUserSessionsBefore(expiredBefore, issuanceCutoff, revokedBefore int64) error {
+	ctx := context.Background()
+	var cursor uint64
 	for {
-		var sids []string
-		if err := r.db.Model(&UserSession{}).
-			Where(
-				"expires_at < ? AND created_at <= ? AND (status <> ? OR revoked_at <= 0 OR revoked_at < ?)",
-				expiredBefore,
-				issuanceCutoff,
-				UserSessionStatusRevoked,
-				revokedBefore,
-			).
-			Order("expires_at").Limit(userSessionCleanupScanLimit).Pluck("sid", &sids).Error; err != nil {
+		keys, next, err := r.cache.Scan(ctx, cursor, "auth:session:*", 100).Result()
+		if err != nil {
 			return err
 		}
-		if len(sids) == 0 {
-			return nil
-		}
-		for start := 0; start < len(sids); start += userSessionCleanupBatchSize {
-			end := start + userSessionCleanupBatchSize
-			if end > len(sids) {
-				end = len(sids)
-			}
-			if err := r.db.Where("sid IN ?", sids[start:end]).
-				Where(
-					"expires_at < ? AND created_at <= ? AND (status <> ? OR revoked_at <= 0 OR revoked_at < ?)",
-					expiredBefore,
-					issuanceCutoff,
-					UserSessionStatusRevoked,
-					revokedBefore,
-				).
-				Delete(&UserSession{}).Error; err != nil {
+		for _, key := range keys {
+			if err := deleteSessionForUser.Run(ctx, r.cache, []string{key, userSessionIndex(userID, "active"), userSessionIndex(userID, "issued"), userSessionIndex(0, "issued")}, userID).Err(); err != nil {
 				return err
 			}
 		}
-	}
-}
-
-func (r *Store) deleteRevokedUserSessionsBefore(revokedBefore, issuanceCutoff int64) error {
-	for {
-		var sids []string
-		if err := r.db.Model(&UserSession{}).
-			Where(
-				"status = ? AND revoked_at > 0 AND revoked_at < ? AND created_at <= ?",
-				UserSessionStatusRevoked,
-				revokedBefore,
-				issuanceCutoff,
-			).
-			Order("revoked_at").Limit(userSessionCleanupScanLimit).Pluck("sid", &sids).Error; err != nil {
-			return err
-		}
-		if len(sids) == 0 {
-			return nil
-		}
-		for start := 0; start < len(sids); start += userSessionCleanupBatchSize {
-			end := start + userSessionCleanupBatchSize
-			if end > len(sids) {
-				end = len(sids)
-			}
-			if err := r.db.Where("sid IN ?", sids[start:end]).
-				Where(
-					"status = ? AND revoked_at > 0 AND revoked_at < ? AND created_at <= ?",
-					UserSessionStatusRevoked,
-					revokedBefore,
-					issuanceCutoff,
-				).
-				Delete(&UserSession{}).Error; err != nil {
-				return err
-			}
+		cursor = next
+		if cursor == 0 {
+			return r.cache.Del(ctx, userSessionIndex(userID, "active"), userSessionIndex(userID, "issued")).Err()
 		}
 	}
-}
-
-var writeUserSessionCacheScript = redis.NewScript(`
-local current_status = redis.call('HGET', KEYS[1], 'Status')
-local current_version = tonumber(redis.call('HGET', KEYS[1], 'Version') or '0')
-if ARGV[5] == 'active' and (current_status == 'revoking' or current_status == 'revoked') then
-  return 0
-end
-if current_version > tonumber(ARGV[3]) then
-  return 0
-end
-redis.call('HSET', KEYS[1],
-  'SID', ARGV[1], 'UserID', ARGV[2], 'Version', ARGV[3],
-  'UserAuthVersion', ARGV[4], 'Status', ARGV[5],
-  'LoginMethod', ARGV[6], 'IP', ARGV[7], 'UserAgent', ARGV[8],
-  'CreatedAt', ARGV[9], 'LastActiveAt', ARGV[10], 'ExpiresAt', ARGV[11],
-  'RevokedAt', ARGV[12], 'RevokedReason', ARGV[13], 'CacheSchema', ARGV[14])
-if ARGV[5] == 'active' then
-  redis.call('PEXPIREAT', KEYS[1], ARGV[15])
-else
-  redis.call('PEXPIRE', KEYS[1], ARGV[15])
-end
-return 1`)
-
-func userCacheTTLSeconds() int {
-	ttl := common.RedisKeyCacheSeconds()
-	if ttl <= 0 {
-		return 60
-	}
-	return ttl
 }

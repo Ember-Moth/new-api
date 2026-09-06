@@ -490,8 +490,8 @@ func TestListModelsTokenLimitUsesResolvedCustomAutoGroups(t *testing.T) {
 }
 
 func TestSetupLoginDoesNotTouchPasswordWhenPasswordFieldOmitted(t *testing.T) {
+	testdb.UseCache(t)
 	db := setupModelListControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.UserSession{}))
 
 	hashedPassword, err := common.Password2Hash("CurrentPassword123")
 	require.NoError(t, err)

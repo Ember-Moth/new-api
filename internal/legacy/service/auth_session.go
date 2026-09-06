@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/module/identity/authn"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	"github.com/QuantumNous/new-api/internal/module/identity/sessions"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -37,7 +37,7 @@ func AuthenticationRuntime() *authn.Runtime {
 			return (*entity.User)(user), err
 		},
 		BumpUserAuthVersion: usercache.New(model.DB).BumpUserAuthVersion,
-		Sessions:            sessions.New(model.DB),
+		Sessions:            sessions.New(model.DB, common.RDB),
 	})
 }
 func CreateLoginSession(userID int, loginMethod, ip, userAgent string) (*AuthBundle, error) {

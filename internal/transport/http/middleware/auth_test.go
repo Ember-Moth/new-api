@@ -22,6 +22,7 @@ import (
 )
 
 func setupDashboardAuthMiddlewareTest(t *testing.T) {
+	testdb.UseCache(t)
 	t.Helper()
 	previousDB := model.DB
 	previousType := common.MainDatabaseType()
@@ -29,7 +30,7 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	previousSecret := common.SessionSecret
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}))
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false

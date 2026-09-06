@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	identitycontract "github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/google/uuid"
 )
 
@@ -57,20 +57,6 @@ func (r *Runtime) createLoginSession(userID int, expectedAuthVersion int64, logi
 		return nil, ErrLoginSessionRevoked
 	}
 	now := time.Now().Unix()
-	activeCount, err := r.deps.Sessions.CountActiveUserSessions(userID, now)
-	if err != nil {
-		return nil, err
-	}
-	if activeCount >= int64(common.UserSessionActiveLimit) {
-		return nil, identitycontract.ErrUserSessionLimit
-	}
-	issuanceCount, err := r.deps.Sessions.CountUserSessionsCreatedSince(userID, now-common.UserSessionIssuanceWindowSeconds)
-	if err != nil {
-		return nil, err
-	}
-	if issuanceCount >= int64(common.UserSessionIssuanceLimit) {
-		return nil, identitycontract.ErrUserSessionIssuanceLimit
-	}
 	refreshSecret, err := common.GenerateRandomCharsKey(64)
 	if err != nil {
 		return nil, err

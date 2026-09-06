@@ -33,11 +33,11 @@ func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 	require.NoError(t, DB.Create(&TwoFABackupCode{UserId: user.Id, CodeHash: "hash"}).Error)
 	require.NoError(t, DB.Create(&PasskeyCredential{UserID: user.Id, CredentialID: "credential", PublicKey: "public-key"}).Error)
 	require.NoError(t, DB.Create(&UserOAuthBinding{UserId: user.Id, ProviderId: 1, ProviderUserId: "provider-user"}).Error)
-	require.NoError(t, DB.Create(&UserSession{
+	require.NoError(t, CreateUserSession(&UserSession{
 		SID: "hard-delete-session", UserID: user.Id, Version: 1, UserAuthVersion: 1,
 		Status: UserSessionStatusActive, RefreshHash: "refresh-hash", LoginMethod: "password",
-		LastActiveAt: 1, ExpiresAt: 2,
-	}).Error)
+		LastActiveAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}))
 
 	flowToken, _, err := CreateAuthFlow(AuthFlowCreate{Purpose: AuthFlowPurposeTwoFALogin, UserId: user.Id, ExpiresAt: time.Now().Add(time.Minute)})
 	require.NoError(t, err)
@@ -67,7 +67,6 @@ func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 		&TwoFABackupCode{},
 		&PasskeyCredential{},
 		&UserOAuthBinding{},
-		&UserSession{},
 		&ExternalIdentityClaim{},
 	} {
 		require.NoError(t, DB.Unscoped().Model(record).Where("user_id = ?", user.Id).Count(&count).Error)
@@ -92,11 +91,11 @@ func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.
 	require.NoError(t, DB.Create(&TwoFABackupCode{UserId: user.Id, CodeHash: "hash"}).Error)
 	require.NoError(t, DB.Create(&PasskeyCredential{UserID: user.Id, CredentialID: "credential-success", PublicKey: "public-key"}).Error)
 	require.NoError(t, DB.Create(&UserOAuthBinding{UserId: user.Id, ProviderId: 1, ProviderUserId: "provider-user-success"}).Error)
-	require.NoError(t, DB.Create(&UserSession{
+	require.NoError(t, CreateUserSession(&UserSession{
 		SID: "hard-delete-success-session", UserID: user.Id, Version: 1, UserAuthVersion: 1,
 		Status: UserSessionStatusActive, RefreshHash: "refresh-hash", LoginMethod: "password",
-		LastActiveAt: 1, ExpiresAt: 2,
-	}).Error)
+		LastActiveAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}))
 	flowToken, _, err := CreateAuthFlow(AuthFlowCreate{Purpose: AuthFlowPurposeTwoFALogin, UserId: user.Id, ExpiresAt: time.Now().Add(time.Minute)})
 	require.NoError(t, err)
 	require.NoError(t, populateUserCache(user))
@@ -115,7 +114,6 @@ func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.
 		&TwoFABackupCode{},
 		&PasskeyCredential{},
 		&UserOAuthBinding{},
-		&UserSession{},
 		&ExternalIdentityClaim{},
 	} {
 		require.NoError(t, DB.Unscoped().Model(record).Where("user_id = ?", user.Id).Count(&count).Error)
@@ -123,6 +121,8 @@ func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.
 	}
 	_, err = GetAuthFlow(flowToken, AuthFlowMatch{Purpose: AuthFlowPurposeTwoFALogin})
 	assert.ErrorIs(t, err, ErrAuthFlowInvalid)
+	_, err = GetUserSessionBySID("hard-delete-success-session")
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	assert.False(t, server.Exists(getUserAuthFenceKey(user.Id)))
 	committed, err := common.RDB.Get(t.Context(), getUserAuthVersionKey(user.Id)).Result()
 	require.NoError(t, err)

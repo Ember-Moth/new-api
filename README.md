@@ -407,11 +407,11 @@ docker run --name new-api -d --restart always \
 > - 所有节点必须使用同一个主数据库，并设置相同的 `SESSION_SECRET`；否则 Access Token、Refresh 会话和临时鉴权流程无法一致校验。
 > - 连接同一个 DragonflyDB 的节点还必须设置相同的 `CRYPTO_SECRET`，否则节点生成的缓存键摘要不一致，无法正确共享缓存。
 
-登录 Session 和单用户活跃数/签发数限制均以数据库为权威。DragonflyDB 中的 Session 仅为短期缓存，TTL 跟随 `SYNC_FREQUENCY`（默认 60 秒），且不会超过 Session 的剩余寿命。
+登录 Session 和单用户活跃数/签发数限制仅存 DragonflyDB。签发、刷新和撤销采用原子操作，TTL 受会话到期时间约束；PostgreSQL 不再创建 `user_sessions`。
 
 应用启动必须配置 `REDIS_CONN_STRING`，所有实例共用同一个 DragonflyDB 逻辑数据库。会话撤销与版本发布通常即时传播，限流额度在实例之间共享。节点心跳仅存 DragonflyDB：每 30 秒更新、90 秒未上报视为离线，记录在最后一次写入 24 小时后自动过期。PostgreSQL 不再创建 `system_instances` 表。
 
-Session 的持久化与认证流程仍是后续状态迁移范围；当前仍保留数据库回源校验。
+会话丢失或缓存不可用时拒绝认证，不会从 PostgreSQL 重建旧会话；缓存状态仍存在时，应用实例重启不要求重新登录。
 
 Token、Origin 校验和 PAT 契约见[用户鉴权与登录会话](./docs/authentication.md)。
 
@@ -505,6 +505,6 @@ Docker Compose 会启动两个应用进程和 Nginx 入口，仍通过 `http://l
 
 两种角色均提供 `/healthz`；默认直接调试端口仅绑定本机，控制面 `3001`、数据面 `3002`。生产入口将 `/api/*`、前端与账单查询送到控制面，将 `/v1/*`（账单查询除外）、`/v1beta/*`、`/pg/*`、Midjourney 路径送到数据面。自定义插件若声明其他路径，须在 `deploy/nginx.conf` 补充对应的数据面转发规则。
 
-当前数据面仍访问 PostgreSQL 进行鉴权、计费和任务持久化。本批完成监听接口与维护任务的角色隔离；节点心跳、系统任务执行租约、邮箱验证码和 OAuth/Passkey/两步登录挑战已迁入 DragonflyDB；登录会话、配置主动发布和可靠结算仍在后续实施中。部署边界及验证见 [控制面与数据面拆分](docs/control-data-plane.md)。
+当前数据面仍访问 PostgreSQL 进行鉴权、计费和任务持久化。本批完成监听接口与维护任务的角色隔离；节点心跳、系统任务执行租约、邮箱验证码和 OAuth/Passkey/两步登录挑战已迁入 DragonflyDB；登录会话及其运行限制也已迁移；配置主动发布和可靠结算仍在后续实施中。部署边界及验证见 [控制面与数据面拆分](docs/control-data-plane.md)。
 
 认证挑战只存 DragonflyDB，成功校验时原子消费；后续数据库操作失败需要重新发起认证。外部签名断言的消费凭证独立保存在 PostgreSQL `auth_assertion_receipts`，与绑定等业务操作一同提交，避免缓存丢失后旧签名再次被接受。这些凭证没有挑战或会话 payload，并在签名失效后清理。

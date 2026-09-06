@@ -1399,3 +1399,8 @@ python3 /tmp/verify-new-api-clickhouse-only.py
 ### 第五十批：短期认证挑战迁入 DragonflyDB
 
 OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/消费及相对 TTL，移除 PostgreSQL `auth_flows`。外部签名消费独立为持久化安全凭证，与业务绑定一同提交，保证缓存丢失不恢复已用签名。完整根模块/RelayKit 测试、build/vet、真实缓存防重放回归及新库双角色两轮启动验证通过。登录会话、配置发布和可靠结算继续推进，见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第五十一批：登录会话与签发限制迁入 DragonflyDB
+
+移除 PostgreSQL `user_sessions`，登录会话、刷新轮换、撤销、活跃数量及签发窗口以 DragonflyDB 为权威。Lua 原子签发消除计数竞争，独立保留签发事件避免注销/密码重置绕过限制。删除旧快照回填与 SQL Session 清理；身份安全回归、真实 DragonflyDB 测试及注册登录后双角色重启保留会话验证通过。详细命令和后续配置发布/结算工作见 [控制面与数据面拆分](control-data-plane.md)。

@@ -376,7 +376,7 @@ func TestTelegramBindConsumesChallengesBeforeBindingTransaction(t *testing.T) {
 	forcedError := errors.New("forced telegram session query failure")
 	const callbackName = "test:telegram-bind-session-query-failure"
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Table != "user_sessions" {
+		if tx.Statement.Table != "users" {
 			return
 		}
 		if _, inTransaction := tx.Statement.ConnPool.(gorm.TxCommitter); inTransaction {

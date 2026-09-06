@@ -19,12 +19,13 @@ import (
 )
 
 func TestAuthLogoutRejectsRefreshCookieSessionMismatch(t *testing.T) {
+	testdb.UseCache(t)
 	previousDB := model.DB
 	previousRedis := common.RedisEnabled
 	previousSecret := common.SessionSecret
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}))
 	model.DB = db
 	common.RedisEnabled = false
 	common.SessionSecret = "auth-logout-mismatch-test-secret"
@@ -110,6 +111,7 @@ func TestWriteAuthSessionErrorMapsSessionGrowthLimits(t *testing.T) {
 }
 
 func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
+	testdb.UseCache(t)
 	previousDB := model.DB
 	previousRedis := common.RedisEnabled
 	previousActiveLimit := common.UserSessionActiveLimit
@@ -117,7 +119,7 @@ func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
 	previousIssuanceWindow := common.UserSessionIssuanceWindowSeconds
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}))
 	model.DB = db
 	common.RedisEnabled = false
 	common.UserSessionActiveLimit = 1
@@ -138,11 +140,11 @@ func TestSessionLimitDoesNotRecordRejectedLoginAsSuccessful(t *testing.T) {
 	}
 	require.NoError(t, db.Create(user).Error)
 	now := time.Now().Unix()
-	require.NoError(t, db.Create(&model.UserSession{
+	require.NoError(t, model.CreateUserSession(&model.UserSession{
 		SID: "existing-active-session", UserID: user.Id, Version: 1, UserAuthVersion: user.AuthVersion,
 		Status: model.UserSessionStatusActive, RefreshHash: "hash", LoginMethod: "password",
 		CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600,
-	}).Error)
+	}))
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

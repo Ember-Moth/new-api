@@ -129,3 +129,29 @@ python3 /tmp/verify-new-api-planes.py
 输出记录：`/tmp/new-api-flow-{full-tests,build,vet,startup}.log`。早期 `flow-tests`、`flow-regression`、`flow-dragonfly` 输出包含迁移过程中的失败；最终结论以上述完整验证结果为准。
 
 下一步：登录会话及其运行限制迁移；随后配置发布/补偿同步、后台任务可靠恢复和计费可靠结算。独立容器入口验证仍未执行，整体目标尚未完成。
+
+## 第六批：登录会话与签发限制迁入 DragonflyDB
+
+登录会话改为 DragonflyDB 权威 hash；移除 PostgreSQL `user_sessions` 及索引、GORM 映射、数据库回源、短期快照回填和分批 Session SQL 清理。记录包含服务端 HMAC 刷新摘要，不保存刷新令牌明文，API 序列化仍隐藏摘要。读取/刷新不延长原会话寿命，使用相对 TTL，缺失/故障时拒绝认证，不从 PostgreSQL 恢复旧登录状态。
+
+签发在一个 Lua 脚本内检查活跃上限与滑动签发窗口，同时创建会话及索引，消除“先计数后插入”的竞争窗口。签发事件独立保留在有序集合中，撤销、密码重置、会话到期不清空历史；账户硬删除才擦除该账号会话元数据。刷新摘要轮换、并发刷新识别、已知旧令牌超出宽限后的撤销、凭刷新秘密注销、会话安全版本 CAS 均采用 Lua。版本比较保留整数精度，覆盖超过 JavaScript 安全整数范围的值。
+
+账户与 `auth_version` 仍是 PostgreSQL 业务事实。设备列表查询当前账户版本后过滤共享会话，并保留当前设备、限制最大返回数量。缓存整体丢失要求重新登录；应用实例重启继续使用仍存在的共享会话。
+
+实际验证：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。使用前文三个 TEST_*_DSN 执行：
+
+```sh
+GOWORK=off make test
+GOWORK=off go test ./e2e ./internal/module/identity/internal/sessions -count=1
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+完整根模块和 RelayKit 测试通过；最终会话保留窗口调整后补跑真实缓存及会话回归。真实 DragonflyDB 验证多客户端并发签发上限、轮换、宽限与重放、撤销、缓存故障、密码重置保留签发历史。既有身份管理、2FA、Passkey、注销所有权、密码变更及账号删除回归改用会话 API 读取结果，保留行为保护；与旧 PostgreSQL 缓存回填和 SQL 索引相关的测试已移除。
+
+新库两角色各启动两轮，确认无 `user_sessions`/`auth_flows`/节点状态/租约表。验证通过控制面实际注册、登录，重启应用后原 Access Token 仍能访问自己的资料；同时保留业务数据、签名消费凭证和 ClickHouse 日志。
+
+输出：`/tmp/new-api-session-{full-tests,final-regression,build,vet,startup}.log`。其余早期 session 测试输出包含迭代中的失败，不作为最终验证结论。
+
+后续继续审计剩余运行状态，推进配置版本发布与补偿同步，随后处理后台任务恢复和计费可靠结算。容器入口集成验证仍待补，整体目标未完成。

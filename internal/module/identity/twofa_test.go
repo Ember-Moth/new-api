@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/legacy/service"
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
-	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,8 +54,8 @@ func TestTwoFAManagementRotatesSessionsAndRecoveryCodes(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = service.ValidateLoginSession(firstIdentity)
 	require.Error(t, err)
-	var revoked model.UserSession
-	require.NoError(t, f.db.Where("sid = ?", other.Session.SID).First(&revoked).Error)
+	revoked, err := model.GetUserSessionBySID(other.Session.SID)
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, revoked.Status)
 	status := selfRequest(t, f, active.AccessToken, http.MethodGet, "/self/2fa", nil)
 	require.True(t, status.Success, status.Message)
@@ -133,7 +133,7 @@ func TestTwoFAAdministratorResetEnforcesCurrentRoleAndRevokesSessions(t *testing
 	require.NoError(t, f.db.First(target, target.Id).Error)
 	assert.EqualValues(t, 3, target.AuthVersion)
 	assert.Equal(t, []string{"admin_twofa_disabled"}, f.revocations)
-	var stored model.UserSession
-	require.NoError(t, f.db.Where("sid = ?", browser.Session.SID).First(&stored).Error)
+	stored, err := model.GetUserSessionBySID(browser.Session.SID)
+	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
 }

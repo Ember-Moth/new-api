@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/QuantumNous/new-api/internal/legacy/service"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/transport/http/middleware"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -161,12 +161,9 @@ func TelegramBind(c *gin.Context) {
 			return errTelegramBindUserDisabled
 		}
 
-		var session model.UserSession
-		if err := tx.Where("sid = ? AND user_id = ?", flow.SessionId, flow.UserId).First(&session).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return service.ErrLoginSessionRevoked
-			}
-			return err
+		session, err := model.GetUserSessionBySID(flow.SessionId)
+		if err != nil || session.UserID != flow.UserId {
+			return service.ErrLoginSessionRevoked
 		}
 		if session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= time.Now().Unix() {
 			return service.ErrLoginSessionRevoked

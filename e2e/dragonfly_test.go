@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
 	identityflows "github.com/QuantumNous/new-api/internal/module/identity/flows"
+	usersessions "github.com/QuantumNous/new-api/internal/module/identity/sessions"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
@@ -81,6 +83,69 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
+
+	t.Run("session authority shares atomic issuance rotation and revocation", func(t *testing.T) {
+		oldActive, oldIssued := common.UserSessionActiveLimit, common.UserSessionIssuanceLimit
+		common.UserSessionActiveLimit, common.UserSessionIssuanceLimit = 1, 2
+		t.Cleanup(func() { common.UserSessionActiveLimit, common.UserSessionIssuanceLimit = oldActive, oldIssued })
+		node := redis.NewClient(client.Options())
+		t.Cleanup(func() { require.NoError(t, node.Close()) })
+		one, two := usersessions.New(database, client), usersessions.New(database, node)
+		assert.False(t, database.Migrator().HasTable("user_sessions"))
+		now := time.Now().Unix()
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		for i, store := range []*usersessions.Store{one, two} {
+			go func() {
+				<-start
+				results <- store.CreateUserSession(&model.UserSession{SID: fmt.Sprintf("atomic-session-%d", i), UserID: 987654, UserAuthVersion: 1, RefreshHash: "initial-hash", CreatedAt: now, ExpiresAt: now + 3600})
+			}()
+		}
+		close(start)
+		winners := 0
+		for range 2 {
+			err := <-results
+			if err == nil {
+				winners++
+			} else {
+				assert.ErrorIs(t, err, model.ErrUserSessionLimit)
+			}
+		}
+		require.Equal(t, 1, winners)
+		sid := "atomic-session-0"
+		current, err := one.GetUserSessionCached(sid)
+		if errors.Is(err, model.ErrUserSessionInactive) {
+			sid = "atomic-session-1"
+			current, err = one.GetUserSessionCached(sid)
+		}
+		require.NoError(t, err)
+		_, err = two.RotateUserSessionRefresh(current.UserID, sid, "unknown", "next", now, 5*time.Second)
+		assert.ErrorIs(t, err, model.ErrUserSessionRefreshInvalid)
+		_, err = two.RotateUserSessionRefresh(current.UserID, sid, "initial-hash", "next", now, 5*time.Second)
+		require.NoError(t, err)
+		_, err = one.RotateUserSessionRefresh(current.UserID, sid, "initial-hash", "loser", now+1, 5*time.Second)
+		assert.ErrorIs(t, err, model.ErrUserSessionRefreshRace)
+		_, err = one.RotateUserSessionRefresh(current.UserID, sid, "initial-hash", "replay", now+6, 5*time.Second)
+		assert.ErrorIs(t, err, model.ErrUserSessionRefreshReuse)
+		_, err = two.GetUserSessionCached(sid)
+		assert.ErrorIs(t, err, model.ErrUserSessionInactive)
+		count, err := one.CountUserSessionsCreatedSince(current.UserID, now-1)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, count)
+		session := &model.UserSession{SID: "second-session", UserID: current.UserID, UserAuthVersion: 1, RefreshHash: "second-hash", CreatedAt: now, ExpiresAt: now + 3600}
+		require.NoError(t, two.CreateUserSession(session))
+		revoked, err := one.RevokeUserSession(current.UserID, session.SID, "logout")
+		require.NoError(t, err)
+		assert.True(t, revoked)
+		assert.ErrorIs(t, two.CreateUserSession(&model.UserSession{SID: "third-session", UserID: current.UserID, UserAuthVersion: 1, RefreshHash: "third-hash", CreatedAt: now, ExpiresAt: now + 3600}), model.ErrUserSessionIssuanceLimit)
+		require.NoError(t, one.DeleteUserSessions(current.UserID))
+		_, err = two.GetUserSessionCached(session.SID)
+		assert.ErrorIs(t, err, model.ErrUserSessionInactive)
+		unavailable := redis.NewClient(client.Options())
+		require.NoError(t, unavailable.Close())
+		_, err = usersessions.New(database, unavailable).GetUserSessionCached(sid)
+		require.Error(t, err)
+	})
 
 	t.Run("authentication ceremonies use cache while spent provider signatures survive cache loss", func(t *testing.T) {
 		node := redis.NewClient(client.Options())
@@ -221,6 +286,8 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.NoError(t, err)
 		user := model.User{Username: "verification-reset", AffCode: "verification-reset", Email: email, Password: passwordHash, Status: common.UserStatusEnabled, AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)
+		login, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "reset-test")
+		require.NoError(t, err)
 		require.NoError(t, common.RegisterVerificationCodeWithKey(email, "reset-once", common.PasswordResetPurpose))
 		router := gin.New()
 		router.POST("/reset", controller.ResetPassword)
@@ -239,6 +306,11 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		require.NoError(t, database.First(&updated, user.Id).Error)
 		assert.True(t, common.ValidatePasswordAndHash(reset.Data, updated.Password))
 		assert.Greater(t, updated.AuthVersion, user.AuthVersion)
+		_, err = model.GetUserSessionCached(login.Session.SID)
+		assert.ErrorIs(t, err, model.ErrUserSessionInactive)
+		issued, err := model.CountUserSessionsCreatedSince(user.Id, time.Now().Add(-time.Hour).Unix())
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, issued)
 		replay := httptest.NewRecorder()
 		router.ServeHTTP(replay, httptest.NewRequest(http.MethodPost, "/reset", strings.NewReader(string(body))))
 		var replayBody struct {

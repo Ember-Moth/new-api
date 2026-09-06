@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/shared/common"
 )
 
 const authArtifactCleanupInterval = time.Hour
 
-// StartAuthArtifactCleanup removes expired dashboard Sessions and old
-// expired provider assertion receipts. Only control-plane instances perform cleanup.
+// StartAuthArtifactCleanup monitors shared session issuance and removes
+// expired provider assertion receipts. Session storage expires in DragonflyDB.
 func StartAuthArtifactCleanup() {
 	if !common.IsControlPlane {
 		return
@@ -38,12 +38,6 @@ func cleanupAuthArtifacts() {
 			common.UserSessionHourlyAlertThreshold,
 			int64(time.Hour/time.Second),
 		))
-	}
-	if err := model.DeleteExpiredUserSessions(now.Unix()); err != nil {
-		common.SysError("failed to delete expired user sessions: " + err.Error())
-	}
-	if err := model.DeleteOldRevokedUserSessions(now.Unix()); err != nil {
-		common.SysError("failed to delete old revoked user sessions: " + err.Error())
 	}
 	if err := model.DeleteExpiredAuthAssertionReceipts(now); err != nil {
 		common.SysError("failed to delete expired assertion receipts: " + err.Error())

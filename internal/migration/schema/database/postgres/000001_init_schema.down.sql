@@ -7,7 +7,6 @@ DROP TABLE quota_batch_receipts;
 DROP TABLE vendors;
 DROP TABLE users;
 DROP TABLE user_subscriptions;
-DROP TABLE user_sessions;
 DROP TABLE user_oauth_bindings;
 DROP TABLE two_fas;
 DROP TABLE two_fa_backup_codes;

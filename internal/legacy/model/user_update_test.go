@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/testdb"
+
 	"github.com/QuantumNous/new-api/internal/shared/common"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +15,7 @@ import (
 )
 
 func setupUserUpdateTestState(t *testing.T) {
+	testdb.UseCache(t)
 	t.Helper()
 	truncateTables(t)
 	require.NoError(t, DB.Exec("DELETE FROM users").Error)
@@ -425,7 +428,6 @@ func TestPasswordResetBumpsAuthVersionAndRevokesSessions(t *testing.T) {
 	}
 	require.NoError(t, DB.Create(user).Error)
 	t.Cleanup(func() { _ = DB.Unscoped().Delete(&User{}, user.Id).Error })
-	require.NoError(t, DB.AutoMigrate(&UserSession{}))
 	session := &UserSession{SID: "password-reset-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: UserSessionStatusActive, RefreshHash: "password-reset-refresh-hash", LoginMethod: "password", CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600}
 	require.NoError(t, CreateUserSession(session))
 
