@@ -23,8 +23,8 @@ import (
 
 func setupTaskPluginBindChannelTest(t *testing.T) *authz.Engine {
 	t.Helper()
-	wasMaster := common.IsMasterNode
-	common.IsMasterNode = true
+	wasMaster := common.IsControlPlane
+	common.IsControlPlane = true
 	previousRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
 	originalDB, originalLogDB := model.DB, model.LOG_DB
@@ -39,7 +39,7 @@ func setupTaskPluginBindChannelTest(t *testing.T) *authz.Engine {
 	authorization, err := authz.New(database, true)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		common.IsMasterNode = wasMaster
+		common.IsControlPlane = wasMaster
 		common.RedisEnabled = previousRedisEnabled
 		model.DB = originalDB
 		model.LOG_DB = originalLogDB

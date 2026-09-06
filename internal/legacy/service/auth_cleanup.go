@@ -11,9 +11,9 @@ import (
 const authArtifactCleanupInterval = time.Hour
 
 // StartAuthArtifactCleanup removes expired dashboard Sessions and old
-// one-time authentication flows. Only the master instance performs cleanup.
+// one-time authentication flows. Only control-plane instances perform cleanup.
 func StartAuthArtifactCleanup() {
-	if !common.IsMasterNode {
+	if !common.IsControlPlane {
 		return
 	}
 	go func() {

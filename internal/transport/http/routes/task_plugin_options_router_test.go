@@ -19,8 +19,8 @@ import (
 )
 
 func TestGetTaskPluginOptionsAdminForbiddenRootAllowed(t *testing.T) {
-	wasMaster := common.IsMasterNode
-	common.IsMasterNode = true
+	wasMaster := common.IsControlPlane
+	common.IsControlPlane = true
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -29,7 +29,7 @@ func TestGetTaskPluginOptionsAdminForbiddenRootAllowed(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&identityentity.CasbinRule{}, &identityentity.AuthzRole{}))
 	authorization, err := authz.New(db, true)
 	require.NoError(t, err)
-	t.Cleanup(func() { common.IsMasterNode = wasMaster })
+	t.Cleanup(func() { common.IsControlPlane = wasMaster })
 
 	gin.SetMode(gin.TestMode)
 	for _, testCase := range []struct {

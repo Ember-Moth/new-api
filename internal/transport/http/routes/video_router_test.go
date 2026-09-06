@@ -20,9 +20,9 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	previousDB := model.DB
 	previousDatabaseType := common.MainDatabaseType()
 
-	previousMasterNode := common.IsMasterNode
+	previousMasterNode := common.IsControlPlane
 	previousRedisEnabled := common.RedisEnabled
-	common.IsMasterNode = false
+	common.IsControlPlane = false
 	common.RedisEnabled = false
 	t.Setenv("SQL_DSN", testdb.DSN(t))
 	require.NoError(t, model.InitDB())
@@ -35,7 +35,7 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 		model.DB = previousDB
 		common.SetMainDatabaseType(previousDatabaseType)
 
-		common.IsMasterNode = previousMasterNode
+		common.IsControlPlane = previousMasterNode
 		common.RedisEnabled = previousRedisEnabled
 	})
 

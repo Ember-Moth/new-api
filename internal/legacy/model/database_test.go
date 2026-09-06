@@ -87,13 +87,13 @@ func TestDatabaseRejectsMissingAndUnsupportedDSNs(t *testing.T) {
 func TestPostgreSQLStartupPreservesDataAndIndexesAcrossRestarts(t *testing.T) {
 	previousDB, previousLogDB := DB, LOG_DB
 	previousMainType := common.MainDatabaseType()
-	previousMaster := common.IsMasterNode
+	previousMaster := common.IsControlPlane
 	t.Cleanup(func() {
 		DB, LOG_DB = previousDB, previousLogDB
 		common.SetMainDatabaseType(previousMainType)
-		common.IsMasterNode = previousMaster
+		common.IsControlPlane = previousMaster
 	})
-	common.IsMasterNode = true
+	common.IsControlPlane = true
 	t.Setenv("SQL_DSN", testdb.DSN(t))
 	require.NoError(t, InitDB())
 	_, dsn, cleanup, err := testdb.NewLogDatabase(DB)
@@ -265,11 +265,11 @@ func TestClickHouseLogMigrationsPreserveRowsAndApplyRetention(t *testing.T) {
 	for range 2 {
 		require.NoError(t, <-results)
 	}
-	previousDB, previousLogDB, previousMaster := DB, LOG_DB, common.IsMasterNode
+	previousDB, previousLogDB, previousMaster := DB, LOG_DB, common.IsControlPlane
 	t.Cleanup(func() {
-		DB, LOG_DB, common.IsMasterNode = previousDB, previousLogDB, previousMaster
+		DB, LOG_DB, common.IsControlPlane = previousDB, previousLogDB, previousMaster
 	})
-	DB, common.IsMasterNode = coordinator, true
+	DB, common.IsControlPlane = coordinator, true
 	t.Setenv("LOG_SQL_DSN", logDSN)
 	t.Setenv("LOG_SQL_CLICKHOUSE_TTL_DAYS", "7")
 	require.NoError(t, InitLogDB())

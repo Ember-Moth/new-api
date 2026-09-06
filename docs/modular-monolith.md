@@ -1374,3 +1374,8 @@ python3 /tmp/verify-new-api-clickhouse-only.py
 真实 ClickHouse 回归覆盖日志写入、同秒同请求游标分页、用户隔离与脱敏、筛选统计、清理任务、迁移并发和 TTL。原账务、认证、任务及 DragonflyDB 回归继续使用真实 ClickHouse 日志库。Compose 的 YAML、日志 DSN 与服务依赖检查通过；本机验证没有启动 Docker 容器。
 
 输出：`/tmp/new-api-clickhouse-only-build.log`、`/tmp/new-api-clickhouse-only-full-tests.log`、`/tmp/new-api-clickhouse-only-vet.log`、`/tmp/new-api-clickhouse-only-regression.log`、`/tmp/new-api-clickhouse-only-startup.log`。
+
+
+### 第四十六批：控制面与数据面监听角色
+
+新增 `APP_ROLE=control|data`，移除 `NODE_TYPE`。管理、前端与转发路由分离，迁移/授权初始化/维护仅控制面执行，提供统一 `/healthz`。Compose 拆分两个应用进程及统一 Nginx 入口。根模块与 RelayKit 测试、build/vet，以及 PostgreSQL 18.6、ClickHouse 26.9.1.762、DragonflyDB v1.40.2 上的新库双角色两轮启动验证通过。容器运行时不可用，入口代理集成验证待补。详细边界及后续状态、配置、账务工作见 [控制面与数据面拆分](control-data-plane.md)。

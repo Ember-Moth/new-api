@@ -58,6 +58,7 @@ web/           — Frontend (React 19, Rsbuild, Base UI, Tailwind)
 - New module implementations must not import `internal/legacy/*` or the transitional HTTP controller package. Pass the required dependencies through constructors.
 - Module core code uses `context.Context` and owned contracts; Gin handlers belong in the module's `transport/http` package.
 - Infrastructure must not depend on business modules or inbound transport. Keep module implementation under its own nested `internal/` directory.
+- Application processes use `APP_ROLE=control` (management API, dashboard, migrations and maintenance) or `APP_ROLE=data` (relay/protocol API). Do not register management routes or a dashboard fallback on data-plane listeners. `NODE_TYPE` has been removed. See `docs/control-data-plane.md` for the remaining state/configuration/settlement work.
 - Build the executable with `go build ./cmd/new-api`; `web/assets.go` embeds the built `web/dist` resources.
 
 ## Internationalization (i18n)

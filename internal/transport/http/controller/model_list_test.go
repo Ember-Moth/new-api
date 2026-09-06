@@ -64,11 +64,11 @@ func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 func initModelListColumnNames(t *testing.T) {
 	t.Helper()
 
-	originalIsMasterNode := common.IsMasterNode
+	originalIsControlPlane := common.IsControlPlane
 	originalMainDatabaseType := common.MainDatabaseType()
 	originalSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
 	defer func() {
-		common.IsMasterNode = originalIsMasterNode
+		common.IsControlPlane = originalIsControlPlane
 		common.SetMainDatabaseType(originalMainDatabaseType)
 		if hadSQLDSN {
 			require.NoError(t, os.Setenv("SQL_DSN", originalSQLDSN))
@@ -77,7 +77,7 @@ func initModelListColumnNames(t *testing.T) {
 		}
 	}()
 
-	common.IsMasterNode = false
+	common.IsControlPlane = false
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	require.NoError(t, os.Setenv("SQL_DSN", testdb.DSN(t)))
 

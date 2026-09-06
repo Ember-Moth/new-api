@@ -74,10 +74,13 @@ func Run(assets router.WebAssets) {
 		return
 	}
 
-	authorization, err := authz.New(model.DB, common.IsMasterNode)
-	if err != nil {
-		common.FatalLog("failed to initialize authorization: " + err.Error())
-		return
+	var authorization *authz.Engine
+	if common.IsControlPlane {
+		authorization, err = authz.New(model.DB, true)
+		if err != nil {
+			common.FatalLog("failed to initialize authorization: " + err.Error())
+			return
+		}
 	}
 
 	common.SysLog("New API " + common.Version + " started")
@@ -129,8 +132,10 @@ func Run(assets router.WebAssets) {
 	go model.OptionManager().SyncOptions(runCtx, common.SyncFrequency)
 	go controller.SyncTaskPlugins()
 
-	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
-	go authorization.StartPolicySync(runCtx, common.SyncFrequency)
+	// 周期性重载授权策略，保证权限变更传播到所有控制面实例
+	if common.IsControlPlane {
+		go authorization.StartPolicySync(runCtx, common.SyncFrequency)
+	}
 
 	// 数据看板
 	aggregates := model.QuotaDataStore()
@@ -140,7 +145,7 @@ func Run(assets router.WebAssets) {
 	performanceDone := performance.Start(runCtx)
 	defer func() { cancelRun(); <-performanceDone }()
 
-	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
+	if common.IsControlPlane && os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
 		if err != nil {
 			common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
@@ -178,7 +183,7 @@ func Run(assets router.WebAssets) {
 		},
 		InvalidatePlan: model.InvalidateSubscriptionPlanCache,
 	})
-	subscriptionDone := subscriptionService.StartMaintenance(runCtx, common.IsMasterNode)
+	subscriptionDone := subscriptionService.StartMaintenance(runCtx, common.IsControlPlane)
 	defer func() { cancelRun(); <-subscriptionDone }()
 
 	// Report this process as a system instance so the System Info page can show
@@ -197,11 +202,11 @@ func Run(assets router.WebAssets) {
 
 	// Register the periodic channel test, upstream model update, and async task
 	// polling (Midjourney / Suno / video) jobs as scheduled system tasks
-	// (DB-lease dedup across masters + run history), then start the runner that
-	// schedules and executes them. Master-only execution and the UpdateTask
+	// (DB-lease dedup across control nodes + run history), then start the runner that
+	// schedules and executes them. Control-plane-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	logService := usage.New(usage.Dependencies{Performance: performance, RankingMetadata: rankingModelMetadata, Aggregates: aggregates, DB: model.LOG_DB, ChannelNames: model.ChannelService().ChannelNames, Writer: model.LogWriterPolicy()})
-	systemService := system.New(system.Dependencies{Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsMasterNode,
+	systemService := system.New(system.Dependencies{Options: model.OptionManager(), DB: model.DB, NodeName: common.NodeName, Master: common.IsControlPlane,
 		Logs:           system.LogOperations{Count: logService.CountOldLog, DeleteBatch: logService.DeleteOldLogBatch},
 		InstanceReport: system.InstanceReportConfig{Node: common.GetNodeIdentity(), Version: common.Version, StartedAt: common.StartTime, Resources: systemInstanceResources},
 	})
@@ -238,6 +243,7 @@ func Run(assets router.WebAssets) {
 	}
 
 	server, err := httpserver.New(assets, router.Dependencies{
+		ControlPlane:  common.IsControlPlane,
 		Usage:         logService,
 		SystemHooks:   systemhttp.ManagementHooks{Audit: controller.RecordManageAudit},
 		System:        systemService,

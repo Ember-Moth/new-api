@@ -92,12 +92,12 @@ func setupRelayRouterTestDB(t *testing.T) {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
-	originalIsMasterNode := common.IsMasterNode
+	originalIsControlPlane := common.IsControlPlane
 	originalRedisEnabled := common.RedisEnabled
 	originalMainDatabaseType := common.MainDatabaseType()
 	originalSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
 
-	common.IsMasterNode = false
+	common.IsControlPlane = false
 	common.RedisEnabled = false
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	require.NoError(t, os.Setenv("SQL_DSN", testdb.DSN(t)))
@@ -109,7 +109,7 @@ func setupRelayRouterTestDB(t *testing.T) {
 		if sqlDB, err := model.DB.DB(); err == nil {
 			_ = sqlDB.Close()
 		}
-		common.IsMasterNode = originalIsMasterNode
+		common.IsControlPlane = originalIsControlPlane
 		common.RedisEnabled = originalRedisEnabled
 		common.SetMainDatabaseType(originalMainDatabaseType)
 		if hadSQLDSN {
@@ -118,4 +118,48 @@ func setupRelayRouterTestDB(t *testing.T) {
 			require.NoError(t, os.Unsetenv("SQL_DSN"))
 		}
 	})
+}
+
+// Exercise the complete route composition: a disabled surface must never reach
+// authentication, application handlers, or the embedded dashboard.
+func TestApplicationPlaneRouteIsolation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_BASE_URL", "https://dashboard.example.test")
+	t.Setenv("TRUSTED_PROXIES", "none")
+	previousRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = previousRedis })
+	for _, control := range []bool{true, false} {
+		name := "data"
+		if control {
+			name = "control"
+		}
+		t.Run(name, func(t *testing.T) {
+			engine := gin.New()
+			SetRouter(engine, WebAssets{}, Dependencies{ControlPlane: control})
+			for _, tc := range []struct {
+				method, path              string
+				controlStatus, dataStatus int
+			}{
+				{http.MethodGet, "/healthz", 200, 200},
+				{http.MethodGet, "/api/user/self", 401, 404},
+				{http.MethodPost, "/api/channel/", 401, 404},
+				{http.MethodPost, "/v1/chat/completions", 404, 401},
+				{http.MethodPost, "/v1/responses", 404, 401},
+				{http.MethodPost, "/v1/tasks/example", 404, 401},
+				{http.MethodPost, "/v1beta/models/gemini:generateContent", 404, 401},
+				{http.MethodPost, "/mj/submit/imagine", 404, 401},
+				{http.MethodPost, "/pg/chat/completions", 404, 401},
+				{http.MethodGet, "/", 301, 404},
+			} {
+				recorder := httptest.NewRecorder()
+				engine.ServeHTTP(recorder, httptest.NewRequest(tc.method, tc.path, nil))
+				want := tc.dataStatus
+				if control {
+					want = tc.controlStatus
+				}
+				assert.Equal(t, want, recorder.Code, "%s %s: %s", tc.method, tc.path, recorder.Body.String())
+			}
+		})
+	}
 }

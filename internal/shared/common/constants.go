@@ -135,7 +135,7 @@ var RetryTimes = 0
 
 //var RootUserEmail = ""
 
-var IsMasterNode bool
+var IsControlPlane bool
 
 const (
 	NodeNameSourceManual   = "manual"

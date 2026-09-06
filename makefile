@@ -28,7 +28,7 @@ dev-api:
 
 dev-api-rebuild:
 	@echo "Rebuilding and starting api service (docker)..."
-	@docker compose -f $(DEV_COMPOSE_FILE) up -d --build $(DEV_API_SERVICE)
+	@docker compose -f $(DEV_COMPOSE_FILE) up -d --build $(DEV_API_SERVICE) new-api-data
 
 dev-web:
 	@echo "Starting web frontend dev server..."

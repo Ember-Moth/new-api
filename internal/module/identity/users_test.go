@@ -74,14 +74,14 @@ func newUserFixture(t *testing.T) *userFixture {
 	previousDB, previousLog := model.DB, model.LOG_DB
 	previousSecret := common.SessionSecret
 	common.SessionSecret = "identity-self-test-secret"
-	previousRedis, previousMaster, previousBatch := common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled
+	previousRedis, previousMaster, previousBatch := common.RedisEnabled, common.IsControlPlane, common.BatchUpdateEnabled
 	previousMain := common.MainDatabaseType()
-	common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = false, false, false
+	common.RedisEnabled, common.IsControlPlane, common.BatchUpdateEnabled = false, false, false
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLog
 		common.SessionSecret = previousSecret
-		common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = previousRedis, previousMaster, previousBatch
+		common.RedisEnabled, common.IsControlPlane, common.BatchUpdateEnabled = previousRedis, previousMaster, previousBatch
 		common.SetMainDatabaseType(previousMain)
 	})
 	db, err := testdb.Open(t, &gorm.Config{})

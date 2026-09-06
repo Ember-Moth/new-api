@@ -83,7 +83,17 @@ func InitEnv() {
 	// Initialize variables from constants.go that were using environment variables
 	DebugEnabled = os.Getenv("DEBUG") == "true"
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
-	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
+	switch role := GetEnvOrDefaultString("APP_ROLE", "control"); role {
+	case "control":
+		IsControlPlane = true
+	case "data":
+		IsControlPlane = false
+	default:
+		log.Fatalf("APP_ROLE must be control or data, got %q", role)
+	}
+	if os.Getenv("NODE_TYPE") != "" {
+		log.Fatal("NODE_TYPE has been removed; configure APP_ROLE=control or APP_ROLE=data")
+	}
 	PasswordLoginEncryptionEnabled = GetEnvOrDefaultBool("PASSWORD_LOGIN_ENCRYPTION_ENABLED", false)
 	initNodeNameIdentity()
 	TLSInsecureSkipVerify = GetEnvOrDefaultBool("TLS_INSECURE_SKIP_VERIFY", false)

@@ -173,7 +173,7 @@ func InitDB() error {
 	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
-	if !common.IsMasterNode {
+	if !common.IsControlPlane {
 		return nil
 	}
 	common.SysLog("applying PostgreSQL schema migrations")
@@ -195,7 +195,7 @@ func InitLogDB() error {
 	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
-	if common.IsMasterNode {
+	if common.IsControlPlane {
 		coordinator, err := DB.DB()
 		if err != nil {
 			_ = sqlDB.Close()
@@ -208,7 +208,7 @@ func InitLogDB() error {
 		}
 	}
 	LOG_DB = db
-	if common.IsMasterNode {
+	if common.IsControlPlane {
 		return syncClickHouseLogTTL(clickHouseLogTTLDays())
 	}
 	return nil

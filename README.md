@@ -309,6 +309,7 @@ docker run --name new-api -d --restart always \
 
 | 变量名 | 说明                                                           | 默认值 |
 |--------|--------------------------------------------------------------|--------|
+| `APP_ROLE` | `control` 提供管理 API 和前端；`data` 提供转发 API。默认 `control`，不支持混合角色 | `control` |
 | `SESSION_SECRET` | 鉴权签名密钥；所有节点必须保持一致                                           | - |
 | `SESSION_COOKIE_SECURE` | `false`/未配置时关闭 refresh/logout OriginGuard 以兼容本地 HTTP 开发代理；`true` 时启用 Secure Cookie 和严格 Origin 校验 | `false` |
 | `SESSION_COOKIE_TRUSTED_URL` | Secure 模式必填：允许调用 refresh/logout 的精确 HTTPS Origin，多个用英文逗号分隔；不是 relay CORS 白名单 | - |
@@ -499,3 +500,13 @@ Token、Origin 校验和 PAT 契约见[用户鉴权与登录会话](./docs/authe
 <sub>Built with ❤️ by QuantumNous</sub>
 
 </div>
+
+### 控制面与数据面部署
+
+应用通过 `APP_ROLE=control` 与 `APP_ROLE=data` 分别启动。控制面负责管理 API、前端、数据库迁移及后台维护；数据面负责模型接口、转发、流式响应和任务协议接口。原 `NODE_TYPE` 配置已移除。
+
+Docker Compose 会启动两个应用进程和 Nginx 入口，仍通过 `http://localhost:3000` 访问。生产示例要求先在 `.env` 设置 `SESSION_SECRET`（例如用 `openssl rand -hex 32` 生成）；两个进程共享这个密钥及 PostgreSQL、ClickHouse、DragonflyDB。控制面初始化并健康后才启动数据面。开发环境由 `docker-compose.dev.yml` 提供相同拓扑。
+
+两种角色均提供 `/healthz`；默认直接调试端口仅绑定本机，控制面 `3001`、数据面 `3002`。生产入口将 `/api/*`、前端与账单查询送到控制面，将 `/v1/*`（账单查询除外）、`/v1beta/*`、`/pg/*`、Midjourney 路径送到数据面。自定义插件若声明其他路径，须在 `deploy/nginx.conf` 补充对应的数据面转发规则。
+
+当前数据面仍访问 PostgreSQL 进行鉴权、计费和任务持久化。本批完成监听接口与维护任务的角色隔离；共享临时状态迁入 DragonflyDB、配置主动发布和可靠结算尚在后续实施中。部署边界及验证见 [控制面与数据面拆分](docs/control-data-plane.md)。
