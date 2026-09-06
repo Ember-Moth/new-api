@@ -1,0 +1,75 @@
+# Application-only deployment on Linux; infrastructure runs on the host.
+# See deploy/host.md. Always pass --env-file .env.host.
+name: new-api-host
+
+x-app: &app
+  image: new-api:${NEW_API_IMAGE_TAG:?Set NEW_API_IMAGE_TAG in .env.host}
+  pull_policy: never
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 60s
+  networks:
+    - app
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/healthz"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 60s
+
+x-environment: &environment
+  PORT: "3000"
+  TZ: ${TZ:-Asia/Shanghai}
+  SQL_DSN: ${SQL_DSN:?Set SQL_DSN in .env.host}
+  LOG_SQL_DSN: ${LOG_SQL_DSN:?Set LOG_SQL_DSN in .env.host}
+  REDIS_CONN_STRING: ${REDIS_CONN_STRING:?Set REDIS_CONN_STRING in .env.host}
+  SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env.host}
+  CRYPTO_SECRET: ${CRYPTO_SECRET:?Set CRYPTO_SECRET in .env.host}
+  SESSION_COOKIE_SECURE: "true"
+  SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:?Set the public HTTPS origin in .env.host}
+  TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.30.80.1/32}
+  SQL_MAX_OPEN_CONNS: ${SQL_MAX_OPEN_CONNS:-20}
+  SQL_MAX_IDLE_CONNS: ${SQL_MAX_IDLE_CONNS:-5}
+  ERROR_LOG_ENABLED: "true"
+  BATCH_UPDATE_ENABLED: "true"
+
+services:
+  control:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGETARCH: ${TARGETARCH:?Set TARGETARCH to amd64 or arm64 in .env.host}
+    environment:
+      <<: *environment
+      APP_ROLE: control
+      NODE_NAME: control-1
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./data/control:/data
+
+  data:
+    <<: *app
+    environment:
+      <<: *environment
+      APP_ROLE: data
+      NODE_NAME: data-1
+    ports:
+      - "127.0.0.1:3002:3000"
+    volumes:
+      - ./data/data:/data
+    depends_on:
+      control:
+        condition: service_healthy
+
+networks:
+  app:
+    external: true
+    name: new-api-app-net
