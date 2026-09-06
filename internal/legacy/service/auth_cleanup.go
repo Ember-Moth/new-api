@@ -11,7 +11,7 @@ import (
 const authArtifactCleanupInterval = time.Hour
 
 // StartAuthArtifactCleanup removes expired dashboard Sessions and old
-// one-time authentication flows. Only control-plane instances perform cleanup.
+// expired provider assertion receipts. Only control-plane instances perform cleanup.
 func StartAuthArtifactCleanup() {
 	if !common.IsControlPlane {
 		return
@@ -45,7 +45,8 @@ func cleanupAuthArtifacts() {
 	if err := model.DeleteOldRevokedUserSessions(now.Unix()); err != nil {
 		common.SysError("failed to delete old revoked user sessions: " + err.Error())
 	}
-	if err := model.DeleteExpiredAuthFlows(now); err != nil {
-		common.SysError("failed to delete expired authentication flows: " + err.Error())
+	if err := model.DeleteExpiredAuthAssertionReceipts(now); err != nil {
+		common.SysError("failed to delete expired assertion receipts: " + err.Error())
 	}
+
 }

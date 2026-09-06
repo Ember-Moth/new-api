@@ -50,11 +50,11 @@ func (*authFlowTestOAuthProvider) ProviderUserIDColumn() string                 
 
 func setupAuthFlowControllerTest(t *testing.T) *authFlowTestOAuthProvider {
 	t.Helper()
+	testdb.UseCache(t)
 	previousDB := model.DB
 	previousType := common.MainDatabaseType()
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.AuthFlow{}))
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	provider := &authFlowTestOAuthProvider{}

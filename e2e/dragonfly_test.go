@@ -26,6 +26,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity"
 	"github.com/QuantumNous/new-api/internal/module/identity/contract"
 	"github.com/QuantumNous/new-api/internal/module/identity/entity"
+	identityflows "github.com/QuantumNous/new-api/internal/module/identity/flows"
 	"github.com/QuantumNous/new-api/internal/module/identity/usercache"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
@@ -81,6 +82,93 @@ func TestDragonflyCacheContracts(t *testing.T) {
 	require.NoError(t, schema.UpPostgres(pool))
 	require.NoError(t, schema.UpPostgres(pool))
 
+	t.Run("authentication ceremonies use cache while spent provider signatures survive cache loss", func(t *testing.T) {
+		node := redis.NewClient(client.Options())
+		t.Cleanup(func() { require.NoError(t, node.Close()) })
+		issuer := identityflows.New(database, client)
+		consumer := identityflows.New(database, node)
+		assert.False(t, database.Migrator().HasTable("auth_flows"))
+		match := identityflows.AuthFlowMatch{Purpose: model.AuthFlowPurposeOAuth, Provider: "github", Intent: model.AuthFlowIntentBind, UserId: 42, SessionId: "session-a"}
+		input := identityflows.AuthFlowCreate{Purpose: match.Purpose, Provider: match.Provider, Intent: match.Intent, UserId: match.UserId, SessionId: match.SessionId, Payload: `{"large_number":9007199254740993,"challenge":"private"}`, ExpiresAt: time.Now().Add(time.Minute)}
+		token, flow, err := issuer.CreateAuthFlow(t.Context(), input)
+		require.NoError(t, err)
+		assert.NotEqual(t, token, flow.TokenHash)
+		ttl, err := client.PTTL(t.Context(), "auth:flow:"+flow.TokenHash).Result()
+		require.NoError(t, err)
+		assert.InDelta(t, 60, ttl.Seconds(), 2)
+		for _, wrong := range []identityflows.AuthFlowMatch{
+			{Purpose: model.AuthFlowPurposeTwoFALogin},
+			{Purpose: match.Purpose, Provider: "discord"},
+			{Purpose: match.Purpose, Intent: model.AuthFlowIntentLogin},
+			{Purpose: match.Purpose, UserId: 99},
+			{Purpose: match.Purpose, SessionId: "session-b"},
+		} {
+			_, err := consumer.ConsumeAuthFlow(t.Context(), token, wrong)
+			assert.ErrorIs(t, err, model.ErrAuthFlowInvalid)
+		}
+		peek, err := consumer.GetAuthFlow(t.Context(), token, match)
+		require.NoError(t, err)
+		assert.Equal(t, input.Payload, peek.Payload)
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		for _, store := range []*identityflows.Store{issuer, consumer} {
+			go func() { <-start; _, err := store.ConsumeAuthFlow(t.Context(), token, match); results <- err }()
+		}
+		close(start)
+		accepted := 0
+		for range 2 {
+			err := <-results
+			if err == nil {
+				accepted++
+			} else {
+				assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+			}
+		}
+		assert.Equal(t, 1, accepted)
+		_, err = issuer.GetAuthFlow(t.Context(), token, match)
+		assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+		token, flow, err = issuer.CreateAuthFlow(t.Context(), input)
+		require.NoError(t, err)
+		require.NoError(t, client.PExpireAt(t.Context(), "auth:flow:"+flow.TokenHash, time.Unix(1, 0)).Err())
+		_, err = consumer.ConsumeAuthFlow(t.Context(), token, match)
+		assert.ErrorIs(t, err, model.ErrAuthFlowInvalid)
+
+		user := model.User{Username: "flow-action", AffCode: "flow-action", DisplayName: "before", AuthVersion: 1}
+		require.NoError(t, database.Create(&user).Error)
+		token, _, err = issuer.CreateAuthFlow(t.Context(), input)
+		require.NoError(t, err)
+		forced := errors.New("forced binding failure")
+		_, err = consumer.ConsumeAuthFlowWithAction(t.Context(), token, match, func(tx *gorm.DB, flow *identityflows.AuthFlow) error {
+			require.NoError(t, tx.Model(&model.User{}).Where("id = ?", user.Id).Update("display_name", "after").Error)
+			return forced
+		})
+		assert.ErrorIs(t, err, forced)
+		_, err = issuer.GetAuthFlow(t.Context(), token, match)
+		assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
+		var unchanged model.User
+		require.NoError(t, database.First(&unchanged, user.Id).Error)
+		assert.Equal(t, "before", unchanged.DisplayName)
+
+		token, _, err = issuer.CreateAuthFlow(t.Context(), input)
+		require.NoError(t, err)
+		require.NoError(t, consumer.DeleteUserAuthFlows(t.Context(), match.UserId))
+		_, err = issuer.GetAuthFlow(t.Context(), token, match)
+		assert.ErrorIs(t, err, model.ErrAuthFlowInvalid)
+		expires := time.Now().Add(time.Minute)
+		require.NoError(t, issuer.ClaimExternalAuthAssertion(t.Context(), model.AuthFlowPurposeTelegramAssertion, "signed-provider-assertion", expires))
+		// This suite exclusively owns disposable cache DB 15. Losing every
+		// cache key must not make an already used signed assertion valid again.
+		require.NoError(t, client.FlushDB(t.Context()).Err())
+		assert.ErrorIs(t, consumer.ClaimExternalAuthAssertion(t.Context(), model.AuthFlowPurposeTelegramAssertion, "signed-provider-assertion", expires), model.ErrAuthFlowConsumed)
+		unavailable := redis.NewClient(client.Options())
+		require.NoError(t, unavailable.Close())
+		offline := identityflows.New(database, unavailable)
+		_, _, err = offline.CreateAuthFlow(t.Context(), input)
+		require.Error(t, err)
+		_, err = offline.ConsumeAuthFlow(t.Context(), token, match)
+		require.Error(t, err)
+	})
+
 	t.Run("verification codes are shared single-use secrets with expiry", func(t *testing.T) {
 		const email = "verification@example.test"
 		const code = "123abc"
@@ -131,7 +219,7 @@ func TestDragonflyCacheContracts(t *testing.T) {
 		assert.False(t, common.VerifyCodeWithKey(email, code, common.PasswordResetPurpose))
 		passwordHash, err := common.Password2Hash("previous-password")
 		require.NoError(t, err)
-		user := model.User{Username: "verification-reset", Email: email, Password: passwordHash, Status: common.UserStatusEnabled, AuthVersion: 1}
+		user := model.User{Username: "verification-reset", AffCode: "verification-reset", Email: email, Password: passwordHash, Status: common.UserStatusEnabled, AuthVersion: 1}
 		require.NoError(t, database.Create(&user).Error)
 		require.NoError(t, common.RegisterVerificationCodeWithKey(email, "reset-once", common.PasswordResetPurpose))
 		router := gin.New()

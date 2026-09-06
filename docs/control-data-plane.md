@@ -104,3 +104,28 @@ GOWORK=off go vet ./internal/shared/common ./internal/transport/http/controller 
 真实 DragonflyDB 回归覆盖另一客户端验证、并发单次消费、用途/邮箱绑定、错误码重试、替换旧码、服务端到期和缓存故障。真实 PostgreSQL + HTTP 密码重置回归验证新密码生效、认证版本推进，重放同一码被拒绝且密码/认证版本不再变化。此批没有 schema/启动迁移修改；没有重复执行新库启动验证。
 
 输出：`/tmp/new-api-verification-{build,tests,reset,vet}.log`。OAuth、Passkey、Telegram 和两步登录的短期流程仍有 PostgreSQL 事务耦合，下一步继续迁移；会话状态、配置发布及可靠结算仍未完成。
+
+## 第五批：OAuth、Passkey 与两步登录挑战迁入 DragonflyDB
+
+`ceremony.Flows` 显式接收缓存客户端，短期流程不再读写 PostgreSQL。初始 schema 移除 `auth_flows` 表及索引，流程实体移除 GORM 映射。挑战使用 HMAC 键、Redis hash 和相对 TTL；Lua 原子检查用途、提供方、意图、用户和会话绑定，并消费挑战。payload 作为原始 JSON 字符串返回，不经过 Lua JSON 数值转换；消费后删除 payload，仅保留到期前的已消费标记。相对 TTL 避免应用与缓存主机时钟偏差延长过期时间。
+
+挑战消费发生在业务事务之前。业务事务失败或提交结果不确定时，不会恢复已消费挑战，客户端需重新发起认证。账号硬删除成功后清理该用户的待用挑战；删除被认证版本保护阻止时，挑战保留。用户身份与会话有效性仍由现有业务校验约束。
+
+**防重放凭证属于持久化安全事实。** 外部签名断言消费独立写入 `auth_assertion_receipts`，含哈希、用途、失效时间和消费时间，不含挑战/会话内容。绑定操作与凭证消费使用同一 PostgreSQL 事务，业务回滚时凭证回滚；挑战本身仍保持已消费。签名失效后清理凭证。真实缓存清空测试证明已使用签名不会因缓存丢失再次被接受。
+
+验证服务版本：PostgreSQL **18.6 (Homebrew)**、ClickHouse **26.9.1.762**、DragonflyDB **df-v1.40.2**。执行并通过：
+
+```sh
+TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:55438/new_api_test?sslmode=disable' \
+TEST_CLICKHOUSE_DSN='clickhouse://default@127.0.0.1:59000/default' \
+TEST_DRAGONFLY_DSN='redis://127.0.0.1:56379/15' GOWORK=off make test
+GOWORK=off go build -o /tmp/new-api-modular ./cmd/new-api
+GOWORK=off go vet ./...
+python3 /tmp/verify-new-api-planes.py
+```
+
+根模块与 RelayKit 完整测试通过。既有 OAuth、Telegram、Passkey 注册/登录/删除、2FA 与账号删除回归保留。真实 DragonflyDB + PostgreSQL 集成覆盖绑定字段不匹配、不消费错误挑战、跨客户端并发单次消费、原始 payload 保真、过期、业务回滚不重启挑战、用户挑战清理、缓存故障及缓存清空后的签名防重放。新数据库两角色各启动两轮，确认无 `auth_flows`、`system_instances`、`system_task_locks`，业务数据、ClickHouse 日志及签名消费凭证重启保留。
+
+输出记录：`/tmp/new-api-flow-{full-tests,build,vet,startup}.log`。早期 `flow-tests`、`flow-regression`、`flow-dragonfly` 输出包含迁移过程中的失败；最终结论以上述完整验证结果为准。
+
+下一步：登录会话及其运行限制迁移；随后配置发布/补偿同步、后台任务可靠恢复和计费可靠结算。独立容器入口验证仍未执行，整体目标尚未完成。

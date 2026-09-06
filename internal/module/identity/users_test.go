@@ -97,6 +97,7 @@ func newUserFixture(t *testing.T) *userFixture {
 	f := &userFixture{db: db, router: gin.New(), authorization: &userAuthorizationFixture{engine: authorization}}
 	wallet := billing.New(billing.Dependencies{DB: db, Accounting: model.AccountingStore()})
 	f.service = identity.New(identity.Dependencies{
+		Cache:          testdb.UseCache(t),
 		Authentication: service.AuthenticationRuntime(),
 		VerifyEmail:    func(email, code string) bool { return code == "valid" },
 		DB:             db, UserAuthorization: f.authorization, UserWallet: wallet, InvalidateTokenCache: model.InvalidateTokenCacheForMutation,

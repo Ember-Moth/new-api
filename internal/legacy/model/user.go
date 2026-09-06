@@ -1,16 +1,18 @@
 package model
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/QuantumNous/new-api/internal/shared/common"
-	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
-	"github.com/QuantumNous/new-api/internal/infra/logger"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/internal/config/setting/operation_setting"
+	"github.com/QuantumNous/new-api/internal/infra/logger"
+	identityentity "github.com/QuantumNous/new-api/internal/module/identity/entity"
+	"github.com/QuantumNous/new-api/internal/module/identity/flows"
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
@@ -602,6 +604,9 @@ func (user *User) HardDelete() error {
 	if err != nil {
 		return err
 	}
+	if err := flows.New(nil, common.RDB).DeleteUserAuthFlows(context.Background(), user.Id); err != nil {
+		common.SysError(fmt.Sprintf("failed to remove authentication flows after deleting user %d: %v", user.Id, err))
+	}
 	if err := PublishCommittedUserAuthVersion(user.Id, deletedAuthVersion); err != nil {
 		common.SysError(fmt.Sprintf("failed to publish auth tombstone after hard deleting user %d: %v", user.Id, err))
 	}
@@ -622,7 +627,6 @@ func DeleteUserAuthenticationData(tx *gorm.DB, userId int) error {
 		&TwoFABackupCode{},
 		&TwoFA{},
 		&UserSession{},
-		&AuthFlow{},
 		&PasskeyCredential{},
 		&Token{},
 	} {

@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -21,6 +22,7 @@ import (
 
 func setupAuthSessionTestDB(t *testing.T) *model.User {
 	t.Helper()
+	testdb.UseCache(t)
 	previousDB, previousRedis := model.DB, common.RedisEnabled
 	previousActiveLimit := common.UserSessionActiveLimit
 	previousIssuanceLimit := common.UserSessionIssuanceLimit
@@ -32,7 +34,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuthFlow{}))
+	require.NoError(t, schema.UpPostgres(sqlDB))
 	model.DB = db
 	common.RedisEnabled = false
 	common.UserSessionActiveLimit = common.DefaultUserSessionActiveLimit
@@ -267,24 +269,13 @@ func TestCleanupAuthArtifactsRemovesOnlyExpiredRecords(t *testing.T) {
 		Status: model.UserSessionStatusActive, RefreshHash: "hash", LoginMethod: "password",
 		CreatedAt: oldExpiry.Unix(), LastActiveAt: oldExpiry.Unix(), ExpiresAt: oldExpiry.Unix(),
 	}).Error)
-	require.NoError(t, model.DB.Create(&model.AuthFlow{
-		TokenHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Purpose: model.AuthFlowPurposeTwoFALogin,
-		ExpiresAt: oldExpiry,
-	}).Error)
-	require.NoError(t, model.DB.Create(&model.AuthFlow{
-		TokenHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Purpose: model.AuthFlowPurposeTwoFALogin,
-		ExpiresAt: now.Add(time.Minute),
-	}).Error)
 
 	cleanupAuthArtifacts()
 
 	var sessionCount int64
 	require.NoError(t, model.DB.Model(&model.UserSession{}).Count(&sessionCount).Error)
 	assert.Zero(t, sessionCount)
-	var flows []model.AuthFlow
-	require.NoError(t, model.DB.Find(&flows).Error)
-	require.Len(t, flows, 1)
-	assert.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", flows[0].TokenHash)
+
 }
 
 func TestCleanupAuthArtifactsContinuesWithRevokedCleanupAfterExpiredBatchFailure(t *testing.T) {

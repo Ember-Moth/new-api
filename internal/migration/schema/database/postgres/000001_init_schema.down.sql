@@ -1,5 +1,7 @@
 BEGIN;
 
+DROP TABLE auth_assertion_receipts;
+
 DROP TABLE quota_batch_receipts;
 
 DROP TABLE vendors;
@@ -33,7 +35,6 @@ DROP TABLE checkins;
 DROP TABLE channels;
 DROP TABLE casbin_rule;
 DROP TABLE authz_roles;
-DROP TABLE auth_flows;
 DROP TABLE abilities;
 
 COMMIT;

@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/passkeys"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/repo"
 	"github.com/QuantumNous/new-api/internal/module/identity/internal/twofa"
+	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
@@ -51,6 +52,7 @@ type UserWallet interface {
 }
 
 type Dependencies struct {
+	Cache                *redis.Client
 	Authentication       *authn.Runtime
 	TwoFAEvent           func(int, string)
 	VerifyEmail          func(string, string) bool
@@ -88,7 +90,7 @@ type Service struct {
 func New(deps Dependencies) *Service {
 	return &Service{
 		Authentication: deps.Authentication,
-		passkeys:       passkeys.NewStore(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), passkeyFlows: passkeys.NewFlows(ceremony.NewFlows(deps.DB)),
+		passkeys:       passkeys.NewStore(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), passkeyFlows: passkeys.NewFlows(ceremony.NewFlows(deps.DB, deps.Cache)),
 		factors: twofa.New(deps.DB, deps.UserSecurity.AdvanceVersion, deps.UserSecurity.PublishAuth), twoFAEvent: deps.TwoFAEvent,
 		bindings:    repo.NewBindings(deps.DB),
 		verifyEmail: deps.VerifyEmail,

@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/testdb"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -12,6 +15,7 @@ import (
 
 func TestAuthFlowIsBoundAndConsumedOnce(t *testing.T) {
 	truncateTables(t)
+	testdb.UseCache(t)
 
 	token, created, err := CreateAuthFlow(AuthFlowCreate{
 		Purpose:   AuthFlowPurposeOAuth,
@@ -55,6 +59,7 @@ func TestAuthFlowIsBoundAndConsumedOnce(t *testing.T) {
 
 func TestAuthFlowExpiryIsEnforced(t *testing.T) {
 	truncateTables(t)
+	testdb.UseCache(t)
 
 	token, flow, err := CreateAuthFlow(AuthFlowCreate{
 		Purpose:   AuthFlowPurposeTwoFALogin,
@@ -62,16 +67,17 @@ func TestAuthFlowExpiryIsEnforced(t *testing.T) {
 		ExpiresAt: time.Now().Add(time.Minute),
 	})
 	require.NoError(t, err)
-	require.NoError(t, DB.Model(&AuthFlow{}).Where("id = ?", flow.Id).Update("expires_at", time.Now().Add(-time.Second)).Error)
+	require.NoError(t, common.RDB.PExpireAt(t.Context(), "auth:flow:"+flow.TokenHash, time.Unix(1, 0)).Err())
 
 	_, err = GetAuthFlow(token, AuthFlowMatch{Purpose: AuthFlowPurposeTwoFALogin})
-	assert.True(t, errors.Is(err, ErrAuthFlowExpired))
+	assert.True(t, errors.Is(err, ErrAuthFlowInvalid))
 	_, err = ConsumeAuthFlow(token, AuthFlowMatch{Purpose: AuthFlowPurposeTwoFALogin})
-	assert.True(t, errors.Is(err, ErrAuthFlowExpired))
+	assert.True(t, errors.Is(err, ErrAuthFlowInvalid))
 }
 
 func TestExternalAuthAssertionCanOnlyBeClaimedOnce(t *testing.T) {
 	truncateTables(t)
+	testdb.UseCache(t)
 	expiresAt := time.Now().Add(time.Minute)
 
 	require.NoError(t, ClaimExternalAuthAssertion(AuthFlowPurposeTelegramAssertion, "signed-assertion", expiresAt))
@@ -81,8 +87,9 @@ func TestExternalAuthAssertionCanOnlyBeClaimedOnce(t *testing.T) {
 	require.NoError(t, ClaimExternalAuthAssertion(AuthFlowPurposeTelegramAssertion, "different-assertion", expiresAt))
 }
 
-func TestConsumeAuthFlowWithActionRollsBackTogether(t *testing.T) {
+func TestConsumeAuthFlowWithActionDoesNotRearmSecretsAfterRollback(t *testing.T) {
 	truncateTables(t)
+	testdb.UseCache(t)
 	token, _, err := CreateAuthFlow(AuthFlowCreate{
 		Purpose:   AuthFlowPurposeTelegramBind,
 		UserId:    42,
@@ -102,8 +109,7 @@ func TestConsumeAuthFlowWithActionRollsBackTogether(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, actionErr)
 
-	flow, err := GetAuthFlow(token, AuthFlowMatch{Purpose: AuthFlowPurposeTelegramBind})
-	require.NoError(t, err)
-	assert.Nil(t, flow.ConsumedAt)
+	_, err = GetAuthFlow(token, AuthFlowMatch{Purpose: AuthFlowPurposeTelegramBind})
+	assert.ErrorIs(t, err, ErrAuthFlowConsumed)
 	require.NoError(t, ClaimExternalAuthAssertion(AuthFlowPurposeTelegramAssertion, "assertion-a", time.Now().Add(time.Minute)))
 }

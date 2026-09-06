@@ -1394,3 +1394,8 @@ python3 /tmp/verify-new-api-clickhouse-only.py
 ### 第四十九批：邮箱验证与重置码迁入 DragonflyDB
 
 移除进程内验证码 map，改用 HMAC 缓存键/值及自动过期，并通过 Lua 原子消费。删除密码重置后的无条件缓存删除，避免删掉新签发验证码。真实 DragonflyDB 单次消费、重放、到期和故障保护，以及真实 PostgreSQL HTTP 密码重置回归通过。剩余认证流程事务解耦继续推进，详见 [控制面与数据面拆分](control-data-plane.md)。
+
+
+### 第五十批：短期认证挑战迁入 DragonflyDB
+
+OAuth、Passkey、2FA 与 Telegram 绑定挑战改用 DragonflyDB 原子校验/消费及相对 TTL，移除 PostgreSQL `auth_flows`。外部签名消费独立为持久化安全凭证，与业务绑定一同提交，保证缓存丢失不恢复已用签名。完整根模块/RelayKit 测试、build/vet、真实缓存防重放回归及新库双角色两轮启动验证通过。登录会话、配置发布和可靠结算继续推进，见 [控制面与数据面拆分](control-data-plane.md)。

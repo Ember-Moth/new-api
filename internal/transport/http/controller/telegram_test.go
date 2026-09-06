@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/legacy/model"
+	"github.com/QuantumNous/new-api/internal/migration/schema"
 	"github.com/QuantumNous/new-api/internal/shared/common"
 	"github.com/QuantumNous/new-api/internal/testdb"
-	"github.com/QuantumNous/new-api/internal/legacy/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -156,7 +157,8 @@ func TestTelegramBindFailureResponseContract(t *testing.T) {
 	}
 }
 
-func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
+func TestTelegramBindConsumesChallengesBeforeBindingTransaction(t *testing.T) {
+	testdb.UseCache(t)
 	previousDB := model.DB
 	previousType := common.MainDatabaseType()
 	previousRedis := common.RedisEnabled
@@ -165,12 +167,10 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 	previousSecret := common.SessionSecret
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(
-		&model.User{},
-		&model.UserSession{},
-		&model.AuthFlow{},
-		&model.ExternalIdentityClaim{},
-	))
+	pool, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, schema.UpPostgres(pool))
+
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false
@@ -266,9 +266,8 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	assertTelegramBindRedirect(t, response, replayFlowToken, telegramBindErrorInvalidRequest)
-	replayFlow, err := model.GetAuthFlow(replayFlowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramBind})
-	require.NoError(t, err)
-	assert.Nil(t, replayFlow.ConsumedAt)
+	_, err = model.GetAuthFlow(replayFlowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramBind})
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
 
 	competingUser := &model.User{
 		Username: "telegram-bind-competing-user", Password: "password-placeholder", Role: common.RoleCommonUser,
@@ -301,9 +300,8 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 
 	require.NoError(t, db.First(competingUser, competingUser.Id).Error)
 	assert.Empty(t, competingUser.TelegramId)
-	competingFlow, err := model.GetAuthFlow(competingFlowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramBind})
-	require.NoError(t, err)
-	assert.Nil(t, competingFlow.ConsumedAt)
+	_, err = model.GetAuthFlow(competingFlowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramBind})
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
 	competingAssertion, competingAssertionExpiry, err := telegramAuthorizationClaim(competingParams, time.Now())
 	require.NoError(t, err)
 	require.NoError(t, model.ClaimExternalAuthAssertion(
@@ -395,9 +393,8 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 	db.Callback().Query().Remove(callbackName)
 	assertTelegramBindRedirect(t, response, internalFlowToken, telegramBindErrorInternal)
 	assert.NotContains(t, response.Header().Get("Location"), forcedError.Error())
-	internalFlow, err := model.GetAuthFlow(internalFlowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramBind})
-	require.NoError(t, err)
-	assert.Nil(t, internalFlow.ConsumedAt)
+	_, err = model.GetAuthFlow(internalFlowToken, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeTelegramBind})
+	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
 	internalAssertion, internalAssertionExpiry, err := telegramAuthorizationClaim(internalParams, time.Now())
 	require.NoError(t, err)
 	require.NoError(t, model.ClaimExternalAuthAssertion(

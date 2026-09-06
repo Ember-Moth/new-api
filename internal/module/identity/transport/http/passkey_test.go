@@ -47,6 +47,7 @@ func TestParsePasskeyFinishRequestDoesNotRewriteRequestBody(t *testing.T) {
 }
 
 func TestPasskeyRegisterFinishRejectsMissingOrWrongProofWithoutConsumingFlow(t *testing.T) {
+	testdb.UseCache(t)
 	previousDB := model.DB
 	previousType := common.MainDatabaseType()
 	previousRedis := common.RedisEnabled
@@ -55,7 +56,7 @@ func TestPasskeyRegisterFinishRejectsMissingOrWrongProofWithoutConsumingFlow(t *
 	previousSettings := *settings
 	db, err := testdb.Open(t, &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TwoFA{}, &model.AuthFlow{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TwoFA{}))
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypePostgreSQL)
 	common.RedisEnabled = false
@@ -114,7 +115,7 @@ func TestPasskeyRegisterFinishRejectsMissingOrWrongProofWithoutConsumingFlow(t *
 			context.Set("auth_version", identity.UserAuthVersion)
 			context.Set("session_version", identity.SessionVersion)
 
-			New(identitymodule.New(identitymodule.Dependencies{DB: db}), ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, RequireSecurityProof: middleware.RequireSecurityProof}).PasskeyRegisterFinish(context)
+			New(identitymodule.New(identitymodule.Dependencies{DB: db, Cache: common.RDB}), ManagementHooks{SessionIdentity: middleware.GetSessionAuthIdentity, RequireSecurityProof: middleware.RequireSecurityProof}).PasskeyRegisterFinish(context)
 
 			assert.Equal(t, http.StatusForbidden, response.Code)
 			var responseBody struct {

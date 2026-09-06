@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	identityflows "github.com/QuantumNous/new-api/internal/module/identity/flows"
 	"github.com/QuantumNous/new-api/internal/shared/common"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/go-redis/redis/v8"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +21,7 @@ import (
 
 func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 	truncateTables(t)
+	cache := testdb.UseCache(t)
 
 	user := User{Username: "hard-delete-user", Password: "password", TelegramId: "hard-delete-telegram"}
 	require.NoError(t, DB.Create(&user).Error)
@@ -35,11 +38,9 @@ func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 		Status: UserSessionStatusActive, RefreshHash: "refresh-hash", LoginMethod: "password",
 		LastActiveAt: 1, ExpiresAt: 2,
 	}).Error)
-	require.NoError(t, DB.Create(&AuthFlow{
-		TokenHash: "hard-delete-auth-flow", Purpose: AuthFlowPurposeTwoFALogin,
-		UserId: user.Id, ExpiresAt: time.Now().Add(time.Minute),
-	}).Error)
 
+	flowToken, _, err := CreateAuthFlow(AuthFlowCreate{Purpose: AuthFlowPurposeTwoFALogin, UserId: user.Id, ExpiresAt: time.Now().Add(time.Minute)})
+	require.NoError(t, err)
 	oldRedisEnabled, oldRDB := common.RedisEnabled, common.RDB
 	common.RedisEnabled = true
 	common.RDB = redis.NewClient(&redis.Options{
@@ -54,6 +55,8 @@ func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 	})
 
 	require.Error(t, HardDeleteUserById(user.Id))
+	_, err = identityflows.New(DB, cache).GetAuthFlow(t.Context(), flowToken, AuthFlowMatch{Purpose: AuthFlowPurposeTwoFALogin})
+	require.NoError(t, err, "failed deletion must preserve the pending challenge")
 
 	var count int64
 	require.NoError(t, DB.Unscoped().Model(&User{}).Where("id = ?", user.Id).Count(&count).Error)
@@ -65,7 +68,6 @@ func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 		&PasskeyCredential{},
 		&UserOAuthBinding{},
 		&UserSession{},
-		&AuthFlow{},
 		&ExternalIdentityClaim{},
 	} {
 		require.NoError(t, DB.Unscoped().Model(record).Where("user_id = ?", user.Id).Count(&count).Error)
@@ -95,10 +97,8 @@ func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.
 		Status: UserSessionStatusActive, RefreshHash: "refresh-hash", LoginMethod: "password",
 		LastActiveAt: 1, ExpiresAt: 2,
 	}).Error)
-	require.NoError(t, DB.Create(&AuthFlow{
-		TokenHash: "hard-delete-success-flow", Purpose: AuthFlowPurposeTwoFALogin,
-		UserId: user.Id, ExpiresAt: time.Now().Add(time.Minute),
-	}).Error)
+	flowToken, _, err := CreateAuthFlow(AuthFlowCreate{Purpose: AuthFlowPurposeTwoFALogin, UserId: user.Id, ExpiresAt: time.Now().Add(time.Minute)})
+	require.NoError(t, err)
 	require.NoError(t, populateUserCache(user))
 	// Administrative hard deletion commonly targets an already soft-deleted
 	// user; the shared version increment must therefore query unscoped.
@@ -116,12 +116,13 @@ func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.
 		&PasskeyCredential{},
 		&UserOAuthBinding{},
 		&UserSession{},
-		&AuthFlow{},
 		&ExternalIdentityClaim{},
 	} {
 		require.NoError(t, DB.Unscoped().Model(record).Where("user_id = ?", user.Id).Count(&count).Error)
 		assert.Zero(t, count)
 	}
+	_, err = GetAuthFlow(flowToken, AuthFlowMatch{Purpose: AuthFlowPurposeTwoFALogin})
+	assert.ErrorIs(t, err, ErrAuthFlowInvalid)
 	assert.False(t, server.Exists(getUserAuthFenceKey(user.Id)))
 	committed, err := common.RDB.Get(t.Context(), getUserAuthVersionKey(user.Id)).Result()
 	require.NoError(t, err)
